@@ -1,11 +1,12 @@
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 
 const output = "backend/dist/server.js";
 const binaries = process.platform === "win32"
   ? ["node_modules/.bin/tsc.cmd", "backend/node_modules/.bin/tsc.cmd"]
   : ["node_modules/.bin/tsc", "backend/node_modules/.bin/tsc"];
-const compiler = binaries.find(existsSync);
+const compiler = binaries.map(resolve).find(existsSync);
 
 if (compiler) {
   const result = spawnSync(compiler, ["-p", "backend/tsconfig.json"], {
