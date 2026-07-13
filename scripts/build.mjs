@@ -6,7 +6,7 @@ const output = "backend/dist/server.js";
 const binaries = process.platform === "win32"
   ? ["node_modules/.bin/tsc.cmd", "backend/node_modules/.bin/tsc.cmd"]
   : ["node_modules/.bin/tsc", "backend/node_modules/.bin/tsc"];
-const compiler = binaries.map(resolve).find(existsSync);
+const compiler = binaries.map((binary) => resolve(binary)).find(existsSync);
 
 if (compiler) {
   const result = spawnSync(compiler, ["-p", "backend/tsconfig.json"], {
