@@ -15,7 +15,7 @@
     "backend"
   ],
   "scripts": {
-    "build": "npm --workspace backend run build",
+    "build": "node scripts/build.mjs",
     "prestart": "npm run build",
     "start": "npm --workspace backend start",
     "test": "npm --workspace backend test"
