@@ -1,0 +1,142 @@
+package com.sudokuarena.data
+
+import com.sudokuarena.domain.BoardCell
+import com.sudokuarena.domain.GameRealtimeGateway
+import com.sudokuarena.domain.GameSnapshot
+import com.sudokuarena.domain.Player
+import com.sudokuarena.domain.RealtimeEvent
+import io.socket.client.IO
+import io.socket.client.Socket
+import io.socket.engineio.client.transports.WebSocket
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import org.json.JSONArray
+import org.json.JSONObject
+
+class SocketGameClient(
+    serverUrl: String,
+    playerName: String,
+) : GameRealtimeGateway {
+    private val mutableEvents = MutableSharedFlow<RealtimeEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    override val events: Flow<RealtimeEvent> = mutableEvents
+
+    private val socket: Socket = IO.socket(
+        serverUrl,
+        IO.Options.builder()
+            .setTransports(arrayOf(WebSocket.NAME))
+            .setReconnection(true)
+            .setAuth(mapOf("name" to playerName))
+            .build(),
+    )
+
+    init {
+        // Los callbacks ocurren fuera del hilo principal. SharedFlow es seguro
+        // para emisión concurrente y el ViewModel vuelve a su propio scope.
+        socket.on(Socket.EVENT_CONNECT) { emit(RealtimeEvent.Connected) }
+        socket.on(Socket.EVENT_DISCONNECT) { emit(RealtimeEvent.Disconnected) }
+        socket.on(Socket.EVENT_CONNECT_ERROR) { args ->
+            emit(RealtimeEvent.Failure(args.firstOrNull()?.toString() ?: "Error de conexión"))
+        }
+        socket.on("game:joined") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.Joined(payload.getString("playerId"), parseSnapshot(payload.getJSONObject("state")))
+        } }
+        socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
+        socket.on("move:accepted") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.MoveAccepted(payload.getString("requestId"), payload.getLong("revision"))
+        } }
+        socket.on("move:rejected") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.MoveRejected(
+                requestId = payload.optString("requestId"),
+                code = payload.getString("code"),
+                message = payload.getString("message"),
+            )
+        } }
+        socket.on("player:penalty") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.Penalty(
+                requestId = payload.optString("requestId"),
+                blockedUntil = payload.getLong("blockedUntil"),
+                reason = payload.getString("reason"),
+            )
+        } }
+        socket.on("arena:full") { args ->
+            val message = (args.firstOrNull() as? JSONObject)?.optString("message") ?: "Arena llena"
+            emit(RealtimeEvent.Failure(message))
+        }
+    }
+
+    override fun connect() {
+        if (!socket.connected()) socket.connect()
+    }
+
+    override fun disconnect() {
+        socket.disconnect()
+    }
+
+    override fun place(
+        requestId: String,
+        row: Int,
+        column: Int,
+        value: Int,
+        clientRevision: Long,
+    ) {
+        val payload = JSONObject()
+            .put("requestId", requestId)
+            .put("row", row)
+            .put("column", column)
+            .put("value", value)
+            .put("clientRevision", clientRevision)
+        socket.emit("player:place", payload)
+    }
+
+    private fun parseSafely(args: Array<out Any>, parser: (JSONObject) -> RealtimeEvent) {
+        runCatching { parser(args.first() as JSONObject) }
+            .onSuccess(::emit)
+            .onFailure { emit(RealtimeEvent.Failure("Payload inválido: ${it.message}")) }
+    }
+
+    private fun emit(event: RealtimeEvent) {
+        mutableEvents.tryEmit(event)
+    }
+}
+
+private fun parseSnapshot(json: JSONObject): GameSnapshot {
+    val boardJson = json.getJSONArray("board")
+    require(boardJson.length() == 9) { "El tablero debe tener 9 filas" }
+    val board = boardJson.mapObjects { rowJson ->
+        val row = rowJson as JSONArray
+        require(row.length() == 9) { "Cada fila debe tener 9 casillas" }
+        row.mapObjects { cellValue ->
+            val cell = cellValue as JSONObject
+            BoardCell(
+                value = if (cell.isNull("value")) null else cell.getInt("value"),
+                ownerId = if (cell.isNull("ownerId")) null else cell.getString("ownerId"),
+                clearing = cell.getBoolean("clearing"),
+            )
+        }
+    }
+    val players = json.getJSONArray("players").mapObjects { value ->
+        val player = value as JSONObject
+        Player(
+            id = player.getString("id"),
+            name = player.getString("name"),
+            slot = player.getInt("slot"),
+            colorHex = player.getString("color"),
+            score = player.getInt("score"),
+            blockedUntil = player.getLong("blockedUntil"),
+        )
+    }
+    return GameSnapshot(
+        gameId = json.getString("gameId"),
+        revision = json.getLong("revision"),
+        serverTime = json.getLong("serverTime"),
+        board = board,
+        players = players,
+    )
+}
+
+private fun <T> JSONArray.mapObjects(transform: (Any) -> T): List<T> =
+    List(length()) { index -> transform(get(index)) }
