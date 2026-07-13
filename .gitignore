@@ -6,6 +6,7 @@ backend/node_modules/
 android/.gradle/
 android/local.properties
 android/**/build/
+android/releases/
 *.iml
 .idea/
 

@@ -27,6 +27,7 @@ data class ArenaUiState(
     val selected: CellPosition? = null,
     val pendingRequestId: String? = null,
     val penaltyRemainingMs: Long = 0,
+    val conquestMessage: String? = null,
     val message: String? = null,
 ) {
     val canPlay: Boolean
@@ -84,8 +85,8 @@ class ArenaViewModel(
                 it.copy(connected = false, pendingRequestId = null, message = "Reconectando…")
             }
             is RealtimeEvent.Joined -> {
-                applySnapshot(event.snapshot)
                 mutableState.update { it.copy(playerId = event.playerId) }
+                applySnapshot(event.snapshot)
             }
             is RealtimeEvent.StateUpdated -> applySnapshot(event.snapshot)
             is RealtimeEvent.MoveAccepted -> mutableState.update {
@@ -93,12 +94,24 @@ class ArenaViewModel(
             }
             is RealtimeEvent.MoveRejected -> mutableState.update {
                 if (it.pendingRequestId == event.requestId) {
-                    it.copy(pendingRequestId = null, message = rejectionMessage(event.code, event.message))
+                    it.copy(pendingRequestId = null, message = friendlyRejectionMessage(event.code, event.message))
                 } else it
             }
             is RealtimeEvent.Penalty -> {
                 blockedUntil = event.blockedUntil
                 mutableState.update { it.copy(pendingRequestId = null, selected = null) }
+            }
+            is RealtimeEvent.SectionConquered -> {
+                val winner = mutableState.value.players.firstOrNull { it.id == event.playerId }?.name ?: "Un jugador"
+                val sections = event.sections.joinToString(" + ") { sectionLabel(it) }
+                val message = "$winner conquist\u00f3 $sections (+${event.bonus})"
+                mutableState.update { it.copy(conquestMessage = message) }
+                viewModelScope.launch {
+                    delay(2_000)
+                    mutableState.update { current ->
+                        if (current.conquestMessage == message) current.copy(conquestMessage = null) else current
+                    }
+                }
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }
@@ -139,10 +152,17 @@ class ArenaViewModel(
 private fun emptyBoard(): List<List<BoardCell>> =
     List(9) { List(9) { BoardCell() } }
 
-private fun rejectionMessage(code: String, fallback: String): String = when (code) {
-    "CELL_OCCUPIED" -> "Otro jugador llegó primero a esa casilla"
+private fun friendlyRejectionMessage(code: String, fallback: String): String = when (code) {
+    "CELL_OCCUPIED" -> "Otro jugador lleg\u00f3 primero a esa casilla"
     "CELL_CLEARING" -> "Espera a que termine la conquista"
-    "INCORRECT_VALUE" -> "Número incorrecto: bloqueo de 3 segundos"
-    "BLOCKED" -> "Aún estás bloqueado"
+    "INCORRECT_VALUE" -> "N\u00famero incorrecto: bloqueo de 3 segundos"
+    "BLOCKED" -> "A\u00fan est\u00e1s bloqueado"
     else -> fallback
+}
+
+private fun sectionLabel(section: com.sudokuarena.domain.ConqueredSection): String = when (section.kind) {
+    "row" -> "fila ${section.index + 1}"
+    "column" -> "columna ${section.index + 1}"
+    "box" -> "cuadrante ${section.index + 1}"
+    else -> "secci\u00f3n"
 }

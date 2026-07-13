@@ -25,6 +25,11 @@ data class GameSnapshot(
     val players: List<Player>,
 )
 
+data class ConqueredSection(
+    val kind: String,
+    val index: Int,
+)
+
 sealed interface RealtimeEvent {
     data object Connected : RealtimeEvent
     data object Disconnected : RealtimeEvent
@@ -33,6 +38,11 @@ sealed interface RealtimeEvent {
     data class MoveAccepted(val requestId: String, val revision: Long) : RealtimeEvent
     data class MoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
     data class Penalty(val requestId: String, val blockedUntil: Long, val reason: String) : RealtimeEvent
+    data class SectionConquered(
+        val playerId: String,
+        val sections: List<ConqueredSection>,
+        val bonus: Int,
+    ) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 

@@ -1,6 +1,7 @@
 package com.sudokuarena.data
 
 import com.sudokuarena.domain.BoardCell
+import com.sudokuarena.domain.ConqueredSection
 import com.sudokuarena.domain.GameRealtimeGateway
 import com.sudokuarena.domain.GameSnapshot
 import com.sudokuarena.domain.Player
@@ -29,6 +30,9 @@ class SocketGameClient(
         IO.Options.builder()
             .setTransports(arrayOf(WebSocket.NAME))
             .setReconnection(true)
+            .setReconnectionAttempts(10)
+            .setReconnectionDelay(1_000)
+            .setReconnectionDelayMax(5_000)
             .setAuth(mapOf("name" to playerName))
             .build(),
     )
@@ -60,6 +64,20 @@ class SocketGameClient(
                 requestId = payload.optString("requestId"),
                 blockedUntil = payload.getLong("blockedUntil"),
                 reason = payload.getString("reason"),
+            )
+        } }
+        socket.on("game:section-conquered") { args -> parseSafely(args) { payload ->
+            val sections = payload.getJSONArray("sections").mapObjects { value ->
+                val section = value as JSONObject
+                ConqueredSection(
+                    kind = section.getString("kind"),
+                    index = section.getInt("index"),
+                )
+            }
+            RealtimeEvent.SectionConquered(
+                playerId = payload.getString("playerId"),
+                sections = sections,
+                bonus = payload.getInt("bonus"),
             )
         } }
         socket.on("arena:full") { args ->

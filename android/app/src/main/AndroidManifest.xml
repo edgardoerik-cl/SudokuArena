@@ -4,7 +4,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Sudoku Arena"
+        android:label="Sudoku Arena: Robo de Filas"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="true">
         <activity

@@ -62,7 +62,7 @@ fun ArenaScreen(
         ) {
             Text("Sudoku Arena", style = MaterialTheme.typography.headlineMedium)
             Text(
-                if (state.connected) "En línea · revisión ${state.revision}" else "Sin conexión",
+                if (state.connected) "En línea · partida ${state.revision}" else "Conectando…",
                 color = if (state.connected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
             )
             Spacer(Modifier.height(12.dp))
@@ -76,6 +76,9 @@ fun ArenaScreen(
                 onCellSelected = onCellSelected,
             )
             Spacer(Modifier.height(14.dp))
+            state.conquestMessage?.let {
+                Text(it, color = Color(0xFF1565C0), style = MaterialTheme.typography.titleSmall)
+            }
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (state.penaltyRemainingMs > 0) {
                 Text(
@@ -174,17 +177,21 @@ private fun SudokuBoard(
 
 @Composable
 private fun NumberPad(enabled: Boolean, onNumber: (Int) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        (1..9).forEach { number ->
-            Button(
-                onClick = { onNumber(number) },
-                enabled = enabled,
-                modifier = Modifier.weight(1f),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-            ) { Text(number.toString()) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        (0..2).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                (1..3).forEach { column ->
+                    val number = row * 3 + column
+                    Button(
+                        onClick = { onNumber(number) },
+                        enabled = enabled,
+                        modifier = Modifier.weight(1f),
+                    ) { Text(number.toString()) }
+                }
+            }
         }
     }
 }
