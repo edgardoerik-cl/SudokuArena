@@ -8,7 +8,10 @@ const binaries = process.platform === "win32"
 const compiler = binaries.find(existsSync);
 
 if (compiler) {
-  const result = spawnSync(compiler, ["-p", "backend/tsconfig.json"], { stdio: "inherit" });
+  const result = spawnSync(compiler, ["-p", "backend/tsconfig.json"], {
+    stdio: "inherit",
+    shell: process.platform === "win32"
+  });
   if (result.status === 0) process.exit(0);
   if (!existsSync(output)) process.exit(result.status ?? 1);
   console.warn("tsc falló; se utilizará el artefacto compilado incluido en backend/dist.");
