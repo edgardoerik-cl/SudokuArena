@@ -27,6 +27,7 @@ import org.json.JSONObject
 class SocketGameClient(
     serverUrl: String,
     playerName: String,
+    clientId: String,
 ) : GameRealtimeGateway {
     private val mutableEvents = MutableSharedFlow<RealtimeEvent>(
         extraBufferCapacity = 64,
@@ -42,7 +43,7 @@ class SocketGameClient(
             .setReconnectionAttempts(10)
             .setReconnectionDelay(1_000)
             .setReconnectionDelayMax(5_000)
-            .setAuth(mapOf("name" to playerName))
+            .setAuth(mapOf("name" to playerName, "clientId" to clientId))
             .build(),
     )
 
@@ -77,6 +78,7 @@ class SocketGameClient(
                     teamScore = result.getInt("teamScore"),
                     role = result.getString("role"),
                     isBot = result.optBoolean("isBot", false),
+                    maxCombo = result.optInt("maxCombo", 0),
                 )
             }
             RealtimeEvent.MatchFinished(results, payload.getLong("finishedAt"))
@@ -88,8 +90,17 @@ class SocketGameClient(
             )
         } }
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
+        socket.on("game:sudden-death") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.SuddenDeath(payload.getLong("endsAt"))
+        } }
         socket.on("move:accepted") { args -> parseSafely(args) { payload ->
-            RealtimeEvent.MoveAccepted(payload.getString("requestId"), payload.getLong("revision"))
+            RealtimeEvent.MoveAccepted(
+                requestId = payload.getString("requestId"),
+                revision = payload.getLong("revision"),
+                combo = payload.optInt("combo", 1),
+                comboMultiplier = payload.optInt("comboMultiplier", 1),
+                comboBonus = payload.optInt("comboBonus", 0),
+            )
         } }
         socket.on("move:rejected") { args -> parseSafely(args) { payload ->
             RealtimeEvent.MoveRejected(
@@ -199,6 +210,14 @@ class SocketGameClient(
         socket.emit("fill_with_ai")
     }
 
+    override fun requestRematch() {
+        socket.emit("room:rematch")
+    }
+
+    override fun setPowerLoadout(powers: List<String>) {
+        socket.emit("player:loadout", JSONObject().put("powers", JSONArray(powers)))
+    }
+
     override fun place(
         requestId: String,
         row: Int,
@@ -278,6 +297,12 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             teamScore = player.optInt("teamScore", player.getInt("score")),
             isBot = player.optBoolean("isBot", false),
             shieldUntil = player.optLong("shieldUntil", 0),
+            combo = player.optInt("combo", 0),
+            maxCombo = player.optInt("maxCombo", 0),
+            comboMultiplier = player.optInt("comboMultiplier", 1),
+            botPersona = player.optString("botPersona").takeIf(String::isNotBlank),
+            powerLoadout = player.optJSONArray("powerLoadout")?.mapObjects { it.toString() }
+                ?: listOf("FOG", "REVEAL"),
         )
     }
     return GameSnapshot(
@@ -310,6 +335,8 @@ private fun parseRoomState(json: JSONObject): RoomState {
         phase = RoomPhase.valueOf(json.getString("phase")),
         startedAt = if (json.isNull("startedAt")) null else json.getLong("startedAt"),
         endsAt = if (json.isNull("endsAt")) null else json.getLong("endsAt"),
+        suddenDeath = json.optBoolean("suddenDeath", false),
+        rematchVotes = json.optInt("rematchVotes", 0),
     )
 }
 

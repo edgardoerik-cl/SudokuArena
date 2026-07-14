@@ -1,5 +1,5 @@
 export const BOARD_SIZE = 9;
-export const APP_VERSION = "0.9.0";
+export const APP_VERSION = "1.0.0";
 export const MAX_PLAYERS = 4;
 export const CELL_POINTS = 10;
 export const SECTION_POINTS = 100;
@@ -17,6 +17,9 @@ export const GOLDEN_CELL_BONUS = 50;
 export const BOARD_EVENT_INTERVAL_MS = 45_000;
 export const BOARD_EVENT_DURATION_MS = 10_000;
 export const MATCH_DURATION_MS = 180_000;
+export const SUDDEN_DEATH_DURATION_MS = 30_000;
+export const COMBO_WINDOW_MS = 4_500;
+export const MAX_COMBO_MULTIPLIER = 3;
 
 export const PLAYER_COLORS = ["#00A8FF", "#FF2DAA", "#00C853", "#FF8A00"] as const;
 

@@ -24,12 +24,17 @@ data class Player(
     val teamScore: Int,
     val isBot: Boolean = false,
     val shieldUntil: Long = 0,
+    val combo: Int = 0,
+    val maxCombo: Int = 0,
+    val comboMultiplier: Int = 1,
+    val botPersona: String? = null,
+    val powerLoadout: List<String> = listOf("FOG", "REVEAL"),
 )
 
 enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
 enum class TileType { NUMBERS, COLORS }
 enum class BotDifficulty { EASY, MEDIUM, HARD }
-enum class RoomPhase { LOBBY, PLAYING, FINISHED }
+enum class RoomPhase { LOBBY, PLAYING, SUDDEN_DEATH, FINISHED }
 
 data class RoomConfig(
     val powersEnabled: Boolean = true,
@@ -45,6 +50,8 @@ data class RoomState(
     val phase: RoomPhase,
     val startedAt: Long?,
     val endsAt: Long?,
+    val suddenDeath: Boolean = false,
+    val rematchVotes: Int = 0,
 )
 
 data class MatchResultEntry(
@@ -56,6 +63,7 @@ data class MatchResultEntry(
     val teamScore: Int,
     val role: String,
     val isBot: Boolean = false,
+    val maxCombo: Int = 0,
 )
 
 enum class BoardEventType { MIRROR_HOUR, GOLDEN_CELLS }
@@ -92,8 +100,15 @@ sealed interface RealtimeEvent {
     data class RoomError(val code: String, val message: String) : RealtimeEvent
     data class RoomStateUpdated(val roomState: RoomState) : RealtimeEvent
     data class MatchFinished(val results: List<MatchResultEntry>, val finishedAt: Long) : RealtimeEvent
+    data class SuddenDeath(val endsAt: Long) : RealtimeEvent
     data class StateUpdated(val snapshot: GameSnapshot) : RealtimeEvent
-    data class MoveAccepted(val requestId: String, val revision: Long) : RealtimeEvent
+    data class MoveAccepted(
+        val requestId: String,
+        val revision: Long,
+        val combo: Int = 1,
+        val comboMultiplier: Int = 1,
+        val comboBonus: Int = 0,
+    ) : RealtimeEvent
     data class MoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
     data class Penalty(val requestId: String, val blockedUntil: Long, val reason: String) : RealtimeEvent
     data class SectionConquered(
@@ -130,6 +145,8 @@ interface GameRealtimeGateway {
     fun configureRoom(config: RoomConfig)
     fun startRoom()
     fun fillWithAi()
+    fun requestRematch()
+    fun setPowerLoadout(powers: List<String>)
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
     fun usePower(
         type: String,

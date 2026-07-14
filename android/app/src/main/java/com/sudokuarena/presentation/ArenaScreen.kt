@@ -88,6 +88,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onTeamModeChanged = viewModel::setTeamMode,
             onTileTypeChanged = viewModel::setTileType,
             onBotDifficultyChanged = viewModel::setBotDifficulty,
+            onLoadoutPower = viewModel::toggleLoadoutPower,
             onFillWithAi = viewModel::fillWithAi,
             onStart = viewModel::startOnlineMatch,
             onExit = onExit,
@@ -105,6 +106,8 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         onReaction = viewModel::sendReaction,
         onFogSwipe = viewModel::cleanFogSwipe,
         onNewSoloGame = viewModel::newSoloGame,
+        onTutorialComplete = viewModel::completeTutorial,
+        onRematch = viewModel::requestRematch,
         onExit = onExit,
     )
 }
@@ -120,6 +123,8 @@ fun ArenaScreen(
     onReaction: (String) -> Unit,
     onFogSwipe: () -> Unit,
     onNewSoloGame: () -> Unit,
+    onTutorialComplete: () -> Unit,
+    onRematch: () -> Unit,
     onExit: () -> Unit,
 ) {
     val shake = remember { Animatable(0f) }
@@ -152,6 +157,7 @@ fun ArenaScreen(
                 }
                 Text(
                     when {
+                        state.roomState?.suddenDeath == true -> "MUERTE SÚBITA · la próxima jugada correcta gana"
                         state.isSoloMode -> "Solitario · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.soloElapsedMs)} · ${state.soloErrors} errores"
                         state.connected && state.roomCode != null -> "Sala ${state.roomCode} · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.matchRemainingMs)}"
                         else -> "Conectando…"
@@ -223,8 +229,25 @@ fun ArenaScreen(
                 MatchResultsOverlay(
                     state = state,
                     onNewSoloGame = onNewSoloGame,
+                    onRematch = onRematch,
                     onExit = onExit,
                     modifier = Modifier.zIndex(30f),
+                )
+            }
+            state.comboMessage?.let { combo ->
+                Text(
+                    combo,
+                    color = Color(0xFFFF8F00),
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.align(Alignment.Center).zIndex(32f),
+                )
+            }
+            if (state.showTutorial) {
+                ArenaTutorialOverlay(
+                    isSoloMode = state.isSoloMode,
+                    onFinished = onTutorialComplete,
+                    modifier = Modifier.zIndex(40f),
                 )
             }
         }
@@ -296,6 +319,10 @@ private fun Scoreboard(state: ArenaUiState) {
                     ) {
                         Text("${if (player.isBot) "🤖 " else ""}${player.name}", maxLines = 1, style = MaterialTheme.typography.labelMedium)
                         Text("${player.score} pts", style = MaterialTheme.typography.titleMedium)
+                        if (player.comboMultiplier > 1) {
+                            Text("COMBO x${player.comboMultiplier}", color = Color(0xFFE65100), fontWeight = FontWeight.Black)
+                        }
+                        player.botPersona?.let { Text(botPersonaLabel(it), style = MaterialTheme.typography.labelSmall) }
                         if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
                             Text("⚡ ${player.energy}%", style = MaterialTheme.typography.labelSmall)
                             if (shieldActive) Text("🛡 ESCUDO", color = Color(0xFF6D28D9), fontWeight = FontWeight.Black)
@@ -362,16 +389,16 @@ private fun PowerPanel(
         ) {
             Button(
                 onClick = onUseReflect,
-                enabled = ownPlayer.energy >= 100 && ownPlayer.shieldUntil <= state.serverNowMs,
+                enabled = "REFLECT" in ownPlayer.powerLoadout && ownPlayer.energy >= 100 && ownPlayer.shieldUntil <= state.serverNowMs,
                 modifier = Modifier.weight(1f),
             ) { Text("🛡 Escudo · 100%", maxLines = 1) }
             Button(
                 onClick = onUseReveal,
-                enabled = ownPlayer.energy >= 50 && state.selected != null,
+                enabled = "REVEAL" in ownPlayer.powerLoadout && ownPlayer.energy >= 50 && state.selected != null,
                 modifier = Modifier.weight(1f),
             ) { Text("👁 Ojo · 50%", maxLines = 1) }
         }
-        if (ownPlayer.energy >= 100) {
+        if (ownPlayer.energy >= 100 && "FOG" in ownPlayer.powerLoadout) {
             Text("Niebla ofensiva", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -648,4 +675,11 @@ private fun formatDuration(milliseconds: Long): String {
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60
     return "%02d:%02d".format(minutes, seconds)
+}
+
+private fun botPersonaLabel(persona: String): String = when (persona) {
+    "CALCULATOR" -> "Preciso"
+    "TRICKSTER" -> "Tramposo"
+    "GUARDIAN" -> "Guardián"
+    else -> "Bot"
 }

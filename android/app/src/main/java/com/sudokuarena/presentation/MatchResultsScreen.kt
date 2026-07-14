@@ -50,6 +50,7 @@ import kotlinx.coroutines.delay
 fun MatchResultsOverlay(
     state: ArenaUiState,
     onNewSoloGame: () -> Unit,
+    onRematch: () -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -93,6 +94,7 @@ fun MatchResultsOverlay(
                     color = Color(0xFFFFCA28),
                 )
             }
+            Text("Nivel ${state.level} · ${state.totalXp} XP", color = Color.White)
             if (state.isColorMode) {
                 Text("MODO COLORES", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -111,6 +113,14 @@ fun MatchResultsOverlay(
             Spacer(Modifier.height(12.dp))
             if (state.isSoloMode) {
                 Button(onClick = onNewSoloGame, modifier = Modifier.fillMaxWidth()) { Text("Jugar otro") }
+            } else {
+                Button(
+                    onClick = onRematch,
+                    enabled = !state.rematchRequested,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (state.rematchRequested) "Esperando votos de revancha…" else "Revancha")
+                }
             }
             OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) { Text("Volver al inicio", color = Color.White) }
         }
@@ -139,6 +149,7 @@ private fun AnimatedResultCard(result: MatchResultEntry, index: Int, showTeamSco
                     Text("${if (result.isBot) "🤖 " else ""}${result.name}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     if (result.role == "BOSS") Text("JEFE", color = Color(0xFFC62828), fontWeight = FontWeight.Bold)
                     else if (result.role == "RAIDER") Text("EQUIPO ASALTANTE", color = Color(0xFF1565C0))
+                    if (result.maxCombo > 1) Text("Mejor combo: ${result.maxCombo}", color = Color(0xFFE65100))
                 }
                 Text(
                     if (showTeamScore) "${result.teamScore} equipo" else "${result.score} pts",

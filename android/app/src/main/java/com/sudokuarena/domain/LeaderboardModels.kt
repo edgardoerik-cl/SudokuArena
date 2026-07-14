@@ -19,5 +19,6 @@ data class GlobalLeaderboards(
 
 interface LeaderboardRepository {
     suspend fun loadTopTen(): GlobalLeaderboards
-    suspend fun submitSoloRecord(nickname: String, elapsedMs: Long)
+    suspend fun beginSoloChallenge(): String
+    suspend fun submitSoloRecord(nickname: String, elapsedMs: Long, challengeToken: String)
 }

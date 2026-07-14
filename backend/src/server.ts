@@ -7,6 +7,7 @@ import {
   APP_VERSION,
   CLEAR_DELAY_MS,
   MATCH_DURATION_MS,
+  SUDDEN_DEATH_DURATION_MS,
   createRandomSolution
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
@@ -44,6 +45,8 @@ interface RoomRuntime {
   startedAt: number | null;
   endsAt: number | null;
   bots: Map<string, BotRuntime>;
+  rematchVotes: Set<string>;
+  suddenDeath: boolean;
 }
 
 const port = Number(process.env.PORT ?? 3000);
@@ -52,8 +55,14 @@ const requestedMatchDuration = Number(process.env.MATCH_DURATION_MS ?? MATCH_DUR
 const matchDurationMs = Number.isFinite(requestedMatchDuration) && requestedMatchDuration > 0
   ? requestedMatchDuration
   : MATCH_DURATION_MS;
+const requestedSuddenDeathDuration = Number(process.env.SUDDEN_DEATH_DURATION_MS ?? SUDDEN_DEATH_DURATION_MS);
+const suddenDeathDurationMs = Number.isFinite(requestedSuddenDeathDuration) && requestedSuddenDeathDuration > 0
+  ? requestedSuddenDeathDuration
+  : SUDDEN_DEATH_DURATION_MS;
 const rooms = new Map<string, RoomRuntime>();
+const disconnectTimers = new Map<string, NodeJS.Timeout>();
 const leaderboard = new LeaderboardStore();
+const soloChallenges = new Map<string, number>();
 
 const httpServer = createServer((request, response) => void handleHttp(request, response));
 
@@ -70,11 +79,15 @@ const boardEventInterval = setInterval(() => {
 
 io.on("connection", (socket) => {
   const requestedName = String(socket.handshake.auth.name ?? socket.handshake.query.name ?? "");
+  const clientId = normalizeClientId(socket.handshake.auth.clientId);
+  const playerId = clientId ? `human:${clientId}` : socket.id;
+  socket.data.playerId = playerId;
+  socket.join(playerId);
   let lastReactionAt = 0;
 
   socket.on("room:create", () => {
     if (socket.data.roomCode) return emitRoomError(socket, "ALREADY_IN_ROOM", "Ya estás dentro de una sala");
-    const room = createRoom(socket.id);
+    const room = createRoom(playerId);
     socket.emit("room:created", { roomCode: room.code });
     joinRoom(socket, room, requestedName);
   });
@@ -85,14 +98,16 @@ io.on("connection", (socket) => {
     if (!roomCode) return emitRoomError(socket, "INVALID_CODE", "Ingresa un código de 4 dígitos");
     const room = rooms.get(roomCode);
     if (!room) return emitRoomError(socket, "ROOM_NOT_FOUND", "La sala no existe o ya terminó");
-    if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
+    if (room.phase !== "LOBBY" && !room.game.hasPlayer(playerId)) {
+      return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
+    }
     joinRoom(socket, room, requestedName);
   });
 
   socket.on("room:configure", (payload: Partial<RoomConfig>) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-    if (room.hostPlayerId !== socket.id) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede configurar");
+    if (room.hostPlayerId !== playerId) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede configurar");
     if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     const teamMode = normalizeTeamMode(payload?.teamMode);
     // tileType ausente conserva la opción actual para clientes 0.6 instalados.
@@ -112,25 +127,46 @@ io.on("connection", (socket) => {
   socket.on("fill_with_ai", () => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-    if (room.hostPlayerId !== socket.id) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede añadir Bots");
+    if (room.hostPlayerId !== playerId) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede añadir Bots");
     if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     fillRoomWithBots(room);
+  });
+
+  socket.on("player:loadout", (payload: { powers?: unknown }) => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "El equipamiento ya está cerrado");
+    const powers = Array.isArray(payload?.powers) ? payload.powers : [];
+    if (!room.game.setPowerLoadout(playerId, powers)) {
+      return emitRoomError(socket, "INVALID_LOADOUT", "Elige exactamente dos poderes distintos");
+    }
+    emitState(room);
   });
 
   socket.on("room:start", () => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-    if (room.hostPlayerId !== socket.id) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede iniciar");
+    if (room.hostPlayerId !== playerId) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede iniciar");
     if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     const minimumError = validatePlayerCount(room);
     if (minimumError) return emitRoomError(socket, "INVALID_PLAYER_COUNT", minimumError);
     startMatch(room);
   });
 
+  socket.on("room:rematch", () => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.phase !== "FINISHED") return emitRoomError(socket, "MATCH_NOT_FINISHED", "La partida aún no termina");
+    room.rematchVotes.add(playerId);
+    emitRoomState(room);
+    const humans = room.game.snapshot().players.filter((player) => !player.isBot);
+    if (humans.length > 0 && humans.every((player) => room.rematchVotes.has(player.id))) startMatch(room, true);
+  });
+
   socket.on("player:place", (payload: PlaceProposal) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-    if (room.phase !== "PLAYING") {
+    if (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH") {
       socket.emit("move:rejected", {
         requestId: typeof payload?.requestId === "string" ? payload.requestId : "",
         code: "MATCH_NOT_PLAYING",
@@ -139,23 +175,25 @@ io.on("connection", (socket) => {
       return;
     }
     // Humanos y Bots atraviesan exactamente el mismo pipeline autoritativo.
-    processPlacement(room, socket.id, payload, socket);
+    processPlacement(room, playerId, payload, socket);
   });
 
   socket.on("use_power", (payload: PowerProposal) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-    if (room.phase !== "PLAYING") return emitRoomError(socket, "MATCH_NOT_PLAYING", "La partida no está en curso");
+    if (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH") {
+      return emitRoomError(socket, "MATCH_NOT_PLAYING", "La partida no está en curso");
+    }
     const powerType = payload?.type ?? "FOG";
     if (powerType !== "FOG" && powerType !== "REFLECT" && powerType !== "REVEAL") {
       socket.emit("power_rejected", { code: "INVALID_POWER", message: "Poder no permitido" });
       return;
     }
     const result = powerType === "REFLECT"
-      ? room.game.useReflectPower(socket.id)
+      ? room.game.useReflectPower(playerId)
       : powerType === "REVEAL"
-        ? room.game.useRevealPower(socket.id, payload?.row, payload?.column, payload?.requestId)
-        : room.game.useFogPower(socket.id, payload?.targetPlayerId);
+        ? room.game.useRevealPower(playerId, payload?.row, payload?.column, payload?.requestId)
+        : room.game.useFogPower(playerId, payload?.targetPlayerId);
     if (!result.accepted) {
       socket.emit("power_rejected", { code: result.code, message: result.message });
       return;
@@ -176,7 +214,7 @@ io.on("connection", (socket) => {
       return;
     }
     socket.emit("power_used", { type: result.type, row: payload.row, column: payload.column });
-    publishAcceptedPlacement(room, socket.id, result.placement);
+    publishAcceptedPlacement(room, playerId, result.placement);
   });
 
   socket.on("send_reaction", (payload: ReactionProposal) => {
@@ -194,7 +232,7 @@ io.on("connection", (socket) => {
     lastReactionAt = now;
     io.to(room.code).emit("reaction_received", {
       reactionId: randomUUID(),
-      playerId: socket.id,
+      playerId,
       emojiId: payload.emojiId,
       sentAt: now
     });
@@ -216,20 +254,30 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     phase: "LOBBY",
     startedAt: null,
     endsAt: null,
-    bots: new Map()
+    bots: new Map(),
+    rematchVotes: new Set(),
+    suddenDeath: false
   };
   rooms.set(code, room);
   return room;
 }
 
 function joinRoom(socket: Socket, room: RoomRuntime, playerName: string): void {
-  const player = room.game.addPlayer(socket.id, playerName);
+  const playerId = String(socket.data.playerId ?? socket.id);
+  const previousDisconnect = disconnectTimers.get(playerId);
+  if (previousDisconnect) {
+    clearTimeout(previousDisconnect);
+    disconnectTimers.delete(playerId);
+  }
+  const existingPlayer = room.game.snapshot().players.find((entry) => entry.id === playerId);
+  const player = existingPlayer ?? room.game.addPlayer(playerId, playerName);
   if (!player) {
     emitRoomError(socket, "ROOM_FULL", "La sala ya tiene 4 jugadores");
     return;
   }
   socket.data.roomCode = room.code;
   socket.join(room.code);
+  socket.join(playerId);
   socket.emit("room:joined", { roomCode: room.code });
   socket.emit("game:joined", {
     playerId: player.id,
@@ -244,14 +292,21 @@ function joinRoom(socket: Socket, room: RoomRuntime, playerName: string): void {
 function leaveCurrentRoom(socket: Socket): void {
   const room = roomFor(socket);
   if (!room) return;
+  const playerId = String(socket.data.playerId ?? socket.id);
   delete socket.data.roomCode;
-  if (room.game.removePlayer(socket.id)) emitState(room);
+  const timer = setTimeout(() => removeDisconnectedPlayer(room, playerId), 15_000);
+  disconnectTimers.set(playerId, timer);
+}
+
+function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
+  disconnectTimers.delete(playerId);
+  if (room.game.removePlayer(playerId)) emitState(room);
   if (room.game.humanPlayerCount === 0) {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     clearBotTimers(room);
     rooms.delete(room.code);
-  } else if (room.hostPlayerId === socket.id) {
+  } else if (room.hostPlayerId === playerId) {
     room.hostPlayerId = room.game.snapshot().players.find((player) => !player.isBot)!.id;
     emitRoomState(room);
   }
@@ -277,7 +332,9 @@ function toRoomState(room: RoomRuntime): RoomState {
     config: { ...room.config },
     phase: room.phase,
     startedAt: room.startedAt,
-    endsAt: room.endsAt
+    endsAt: room.endsAt,
+    suddenDeath: room.suddenDeath,
+    rematchVotes: room.rematchVotes.size
   };
 }
 
@@ -288,6 +345,11 @@ function emitRoomError(socket: Socket, code: string, message: string): void {
 function normalizeRoomCode(value: unknown): string | null {
   const code = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   return /^\d{4}$/.test(code) ? code : null;
+}
+
+function normalizeClientId(value: unknown): string | null {
+  const clientId = typeof value === "string" ? value.trim() : "";
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(clientId) ? clientId : null;
 }
 
 function normalizeTeamMode(value: unknown): TeamMode | null {
@@ -310,11 +372,14 @@ function validatePlayerCount(room: RoomRuntime): string | null {
   return null;
 }
 
-function startMatch(room: RoomRuntime): void {
+function startMatch(room: RoomRuntime, rematch = false): void {
   room.phase = "PLAYING";
+  room.suddenDeath = false;
+  room.rematchVotes.clear();
   room.startedAt = Date.now();
   room.endsAt = room.startedAt + matchDurationMs;
-  room.game.startMatch(room.config, resolveBossPlayerId(room));
+  if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
+  else room.game.startMatch(room.config, resolveBossPlayerId(room));
   emitRoomState(room);
   emitState(room);
   io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
@@ -322,9 +387,19 @@ function startMatch(room: RoomRuntime): void {
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
 
-function finishMatch(room: RoomRuntime): void {
-  if (rooms.get(room.code) !== room || room.phase !== "PLAYING") return;
+function finishMatch(room: RoomRuntime, force = false): void {
+  if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH")) return;
+  if (!force && room.phase === "PLAYING" && hasTopScoreTie(room)) {
+    room.phase = "SUDDEN_DEATH";
+    room.suddenDeath = true;
+    room.endsAt = Date.now() + suddenDeathDurationMs;
+    emitRoomState(room);
+    io.to(room.code).emit("game:sudden-death", { endsAt: room.endsAt });
+    room.matchTimeout = setTimeout(() => finishMatch(room, true), suddenDeathDurationMs);
+    return;
+  }
   room.phase = "FINISHED";
+  room.suddenDeath = false;
   room.endsAt = Date.now();
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   room.boardEventTimeout = null;
@@ -389,7 +464,15 @@ function processPlacement(room: RoomRuntime, playerId: string, payload: PlacePro
   }
 
   publishAcceptedPlacement(room, playerId, result, responder);
+  if (room.phase === "SUDDEN_DEATH") finishMatch(room, true);
   return result;
+}
+
+function hasTopScoreTie(room: RoomRuntime): boolean {
+  const results = room.game.matchResults();
+  if (results.length < 2) return false;
+  const top = results[0]!.teamScore;
+  return new Set(results.filter((entry) => entry.teamScore === top).map((entry) => entry.teamId)).size > 1;
 }
 
 function publishAcceptedPlacement(
@@ -402,7 +485,10 @@ function publishAcceptedPlacement(
     requestId: result.requestId,
     revision: result.revision,
     cellPoints: result.cellPoints,
-    goldenBonus: result.goldenBonus
+    goldenBonus: result.goldenBonus,
+    combo: result.combo,
+    comboMultiplier: result.comboMultiplier,
+    comboBonus: result.comboBonus
   });
   emitState(room);
   if (!result.clearPlan) return;
@@ -422,16 +508,16 @@ function publishAcceptedPlacement(
 
 function scheduleBotAction(room: RoomRuntime, botId: string): void {
   const runtime = room.bots.get(botId);
-  if (!runtime || room.phase !== "PLAYING") return;
+  if (!runtime || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH")) return;
   if (runtime.timer) clearTimeout(runtime.timer);
-  const profile = botProfile(room.config.botDifficulty);
   const player = room.game.snapshot().players.find((entry) => entry.id === botId);
+  const profile = botProfile(room.config.botDifficulty, player?.botPersona ?? null);
   const availableAt = Math.max(runtime.disabledUntil, player?.blockedUntil ?? 0);
   const thinkTime = randomBetween(profile.minDelayMs, profile.maxDelayMs);
   const delay = Math.max(thinkTime, availableAt - Date.now() + 80);
   runtime.timer = setTimeout(() => {
     runtime.timer = null;
-    if (rooms.get(room.code) !== room || room.phase !== "PLAYING") return;
+    if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH")) return;
     if (!runBotSupportPower(room, botId, runtime)) {
       runBotPower(room, botId);
       const proposal = room.game.createBotProposal(botId, profile.accuracy);
@@ -459,7 +545,8 @@ function runBotSupportPower(room: RoomRuntime, botId: string, runtime: BotRuntim
     player.id !== botId && (room.config.teamMode === "FFA" || player.teamId !== bot.teamId)
   );
 
-  if (bot.energy >= 100 && bot.shieldUntil <= now && rivals.some((player) => player.energy >= 100)) {
+  const threatThreshold = bot.botPersona === "GUARDIAN" ? 75 : 100;
+  if (bot.energy >= 100 && bot.shieldUntil <= now && rivals.some((player) => player.energy >= threatThreshold)) {
     const shield = room.game.useReflectPower(botId, now);
     if (shield.accepted && shield.type === "REFLECT") {
       emitState(room);
@@ -501,9 +588,11 @@ function applyFogDelivery(
 }
 
 function runBotPower(room: RoomRuntime, botId: string): void {
-  if (!room.config.powersEnabled || Math.random() > 0.22) return;
+  if (!room.config.powersEnabled) return;
   const snapshot = room.game.snapshot();
   const bot = snapshot.players.find((player) => player.id === botId);
+  const fogChance = bot?.botPersona === "TRICKSTER" ? 0.48 : 0.22;
+  if (Math.random() > fogChance) return;
   if (!bot || bot.energy < 100) return;
   const targets = snapshot.players.filter((player) =>
     !player.isBot && player.id !== botId && (room.config.teamMode === "FFA" || player.teamId !== bot.teamId)
@@ -516,10 +605,19 @@ function runBotPower(room: RoomRuntime, botId: string): void {
   emitState(room);
 }
 
-function botProfile(difficulty: BotDifficulty): { minDelayMs: number; maxDelayMs: number; accuracy: number } {
-  if (difficulty === "EASY") return { minDelayMs: 2_400, maxDelayMs: 4_200, accuracy: 0.72 };
-  if (difficulty === "HARD") return { minDelayMs: 700, maxDelayMs: 1_600, accuracy: 0.96 };
-  return { minDelayMs: 1_300, maxDelayMs: 2_700, accuracy: 0.86 };
+function botProfile(
+  difficulty: BotDifficulty,
+  persona: "CALCULATOR" | "TRICKSTER" | "GUARDIAN" | null
+): { minDelayMs: number; maxDelayMs: number; accuracy: number } {
+  const base = difficulty === "EASY"
+    ? { minDelayMs: 2_400, maxDelayMs: 4_200, accuracy: 0.72 }
+    : difficulty === "HARD"
+      ? { minDelayMs: 700, maxDelayMs: 1_600, accuracy: 0.96 }
+      : { minDelayMs: 1_300, maxDelayMs: 2_700, accuracy: 0.86 };
+  if (persona === "CALCULATOR") return { ...base, minDelayMs: Math.round(base.minDelayMs * 1.12), accuracy: Math.min(0.99, base.accuracy + 0.03) };
+  if (persona === "TRICKSTER") return { ...base, minDelayMs: Math.round(base.minDelayMs * 0.86), maxDelayMs: Math.round(base.maxDelayMs * 0.9), accuracy: Math.max(0.65, base.accuracy - 0.04) };
+  if (persona === "GUARDIAN") return { ...base, minDelayMs: Math.round(base.minDelayMs * 1.05), maxDelayMs: Math.round(base.maxDelayMs * 1.05) };
+  return base;
 }
 
 function clearBotTimers(room: RoomRuntime): void {
@@ -555,11 +653,28 @@ async function handleHttp(
       sendJson(response, 200, await leaderboard.topTen());
       return;
     }
+    if (request.method === "POST" && request.url === "/api/solo/challenge") {
+      const cutoff = Date.now() - 14_400_000;
+      for (const [existingToken, createdAt] of soloChallenges) {
+        if (createdAt < cutoff) soloChallenges.delete(existingToken);
+      }
+      const token = randomUUID();
+      soloChallenges.set(token, Date.now());
+      sendJson(response, 200, { token, expiresInMs: 14_400_000 });
+      return;
+    }
     if (request.method === "POST" && request.url === "/api/leaderboards/solo") {
       const payload = await readJsonBody(request);
+      const challengeToken = typeof payload.challengeToken === "string" ? payload.challengeToken : "";
+      const challengeStartedAt = soloChallenges.get(challengeToken);
+      soloChallenges.delete(challengeToken);
+      if (!challengeStartedAt || Date.now() - challengeStartedAt > 14_400_000) {
+        sendJson(response, 403, { error: "Desafío inválido, vencido o ya utilizado" });
+        return;
+      }
       const nickname = sanitizeNickname(payload.nickname);
       const elapsedMs = Number(payload.elapsedMs);
-      if (!Number.isInteger(elapsedMs) || elapsedMs < 1_000 || elapsedMs > 86_400_000) {
+      if (!Number.isInteger(elapsedMs) || elapsedMs < 30_000 || elapsedMs > 86_400_000) {
         sendJson(response, 400, { error: "Tiempo inválido" });
         return;
       }

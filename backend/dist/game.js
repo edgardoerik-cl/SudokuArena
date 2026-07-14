@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BOARD_SIZE, CELL_POINTS, ENERGY_PER_HIT, FOG_POWER_COST, REFLECT_POWER_COST, REVEAL_POWER_COST, REFLECT_DURATION_MS, GOLDEN_CELL_BONUS, MAX_PLAYERS, MAX_ENERGY, MIRROR_CELL_POINTS, MIRROR_PENALTY_MS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
+import { BOARD_SIZE, CELL_POINTS, COMBO_WINDOW_MS, ENERGY_PER_HIT, FOG_POWER_COST, REFLECT_POWER_COST, REVEAL_POWER_COST, REFLECT_DURATION_MS, GOLDEN_CELL_BONUS, MAX_PLAYERS, MAX_ENERGY, MAX_COMBO_MULTIPLIER, MIRROR_CELL_POINTS, MIRROR_PENALTY_MS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
 export class ArenaGame {
     gameId;
     solution;
@@ -14,6 +14,7 @@ export class ArenaGame {
     pendingSections = new Set();
     processedRequests = new Map();
     teamScores = new Map();
+    lastCorrectAt = new Map();
     revision = 0;
     activeBoardEvent = null;
     configuration = {
@@ -32,6 +33,9 @@ export class ArenaGame {
     get humanPlayerCount() {
         return [...this.players.values()].filter((player) => !player.isBot).length;
     }
+    hasPlayer(id) {
+        return this.players.has(id);
+    }
     addPlayer(id, rawName, isBot = false) {
         if (this.players.size >= MAX_PLAYERS)
             return null;
@@ -49,13 +53,27 @@ export class ArenaGame {
             role: "PLAYER",
             teamScore: 0,
             isBot,
-            shieldUntil: 0
+            shieldUntil: 0,
+            combo: 0,
+            maxCombo: 0,
+            comboMultiplier: 1,
+            botPersona: isBot ? botPersonaForSlot(slot) : null,
+            powerLoadout: defaultLoadout(isBot ? botPersonaForSlot(slot) : null)
         };
         this.players.set(id, player);
         this.processedRequests.set(id, new Set());
         this.teamScores.set(player.teamId, 0);
         this.revision += 1;
         return { ...player };
+    }
+    setPowerLoadout(playerId, powers) {
+        const player = this.players.get(playerId);
+        const unique = [...new Set(powers)];
+        if (!player || unique.length !== 2 || unique.some((power) => !isActivePower(power)))
+            return false;
+        player.powerLoadout = unique;
+        this.revision += 1;
+        return true;
     }
     startMatch(config, hostPlayerId) {
         this.configuration = { ...config };
@@ -69,9 +87,30 @@ export class ArenaGame {
             player.energy = 0;
             player.blockedUntil = 0;
             player.shieldUntil = 0;
+            player.combo = 0;
+            player.maxCombo = 0;
+            player.comboMultiplier = 1;
+            this.lastCorrectAt.delete(player.id);
             this.teamScores.set(player.teamId, 0);
         }
         this.revision += 1;
+    }
+    /** Reinicia la arena conservando jugadores, colores y slots para una revancha. */
+    resetMatch(config, hostPlayerId) {
+        for (const row of this.board) {
+            for (const cell of row) {
+                cell.value = null;
+                cell.ownerId = null;
+                cell.ownerTeamId = null;
+                cell.golden = false;
+                cell.clearTokens.clear();
+            }
+        }
+        this.pendingSections.clear();
+        this.activeBoardEvent = null;
+        for (const requests of this.processedRequests.values())
+            requests.clear();
+        this.startMatch(config, hostPlayerId);
     }
     matchResults() {
         return [...this.players.values()]
@@ -84,7 +123,8 @@ export class ArenaGame {
             teamId: player.teamId,
             teamScore: player.teamScore,
             role: player.role,
-            isBot: player.isBot
+            isBot: player.isBot,
+            maxCombo: player.maxCombo
         }));
     }
     /**
@@ -163,6 +203,8 @@ export class ArenaGame {
             return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
         if (!this.configuration.powersEnabled)
             return powerReject("POWER_DISABLED", "Los poderes están desactivados");
+        if (!player.powerLoadout.includes("FOG"))
+            return powerReject("POWER_NOT_EQUIPPED", "Niebla no está equipada");
         if (typeof targetPlayerId !== "string" || targetPlayerId.length === 0) {
             return powerReject("INVALID_TARGET", "Objetivo inválido");
         }
@@ -196,6 +238,8 @@ export class ArenaGame {
             return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
         if (!this.configuration.powersEnabled)
             return powerReject("POWER_DISABLED", "Los poderes están desactivados");
+        if (!player.powerLoadout.includes("REFLECT"))
+            return powerReject("POWER_NOT_EQUIPPED", "Escudo no está equipado");
         if (player.blockedUntil > now)
             return powerReject("PLAYER_BLOCKED", "No puedes activar poderes mientras estás bloqueado");
         if (player.energy < REFLECT_POWER_COST)
@@ -211,6 +255,8 @@ export class ArenaGame {
             return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
         if (!this.configuration.powersEnabled)
             return powerReject("POWER_DISABLED", "Los poderes están desactivados");
+        if (!player.powerLoadout.includes("REVEAL"))
+            return powerReject("POWER_NOT_EQUIPPED", "Ojo de Lince no está equipado");
         if (player.blockedUntil > now)
             return powerReject("PLAYER_BLOCKED", "No puedes activar poderes mientras estás bloqueado");
         if (player.energy < REVEAL_POWER_COST)
@@ -269,6 +315,9 @@ export class ArenaGame {
         if (this.solution[proposal.row][proposal.column] !== proposal.value) {
             const penaltyMs = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_PENALTY_MS : PENALTY_MS;
             player.blockedUntil = now + penaltyMs;
+            player.combo = 0;
+            player.comboMultiplier = 1;
+            this.lastCorrectAt.delete(playerId);
             this.revision += 1;
             return {
                 ...reject(requestId, "INCORRECT_VALUE", "Número incorrecto", true),
@@ -280,8 +329,15 @@ export class ArenaGame {
         cell.value = proposal.value;
         cell.ownerId = playerId;
         cell.ownerTeamId = player.teamId;
+        const previousCorrectAt = this.lastCorrectAt.get(playerId) ?? 0;
+        player.combo = now - previousCorrectAt <= COMBO_WINDOW_MS ? player.combo + 1 : 1;
+        player.maxCombo = Math.max(player.maxCombo, player.combo);
+        player.comboMultiplier = Math.min(MAX_COMBO_MULTIPLIER, 1 + Math.floor((player.combo - 1) / 3));
+        this.lastCorrectAt.set(playerId, now);
         const bossMultiplier = player.role === "BOSS" ? 2 : 1;
-        const cellPoints = (this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_CELL_POINTS : CELL_POINTS) * bossMultiplier;
+        const baseCellPoints = (this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_CELL_POINTS : CELL_POINTS) * bossMultiplier;
+        const comboBonus = baseCellPoints * (player.comboMultiplier - 1);
+        const cellPoints = baseCellPoints + comboBonus;
         const goldenBonus = cell.golden ? GOLDEN_CELL_BONUS : 0;
         cell.golden = false;
         player.score += cellPoints + goldenBonus;
@@ -302,6 +358,9 @@ export class ArenaGame {
             bonus,
             cellPoints,
             goldenBonus,
+            combo: player.combo,
+            comboMultiplier: player.comboMultiplier,
+            comboBonus,
             clearPlan
         };
     }
@@ -451,5 +510,19 @@ function teamAssignment(player, mode, hostPlayerId) {
             : { teamId: "RAIDERS", role: "RAIDER" };
     }
     return { teamId: `PLAYER:${player.id}`, role: "PLAYER" };
+}
+function botPersonaForSlot(slot) {
+    const personas = ["CALCULATOR", "TRICKSTER", "GUARDIAN"];
+    return personas[slot % personas.length];
+}
+function defaultLoadout(persona) {
+    if (persona === "CALCULATOR")
+        return ["REVEAL", "REFLECT"];
+    if (persona === "GUARDIAN")
+        return ["REFLECT", "FOG"];
+    return ["FOG", "REVEAL"];
+}
+function isActivePower(value) {
+    return value === "FOG" || value === "REFLECT" || value === "REVEAL";
 }
 //# sourceMappingURL=game.js.map

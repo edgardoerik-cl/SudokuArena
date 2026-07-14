@@ -21,7 +21,9 @@ Cada sala publica además este estado de lobby/partida:
   "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO", "tileType": "COLORS", "botDifficulty": "HARD" },
   "phase": "PLAYING",
   "startedAt": 1783915200000,
-  "endsAt": 1783915380000
+  "endsAt": 1783915380000,
+  "suddenDeath": false,
+  "rematchVotes": 0
 }
 ```
 
@@ -80,6 +82,8 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode, tileType, botDifficulty }` |
 | Host → servidor | `fill_with_ai` | Completa el mínimo FFA o los cuatro slots de equipo con Bots |
 | Cliente → servidor | `room:start` | sin payload; sólo Host |
+| Cliente → servidor | `player:loadout` | `{ powers: ["FOG", "REVEAL"] }`; exactamente dos |
+| Cliente → servidor | `room:rematch` | voto de revancha al finalizar |
 | Servidor → cliente | `room:joined` | `{ roomCode }` |
 | Servidor → sala | `room:state` | configuración, fase y tiempos |
 | Servidor → cliente | `room:error` | `{ code, message }` |
@@ -99,6 +103,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → todos | `board_event_end` | `{ eventType }` |
 | Servidor → todos | `reaction_received` | `{ reactionId, playerId, emojiId, sentAt }` |
 | Servidor → sala | `game:started` | `{ startedAt, endsAt }` |
+| Servidor → sala | `game:sudden-death` | `{ endsAt }`; la próxima jugada correcta gana |
 | Servidor → sala | `game:finished` | `{ results, finishedAt }` |
 
 Emojis admitidos: `LAUGH`, `CRY`, `ANGRY` y `SURPRISED`. El servidor limita las
@@ -107,6 +112,9 @@ reacciones a una cada 500 ms por conexión.
 ## Reglas competitivas
 
 - Cada acierto entrega 10 puntos y 25 de energía, hasta un máximo de 100.
+- Los aciertos separados por no más de 4,5 segundos forman combo. Desde el
+  cuarto aplican x2 y desde el séptimo x3; un error rompe la cadena.
+- Cada jugador equipa exactamente dos poderes en el lobby.
 - Niebla cuesta 100 de energía, exige un rival y se devuelve al atacante si el
   objetivo mantiene un Escudo de Espejo activo.
 - Escudo de Espejo cuesta 100 y protege durante cinco segundos.
@@ -133,6 +141,8 @@ bonificación dentro de cada sala.
 - En FFA, el primer `fill_with_ai` con un solo humano crea un duelo 1v1; una
   segunda pulsación puede completar cuatro. En 2v2 y 3v1 completa cuatro slots.
 - `EASY`, `MEDIUM` y `HARD` controlan el intervalo y la probabilidad de acierto.
+- Cada Bot tiene una personalidad visible: `CALCULATOR` prioriza precisión,
+  `TRICKSTER` juega rápido y usa Niebla, y `GUARDIAN` anticipa Escudos.
 - El Bot sólo genera una propuesta; `ArenaGame.place` valida y aplica exactamente
   las mismas carreras, puntos, energía, error y bloqueo que para un socket humano.
 - Activa Escudo si detecta un rival con energía completa y usa Ojo de Lince tras
@@ -143,6 +153,10 @@ bonificación dentro de cada sala.
 Esta garantía requiere una sola instancia del backend porque el estado vive en
 memoria. Para escalar horizontalmente se necesita un actor por partida o una
 operación transaccional en Redis, además del adaptador Redis de Socket.IO.
+
+El Cuadro de Honor sí puede persistir en PostgreSQL configurando `DATABASE_URL`;
+sin esa variable usa el archivo JSON atómico. Los récords solitarios globales
+consumen un token de desafío de un solo uso emitido al iniciar la partida.
 
 ## Responsabilidades Android
 
@@ -157,3 +171,6 @@ operación transaccional en Redis, además del adaptador Redis de Socket.IO.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.
 - `ArenaScreen`: dibuja oro y clima, anima la limpieza, muestra reacciones y
   captura swipes rápidos del overlay de niebla.
+- `ArenaTutorialOverlay`: onboarding paginado que sólo aparece la primera vez.
+- `PlayerPreferences`: nickname, récord, identidad de reconexión, XP, tutorial y
+  marca del reto diario.

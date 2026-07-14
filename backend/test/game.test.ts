@@ -49,6 +49,29 @@ describe("ArenaGame", () => {
     if (!duringPenalty.accepted) assert.equal(duringPenalty.code, "BLOCKED");
   });
 
+  it("multiplica puntos por combos rápidos y los corta al fallar", () => {
+    const game = new ArenaGame();
+    game.addPlayer("p1", "Combo");
+    for (let column = 0; column < 6; column += 1) {
+      game.place("p1", {
+        requestId: `combo-${column}`,
+        row: 0,
+        column,
+        value: SOLUTION[0]![column]!
+      }, 1_000 + column * 500);
+    }
+    let player = game.snapshot().players[0]!;
+    assert.equal(player.combo, 6);
+    assert.equal(player.comboMultiplier, 2);
+    assert.equal(player.maxCombo, 6);
+    assert.equal(player.score, 90);
+
+    game.place("p1", { requestId: "combo-fail", row: 1, column: 0, value: 1 }, 5_000);
+    player = game.snapshot().players[0]!;
+    assert.equal(player.combo, 0);
+    assert.equal(player.comboMultiplier, 1);
+  });
+
   it("conquista y limpia una fila completa", () => {
     const game = new ArenaGame();
     game.addPlayer("p1", "Ada");
@@ -97,6 +120,7 @@ describe("ArenaGame", () => {
     const game = new ArenaGame();
     game.addPlayer("attacker", "Atacante");
     game.addPlayer("defender", "Defensor");
+    game.setPowerLoadout("defender", ["REFLECT", "REVEAL"]);
     for (let column = 0; column < 4; column += 1) {
       game.place("attacker", { requestId: `a-${column}`, row: 0, column, value: SOLUTION[0]![column]! });
       game.place("defender", { requestId: `d-${column}`, row: 1, column, value: SOLUTION[1]![column]! });

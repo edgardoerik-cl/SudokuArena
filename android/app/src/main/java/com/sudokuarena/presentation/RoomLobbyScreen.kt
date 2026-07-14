@@ -36,6 +36,7 @@ fun RoomLobbyScreen(
     onTeamModeChanged: (TeamMode) -> Unit,
     onTileTypeChanged: (TileType) -> Unit,
     onBotDifficultyChanged: (BotDifficulty) -> Unit,
+    onLoadoutPower: (String) -> Unit,
     onFillWithAi: () -> Unit,
     onStart: () -> Unit,
     onExit: () -> Unit,
@@ -66,6 +67,24 @@ fun RoomLobbyScreen(
                     Text("JUGADORES ${state.players.size}/4", style = MaterialTheme.typography.labelLarge)
                     state.players.forEach { player ->
                         Text("• ${if (player.isBot) "🤖 " else ""}${player.name}${if (player.id == room.hostPlayerId) "  👑" else ""}")
+                    }
+                }
+            }
+
+            if (room.config.powersEnabled) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("EQUIPAMIENTO · ELIGE 2", fontWeight = FontWeight.Black)
+                        Text("Toca otro poder para reemplazar el más antiguo.", style = MaterialTheme.typography.bodySmall)
+                        val equipped = state.ownPlayer?.powerLoadout.orEmpty()
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("FOG" to "Niebla", "REFLECT" to "Escudo", "REVEAL" to "Ojo").forEach { (id, label) ->
+                                OutlinedButton(
+                                    onClick = { onLoadoutPower(id) },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text(if (id in equipped) "✓ $label" else label) }
+                            }
+                        }
                     }
                 }
             }

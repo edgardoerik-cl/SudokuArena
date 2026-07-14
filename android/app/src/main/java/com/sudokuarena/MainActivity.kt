@@ -65,6 +65,7 @@ private fun SudokuArenaApp() {
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
     var requestedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
     var soloColorMode by rememberSaveable { mutableStateOf(false) }
+    var dailyChallenge by rememberSaveable { mutableStateOf(false) }
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
 
     if (screen == "SPLASH") {
@@ -75,11 +76,21 @@ private fun SudokuArenaApp() {
     if (screen == "WELCOME") {
         WelcomeScreen(
             initialNickname = preferences.nickname(),
+            initialXp = preferences.totalXp(),
             leaderboardRepository = leaderboardRepository,
             onSaveNickname = preferences::saveNickname,
             onSoloMode = {
+                dailyChallenge = false
                 requestedRoomCode = null
                 screen = "SOLO_SETUP"
+            },
+            onDailyChallenge = {
+                dailyChallenge = true
+                soloColorMode = false
+                requestedRoomCode = null
+                mode = "SOLO"
+                sessionId += 1
+                screen = "GAME"
             },
             onMultiplayerMode = { screen = "MULTIPLAYER_ENTRY" },
         )
@@ -125,6 +136,7 @@ private fun SudokuArenaApp() {
         if (isSolo) null else SocketGameClient(
             serverUrl = BuildConfig.SOCKET_URL,
             playerName = preferences.nickname(),
+            clientId = preferences.clientId(),
         )
     }
     val factory = remember(sessionId) {
@@ -137,6 +149,7 @@ private fun SudokuArenaApp() {
             leaderboardRepository = leaderboardRepository,
             playerName = preferences.nickname(),
             requestedRoomCode = requestedRoomCode,
+            isDailyChallenge = isSolo && dailyChallenge,
         )
     }
     val arenaViewModel: ArenaViewModel = viewModel(

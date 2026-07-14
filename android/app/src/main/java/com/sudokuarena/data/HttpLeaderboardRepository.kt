@@ -37,11 +37,19 @@ class HttpLeaderboardRepository(serverUrl: String) : LeaderboardRepository {
         )
     }
 
-    override suspend fun submitSoloRecord(nickname: String, elapsedMs: Long) = withContext(Dispatchers.IO) {
+    override suspend fun beginSoloChallenge(): String = withContext(Dispatchers.IO) {
+        request("POST", "/api/solo/challenge", "{}").getString("token")
+    }
+
+    override suspend fun submitSoloRecord(nickname: String, elapsedMs: Long, challengeToken: String) = withContext(Dispatchers.IO) {
         request(
             method = "POST",
             path = "/api/leaderboards/solo",
-            body = JSONObject().put("nickname", nickname).put("elapsedMs", elapsedMs).toString(),
+            body = JSONObject()
+                .put("nickname", nickname)
+                .put("elapsedMs", elapsedMs)
+                .put("challengeToken", challengeToken)
+                .toString(),
         )
         Unit
     }

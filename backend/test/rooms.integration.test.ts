@@ -20,6 +20,7 @@ before(async () => {
       ...process.env,
       PORT: String(port),
       MATCH_DURATION_MS: "2500",
+      SUDDEN_DEATH_DURATION_MS: "500",
       LEADERBOARD_FILE: leaderboardFile
     },
     stdio: "ignore"
@@ -47,17 +48,25 @@ after(async () => {
 
 describe("matchmaking por salas", () => {
   it("publica y conserva el mejor récord solitario por HTTP", async () => {
+    const firstChallenge = await fetch(`${url}/api/solo/challenge`, { method: "POST" }).then((value) => value.json()) as { token: string };
     const first = await fetch(`${url}/api/leaderboards/solo`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 125_000 })
+      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 125_000, challengeToken: firstChallenge.token })
     });
     assert.equal(first.status, 200);
+    const replay = await fetch(`${url}/api/leaderboards/solo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 124_000, challengeToken: firstChallenge.token })
+    });
+    assert.equal(replay.status, 403);
 
+    const secondChallenge = await fetch(`${url}/api/solo/challenge`, { method: "POST" }).then((value) => value.json()) as { token: string };
     await fetch(`${url}/api/leaderboards/solo`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 110_000 })
+      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 110_000, challengeToken: secondChallenge.token })
     });
     const response = await fetch(`${url}/api/leaderboards`);
     const top = await response.json() as { solo: Array<{ rank: number; nickname: string; bestTimeMs: number }> };
@@ -132,11 +141,39 @@ describe("matchmaking por salas", () => {
     const finished = await finishedAtBob;
     assert.equal(finished.results.length, 2);
     assert.equal(finished.results[0].rank, 1);
+
+    const rematchAtBob = nextMatchingEvent<any>(bob, "room:state", (state) => state.phase === "PLAYING");
+    alice.emit("room:rematch");
+    bob.emit("room:rematch");
+    const rematch = await rematchAtBob;
+    assert.equal(rematch.rematchVotes, 0);
+    assert.equal(rematch.suddenDeath, false);
+  });
+
+  it("reanuda una partida con la misma identidad tras un corte breve", async () => {
+    const identity = `client-${port}`;
+    const first = await connect("Reconnect", identity);
+    const created = nextEvent<any>(first, "game:joined");
+    first.emit("room:create");
+    const initial = await created;
+    first.emit("fill_with_ai");
+    await nextMatchingEvent<any>(first, "game:state", (state) => state.players.length === 2);
+    first.emit("room:start");
+    await nextEvent(first, "game:started");
+    first.disconnect();
+
+    const resumed = await connect("Reconnect", identity);
+    const rejoined = nextEvent<any>(resumed, "game:joined");
+    resumed.emit("room:join", { roomCode: initial.roomCode });
+    const state = await rejoined;
+    assert.equal(state.playerId, initial.playerId);
+    assert.equal(state.roomState.phase, "PLAYING");
+    assert.equal(state.state.players.filter((player: any) => !player.isBot).length, 1);
   });
 });
 
-async function connect(name: string): Promise<Socket> {
-  const socket = io(url, { transports: ["websocket"], auth: { name }, reconnection: false });
+async function connect(name: string, clientId?: string): Promise<Socket> {
+  const socket = io(url, { transports: ["websocket"], auth: { name, clientId }, reconnection: false });
   clients.push(socket);
   await nextEvent(socket, "connect");
   return socket;

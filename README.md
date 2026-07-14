@@ -3,13 +3,17 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `0.9.0` incorpora un menú animado 100% Compose, conquista neón por jugador,
+La versión `1.0.0` incorpora un menú animado 100% Compose con un nuevo emblema vivo, conquista neón por jugador,
 Escudo de Espejo, Ojo de Lince, Bots estratégicos, tema de alto contraste,
 Splash Art e icono definitivos,
 pantalla inmersiva, fichas de números o colores y perfil persistente,
 Cuadro de Honor global, lobby configurable, modos FFA/2v2/3v1 y feedback visual
 para victoria, error y sabotaje. Las partidas online duran tres minutos y siguen
-una máquina de estados autoritativa `LOBBY → PLAYING → FINISHED`.
+una máquina de estados autoritativa `LOBBY → PLAYING → SUDDEN_DEATH → FINISHED`.
+
+También incluye tutorial de primera partida, combos autoritativos x2/x3, elección
+de dos poderes por jugador, Bots con personalidad, revancha por votación, reto
+diario determinista, niveles/XP y reconexión con 15 segundos de tolerancia.
 
 ## Estructura
 
@@ -35,7 +39,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-v0.9.0-debug.apk`. No se debe subir ese archivo a Git:
+`SudokuArena-v1.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor
@@ -44,6 +48,16 @@ El servidor guarda los Top 10 en `backend/data/leaderboards.json`. En una nube
 con disco persistente conviene configurar `LEADERBOARD_FILE` apuntando a ese
 volumen; por ejemplo, en Bonto: `/data/leaderboards.json`. Sin un volumen
 persistente, el ranking se reinicia cuando el contenedor es reemplazado.
+
+Si existe `DATABASE_URL`, el servidor cambia automáticamente a PostgreSQL, crea
+la tabla `sudoku_arena_leaderboard` y usa operaciones atómicas para récords y
+victorias. `PGSSLMODE=disable` sólo debe usarse en una base local sin TLS.
+
+Los tiempos globales requieren un desafío de un solo uso obtenido al comenzar la
+partida. Esto bloquea reenvíos triviales; el récord local continúa funcionando
+sin Internet. Para producción comercial conviene validar la partida completa y
+usar PostgreSQL. El adaptador ya está incluido; se conserva JSON para no exigir
+otro servicio pago durante las pruebas.
 
 El prototipo debe desplegarse con **una sola instancia**: el estado vive en la
 memoria del proceso. Para escalar horizontalmente hay que mover el comando de

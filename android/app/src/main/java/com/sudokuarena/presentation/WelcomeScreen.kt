@@ -56,9 +56,11 @@ import kotlin.math.sin
 @Composable
 fun WelcomeScreen(
     initialNickname: String,
+    initialXp: Int,
     leaderboardRepository: LeaderboardRepository,
     onSaveNickname: (String) -> Unit,
     onSoloMode: () -> Unit,
+    onDailyChallenge: () -> Unit,
     onMultiplayerMode: () -> Unit,
 ) {
     var savedNickname by remember(initialNickname) { mutableStateOf(initialNickname.trim()) }
@@ -126,6 +128,20 @@ fun WelcomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(72.dp),
+                )
+                NeonArenaButton(
+                    text = "Reto Diario · +350 XP",
+                    onClick = onDailyChallenge,
+                    secondary = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(58.dp),
+                )
+                Text(
+                    "NIVEL ${initialXp / 500 + 1}  ·  $initialXp XP",
+                    color = ArenaColors.Ink,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
             }
 

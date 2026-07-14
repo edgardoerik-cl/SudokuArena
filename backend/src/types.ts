@@ -10,7 +10,9 @@ export type TeamMode = "FFA" | "TWO_V_TWO" | "THREE_V_ONE";
 export type TileType = "NUMBERS" | "COLORS";
 export type BotDifficulty = "EASY" | "MEDIUM" | "HARD";
 export type PlayerRole = "PLAYER" | "TEAMMATE" | "BOSS" | "RAIDER";
-export type RoomPhase = "LOBBY" | "PLAYING" | "FINISHED";
+export type RoomPhase = "LOBBY" | "PLAYING" | "SUDDEN_DEATH" | "FINISHED";
+export type BotPersona = "CALCULATOR" | "TRICKSTER" | "GUARDIAN";
+export type ActivePower = "FOG" | "REFLECT" | "REVEAL";
 
 export interface RoomConfig {
   powersEnabled: boolean;
@@ -26,6 +28,8 @@ export interface RoomState {
   phase: RoomPhase;
   startedAt: number | null;
   endsAt: number | null;
+  suddenDeath: boolean;
+  rematchVotes: number;
 }
 
 export interface PlayerState {
@@ -41,6 +45,11 @@ export interface PlayerState {
   teamScore: number;
   isBot: boolean;
   shieldUntil: number;
+  combo: number;
+  maxCombo: number;
+  comboMultiplier: number;
+  botPersona: BotPersona | null;
+  powerLoadout: ActivePower[];
 }
 
 export type BoardEventType = "MIRROR_HOUR" | "GOLDEN_CELLS";
@@ -91,6 +100,7 @@ export interface MatchResultEntry {
   teamScore: number;
   role: PlayerRole;
   isBot: boolean;
+  maxCombo: number;
 }
 
 export type SectionKind = "row" | "column" | "box";
@@ -124,6 +134,9 @@ export type PlaceResult =
       bonus: number;
       cellPoints: number;
       goldenBonus: number;
+      combo: number;
+      comboMultiplier: number;
+      comboBonus: number;
       clearPlan: ClearPlan | null;
     }
   | {
@@ -145,7 +158,8 @@ export type PowerRejectionCode =
   | "SAME_TEAM"
   | "INVALID_CELL"
   | "CELL_UNAVAILABLE"
-  | "PLAYER_BLOCKED";
+  | "PLAYER_BLOCKED"
+  | "POWER_NOT_EQUIPPED";
 
 export type PowerResult =
   | {

@@ -8,6 +8,13 @@ import org.junit.Test
 
 class RandomSudokuGeneratorTest {
     @Test
+    fun `el reto diario es determinista para la misma fecha`() {
+        val generator = RandomSudokuGenerator(emptyCells = 45)
+        assertEquals(generator.generate(20_000L), generator.generate(20_000L))
+        assertTrue(generator.generate(20_000L) != generator.generate(20_001L))
+    }
+
+    @Test
     fun `genera tablero valido con 45 casillas vacias`() {
         val puzzle = RandomSudokuGenerator(random = Random(7), emptyCells = 45).generate()
         val expected = (1..9).toSet()

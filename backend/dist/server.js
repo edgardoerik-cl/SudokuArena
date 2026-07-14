@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { Server } from "socket.io";
-import { BOARD_EVENT_DURATION_MS, BOARD_EVENT_INTERVAL_MS, APP_VERSION, CLEAR_DELAY_MS, MATCH_DURATION_MS, createRandomSolution } from "./constants.js";
+import { BOARD_EVENT_DURATION_MS, BOARD_EVENT_INTERVAL_MS, APP_VERSION, CLEAR_DELAY_MS, MATCH_DURATION_MS, SUDDEN_DEATH_DURATION_MS, createRandomSolution } from "./constants.js";
 import { ArenaGame } from "./game.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 const port = Number(process.env.PORT ?? 3000);
@@ -10,8 +10,14 @@ const requestedMatchDuration = Number(process.env.MATCH_DURATION_MS ?? MATCH_DUR
 const matchDurationMs = Number.isFinite(requestedMatchDuration) && requestedMatchDuration > 0
     ? requestedMatchDuration
     : MATCH_DURATION_MS;
+const requestedSuddenDeathDuration = Number(process.env.SUDDEN_DEATH_DURATION_MS ?? SUDDEN_DEATH_DURATION_MS);
+const suddenDeathDurationMs = Number.isFinite(requestedSuddenDeathDuration) && requestedSuddenDeathDuration > 0
+    ? requestedSuddenDeathDuration
+    : SUDDEN_DEATH_DURATION_MS;
 const rooms = new Map();
+const disconnectTimers = new Map();
 const leaderboard = new LeaderboardStore();
+const soloChallenges = new Map();
 const httpServer = createServer((request, response) => void handleHttp(request, response));
 const io = new Server(httpServer, {
     cors: { origin: allowedOrigin },
@@ -26,11 +32,15 @@ const boardEventInterval = setInterval(() => {
 }, BOARD_EVENT_INTERVAL_MS);
 io.on("connection", (socket) => {
     const requestedName = String(socket.handshake.auth.name ?? socket.handshake.query.name ?? "");
+    const clientId = normalizeClientId(socket.handshake.auth.clientId);
+    const playerId = clientId ? `human:${clientId}` : socket.id;
+    socket.data.playerId = playerId;
+    socket.join(playerId);
     let lastReactionAt = 0;
     socket.on("room:create", () => {
         if (socket.data.roomCode)
             return emitRoomError(socket, "ALREADY_IN_ROOM", "Ya estás dentro de una sala");
-        const room = createRoom(socket.id);
+        const room = createRoom(playerId);
         socket.emit("room:created", { roomCode: room.code });
         joinRoom(socket, room, requestedName);
     });
@@ -43,15 +53,16 @@ io.on("connection", (socket) => {
         const room = rooms.get(roomCode);
         if (!room)
             return emitRoomError(socket, "ROOM_NOT_FOUND", "La sala no existe o ya terminó");
-        if (room.phase !== "LOBBY")
+        if (room.phase !== "LOBBY" && !room.game.hasPlayer(playerId)) {
             return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
+        }
         joinRoom(socket, room, requestedName);
     });
     socket.on("room:configure", (payload) => {
         const room = roomFor(socket);
         if (!room)
             return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-        if (room.hostPlayerId !== socket.id)
+        if (room.hostPlayerId !== playerId)
             return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede configurar");
         if (room.phase !== "LOBBY")
             return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
@@ -73,17 +84,29 @@ io.on("connection", (socket) => {
         const room = roomFor(socket);
         if (!room)
             return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-        if (room.hostPlayerId !== socket.id)
+        if (room.hostPlayerId !== playerId)
             return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede añadir Bots");
         if (room.phase !== "LOBBY")
             return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
         fillRoomWithBots(room);
     });
+    socket.on("player:loadout", (payload) => {
+        const room = roomFor(socket);
+        if (!room)
+            return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+        if (room.phase !== "LOBBY")
+            return emitRoomError(socket, "MATCH_STARTED", "El equipamiento ya está cerrado");
+        const powers = Array.isArray(payload?.powers) ? payload.powers : [];
+        if (!room.game.setPowerLoadout(playerId, powers)) {
+            return emitRoomError(socket, "INVALID_LOADOUT", "Elige exactamente dos poderes distintos");
+        }
+        emitState(room);
+    });
     socket.on("room:start", () => {
         const room = roomFor(socket);
         if (!room)
             return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-        if (room.hostPlayerId !== socket.id)
+        if (room.hostPlayerId !== playerId)
             return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede iniciar");
         if (room.phase !== "LOBBY")
             return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
@@ -92,11 +115,23 @@ io.on("connection", (socket) => {
             return emitRoomError(socket, "INVALID_PLAYER_COUNT", minimumError);
         startMatch(room);
     });
+    socket.on("room:rematch", () => {
+        const room = roomFor(socket);
+        if (!room)
+            return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+        if (room.phase !== "FINISHED")
+            return emitRoomError(socket, "MATCH_NOT_FINISHED", "La partida aún no termina");
+        room.rematchVotes.add(playerId);
+        emitRoomState(room);
+        const humans = room.game.snapshot().players.filter((player) => !player.isBot);
+        if (humans.length > 0 && humans.every((player) => room.rematchVotes.has(player.id)))
+            startMatch(room, true);
+    });
     socket.on("player:place", (payload) => {
         const room = roomFor(socket);
         if (!room)
             return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-        if (room.phase !== "PLAYING") {
+        if (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH") {
             socket.emit("move:rejected", {
                 requestId: typeof payload?.requestId === "string" ? payload.requestId : "",
                 code: "MATCH_NOT_PLAYING",
@@ -105,24 +140,25 @@ io.on("connection", (socket) => {
             return;
         }
         // Humanos y Bots atraviesan exactamente el mismo pipeline autoritativo.
-        processPlacement(room, socket.id, payload, socket);
+        processPlacement(room, playerId, payload, socket);
     });
     socket.on("use_power", (payload) => {
         const room = roomFor(socket);
         if (!room)
             return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-        if (room.phase !== "PLAYING")
+        if (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH") {
             return emitRoomError(socket, "MATCH_NOT_PLAYING", "La partida no está en curso");
+        }
         const powerType = payload?.type ?? "FOG";
         if (powerType !== "FOG" && powerType !== "REFLECT" && powerType !== "REVEAL") {
             socket.emit("power_rejected", { code: "INVALID_POWER", message: "Poder no permitido" });
             return;
         }
         const result = powerType === "REFLECT"
-            ? room.game.useReflectPower(socket.id)
+            ? room.game.useReflectPower(playerId)
             : powerType === "REVEAL"
-                ? room.game.useRevealPower(socket.id, payload?.row, payload?.column, payload?.requestId)
-                : room.game.useFogPower(socket.id, payload?.targetPlayerId);
+                ? room.game.useRevealPower(playerId, payload?.row, payload?.column, payload?.requestId)
+                : room.game.useFogPower(playerId, payload?.targetPlayerId);
         if (!result.accepted) {
             socket.emit("power_rejected", { code: result.code, message: result.message });
             return;
@@ -143,7 +179,7 @@ io.on("connection", (socket) => {
             return;
         }
         socket.emit("power_used", { type: result.type, row: payload.row, column: payload.column });
-        publishAcceptedPlacement(room, socket.id, result.placement);
+        publishAcceptedPlacement(room, playerId, result.placement);
     });
     socket.on("send_reaction", (payload) => {
         const room = roomFor(socket);
@@ -161,7 +197,7 @@ io.on("connection", (socket) => {
         lastReactionAt = now;
         io.to(room.code).emit("reaction_received", {
             reactionId: randomUUID(),
-            playerId: socket.id,
+            playerId,
             emojiId: payload.emojiId,
             sentAt: now
         });
@@ -183,19 +219,29 @@ function createRoom(hostPlayerId) {
         phase: "LOBBY",
         startedAt: null,
         endsAt: null,
-        bots: new Map()
+        bots: new Map(),
+        rematchVotes: new Set(),
+        suddenDeath: false
     };
     rooms.set(code, room);
     return room;
 }
 function joinRoom(socket, room, playerName) {
-    const player = room.game.addPlayer(socket.id, playerName);
+    const playerId = String(socket.data.playerId ?? socket.id);
+    const previousDisconnect = disconnectTimers.get(playerId);
+    if (previousDisconnect) {
+        clearTimeout(previousDisconnect);
+        disconnectTimers.delete(playerId);
+    }
+    const existingPlayer = room.game.snapshot().players.find((entry) => entry.id === playerId);
+    const player = existingPlayer ?? room.game.addPlayer(playerId, playerName);
     if (!player) {
         emitRoomError(socket, "ROOM_FULL", "La sala ya tiene 4 jugadores");
         return;
     }
     socket.data.roomCode = room.code;
     socket.join(room.code);
+    socket.join(playerId);
     socket.emit("room:joined", { roomCode: room.code });
     socket.emit("game:joined", {
         playerId: player.id,
@@ -210,8 +256,14 @@ function leaveCurrentRoom(socket) {
     const room = roomFor(socket);
     if (!room)
         return;
+    const playerId = String(socket.data.playerId ?? socket.id);
     delete socket.data.roomCode;
-    if (room.game.removePlayer(socket.id))
+    const timer = setTimeout(() => removeDisconnectedPlayer(room, playerId), 15_000);
+    disconnectTimers.set(playerId, timer);
+}
+function removeDisconnectedPlayer(room, playerId) {
+    disconnectTimers.delete(playerId);
+    if (room.game.removePlayer(playerId))
         emitState(room);
     if (room.game.humanPlayerCount === 0) {
         if (room.boardEventTimeout)
@@ -221,7 +273,7 @@ function leaveCurrentRoom(socket) {
         clearBotTimers(room);
         rooms.delete(room.code);
     }
-    else if (room.hostPlayerId === socket.id) {
+    else if (room.hostPlayerId === playerId) {
         room.hostPlayerId = room.game.snapshot().players.find((player) => !player.isBot).id;
         emitRoomState(room);
     }
@@ -243,7 +295,9 @@ function toRoomState(room) {
         config: { ...room.config },
         phase: room.phase,
         startedAt: room.startedAt,
-        endsAt: room.endsAt
+        endsAt: room.endsAt,
+        suddenDeath: room.suddenDeath,
+        rematchVotes: room.rematchVotes.size
     };
 }
 function emitRoomError(socket, code, message) {
@@ -252,6 +306,10 @@ function emitRoomError(socket, code, message) {
 function normalizeRoomCode(value) {
     const code = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
     return /^\d{4}$/.test(code) ? code : null;
+}
+function normalizeClientId(value) {
+    const clientId = typeof value === "string" ? value.trim() : "";
+    return /^[a-zA-Z0-9_-]{8,80}$/.test(clientId) ? clientId : null;
 }
 function normalizeTeamMode(value) {
     return value === "FFA" || value === "TWO_V_TWO" || value === "THREE_V_ONE" ? value : null;
@@ -272,11 +330,16 @@ function validatePlayerCount(room) {
         return "El modo 3 vs 1 requiere exactamente 4 jugadores";
     return null;
 }
-function startMatch(room) {
+function startMatch(room, rematch = false) {
     room.phase = "PLAYING";
+    room.suddenDeath = false;
+    room.rematchVotes.clear();
     room.startedAt = Date.now();
     room.endsAt = room.startedAt + matchDurationMs;
-    room.game.startMatch(room.config, resolveBossPlayerId(room));
+    if (rematch)
+        room.game.resetMatch(room.config, resolveBossPlayerId(room));
+    else
+        room.game.startMatch(room.config, resolveBossPlayerId(room));
     emitRoomState(room);
     emitState(room);
     io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
@@ -284,10 +347,20 @@ function startMatch(room) {
         scheduleBotAction(room, botId);
     room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
-function finishMatch(room) {
-    if (rooms.get(room.code) !== room || room.phase !== "PLAYING")
+function finishMatch(room, force = false) {
+    if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH"))
         return;
+    if (!force && room.phase === "PLAYING" && hasTopScoreTie(room)) {
+        room.phase = "SUDDEN_DEATH";
+        room.suddenDeath = true;
+        room.endsAt = Date.now() + suddenDeathDurationMs;
+        emitRoomState(room);
+        io.to(room.code).emit("game:sudden-death", { endsAt: room.endsAt });
+        room.matchTimeout = setTimeout(() => finishMatch(room, true), suddenDeathDurationMs);
+        return;
+    }
     room.phase = "FINISHED";
+    room.suddenDeath = false;
     room.endsAt = Date.now();
     if (room.boardEventTimeout)
         clearTimeout(room.boardEventTimeout);
@@ -353,14 +426,26 @@ function processPlacement(room, playerId, payload, responder) {
         return result;
     }
     publishAcceptedPlacement(room, playerId, result, responder);
+    if (room.phase === "SUDDEN_DEATH")
+        finishMatch(room, true);
     return result;
+}
+function hasTopScoreTie(room) {
+    const results = room.game.matchResults();
+    if (results.length < 2)
+        return false;
+    const top = results[0].teamScore;
+    return new Set(results.filter((entry) => entry.teamScore === top).map((entry) => entry.teamId)).size > 1;
 }
 function publishAcceptedPlacement(room, playerId, result, responder) {
     responder?.emit("move:accepted", {
         requestId: result.requestId,
         revision: result.revision,
         cellPoints: result.cellPoints,
-        goldenBonus: result.goldenBonus
+        goldenBonus: result.goldenBonus,
+        combo: result.combo,
+        comboMultiplier: result.comboMultiplier,
+        comboBonus: result.comboBonus
     });
     emitState(room);
     if (!result.clearPlan)
@@ -380,18 +465,18 @@ function publishAcceptedPlacement(room, playerId, result, responder) {
 }
 function scheduleBotAction(room, botId) {
     const runtime = room.bots.get(botId);
-    if (!runtime || room.phase !== "PLAYING")
+    if (!runtime || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH"))
         return;
     if (runtime.timer)
         clearTimeout(runtime.timer);
-    const profile = botProfile(room.config.botDifficulty);
     const player = room.game.snapshot().players.find((entry) => entry.id === botId);
+    const profile = botProfile(room.config.botDifficulty, player?.botPersona ?? null);
     const availableAt = Math.max(runtime.disabledUntil, player?.blockedUntil ?? 0);
     const thinkTime = randomBetween(profile.minDelayMs, profile.maxDelayMs);
     const delay = Math.max(thinkTime, availableAt - Date.now() + 80);
     runtime.timer = setTimeout(() => {
         runtime.timer = null;
-        if (rooms.get(room.code) !== room || room.phase !== "PLAYING")
+        if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH"))
             return;
         if (!runBotSupportPower(room, botId, runtime)) {
             runBotPower(room, botId);
@@ -419,7 +504,8 @@ function runBotSupportPower(room, botId, runtime) {
     if (!bot)
         return false;
     const rivals = snapshot.players.filter((player) => player.id !== botId && (room.config.teamMode === "FFA" || player.teamId !== bot.teamId));
-    if (bot.energy >= 100 && bot.shieldUntil <= now && rivals.some((player) => player.energy >= 100)) {
+    const threatThreshold = bot.botPersona === "GUARDIAN" ? 75 : 100;
+    if (bot.energy >= 100 && bot.shieldUntil <= now && rivals.some((player) => player.energy >= threatThreshold)) {
         const shield = room.game.useReflectPower(botId, now);
         if (shield.accepted && shield.type === "REFLECT") {
             emitState(room);
@@ -455,10 +541,13 @@ function applyFogDelivery(room, attackerId, recipientPlayerId, reflectedBy) {
         io.to(reflectedBy).emit("power_reflected", { attackerId });
 }
 function runBotPower(room, botId) {
-    if (!room.config.powersEnabled || Math.random() > 0.22)
+    if (!room.config.powersEnabled)
         return;
     const snapshot = room.game.snapshot();
     const bot = snapshot.players.find((player) => player.id === botId);
+    const fogChance = bot?.botPersona === "TRICKSTER" ? 0.48 : 0.22;
+    if (Math.random() > fogChance)
+        return;
     if (!bot || bot.energy < 100)
         return;
     const targets = snapshot.players.filter((player) => !player.isBot && player.id !== botId && (room.config.teamMode === "FFA" || player.teamId !== bot.teamId));
@@ -471,12 +560,19 @@ function runBotPower(room, botId) {
     applyFogDelivery(room, botId, result.recipientPlayerId, result.reflected ? result.targetPlayerId : undefined);
     emitState(room);
 }
-function botProfile(difficulty) {
-    if (difficulty === "EASY")
-        return { minDelayMs: 2_400, maxDelayMs: 4_200, accuracy: 0.72 };
-    if (difficulty === "HARD")
-        return { minDelayMs: 700, maxDelayMs: 1_600, accuracy: 0.96 };
-    return { minDelayMs: 1_300, maxDelayMs: 2_700, accuracy: 0.86 };
+function botProfile(difficulty, persona) {
+    const base = difficulty === "EASY"
+        ? { minDelayMs: 2_400, maxDelayMs: 4_200, accuracy: 0.72 }
+        : difficulty === "HARD"
+            ? { minDelayMs: 700, maxDelayMs: 1_600, accuracy: 0.96 }
+            : { minDelayMs: 1_300, maxDelayMs: 2_700, accuracy: 0.86 };
+    if (persona === "CALCULATOR")
+        return { ...base, minDelayMs: Math.round(base.minDelayMs * 1.12), accuracy: Math.min(0.99, base.accuracy + 0.03) };
+    if (persona === "TRICKSTER")
+        return { ...base, minDelayMs: Math.round(base.minDelayMs * 0.86), maxDelayMs: Math.round(base.maxDelayMs * 0.9), accuracy: Math.max(0.65, base.accuracy - 0.04) };
+    if (persona === "GUARDIAN")
+        return { ...base, minDelayMs: Math.round(base.minDelayMs * 1.05), maxDelayMs: Math.round(base.maxDelayMs * 1.05) };
+    return base;
 }
 function clearBotTimers(room) {
     for (const runtime of room.bots.values()) {
@@ -507,11 +603,29 @@ async function handleHttp(request, response) {
             sendJson(response, 200, await leaderboard.topTen());
             return;
         }
+        if (request.method === "POST" && request.url === "/api/solo/challenge") {
+            const cutoff = Date.now() - 14_400_000;
+            for (const [existingToken, createdAt] of soloChallenges) {
+                if (createdAt < cutoff)
+                    soloChallenges.delete(existingToken);
+            }
+            const token = randomUUID();
+            soloChallenges.set(token, Date.now());
+            sendJson(response, 200, { token, expiresInMs: 14_400_000 });
+            return;
+        }
         if (request.method === "POST" && request.url === "/api/leaderboards/solo") {
             const payload = await readJsonBody(request);
+            const challengeToken = typeof payload.challengeToken === "string" ? payload.challengeToken : "";
+            const challengeStartedAt = soloChallenges.get(challengeToken);
+            soloChallenges.delete(challengeToken);
+            if (!challengeStartedAt || Date.now() - challengeStartedAt > 14_400_000) {
+                sendJson(response, 403, { error: "Desafío inválido, vencido o ya utilizado" });
+                return;
+            }
             const nickname = sanitizeNickname(payload.nickname);
             const elapsedMs = Number(payload.elapsedMs);
-            if (!Number.isInteger(elapsedMs) || elapsedMs < 1_000 || elapsedMs > 86_400_000) {
+            if (!Number.isInteger(elapsedMs) || elapsedMs < 30_000 || elapsedMs > 86_400_000) {
                 sendJson(response, 400, { error: "Tiempo inválido" });
                 return;
             }

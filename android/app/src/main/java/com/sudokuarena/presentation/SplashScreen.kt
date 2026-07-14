@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -101,41 +102,60 @@ fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
     }
 }
 
-/** Tablero 3x3 fusionado con gradas, columnas y arco de coliseo. */
+/** Emblema vivo: escudo hexagonal, nueve central y órbitas de energía. */
 @Composable
 fun ArenaLogo(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val glow = Color(0xFF64B5F6)
-        val gold = Color(0xFFFFCA28)
-        val boardSize = size.minDimension * 0.58f
-        val left = (size.width - boardSize) / 2f
-        val top = size.height * 0.24f
-        drawRoundRect(glow.copy(alpha = 0.18f), Offset(left - 10f, top - 10f), Size(boardSize + 20f, boardSize + 20f), CornerRadius(24f))
-        drawRoundRect(Color(0xFF111A45), Offset(left, top), Size(boardSize, boardSize), CornerRadius(18f))
-        drawRoundRect(gold, Offset(left, top), Size(boardSize, boardSize), CornerRadius(18f), style = Stroke(7f))
-        for (index in 1..2) {
-            val position = index * boardSize / 3f
-            drawLine(glow, Offset(left + position, top), Offset(left + position, top + boardSize), 5f)
-            drawLine(glow, Offset(left, top + position), Offset(left + boardSize, top + position), 5f)
+    val transition = rememberInfiniteTransition(label = "arenaEmblem")
+    val pulse by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1_300, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "emblemPulse",
+    )
+    val orbit by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(8_000)),
+        label = "emblemOrbit",
+    )
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val cyan = Color(0xFF00A8FF)
+            val violet = Color(0xFF7C3AED)
+            val radius = size.minDimension * 0.35f
+            drawCircle(cyan.copy(alpha = 0.08f + pulse * 0.08f), radius * (1.18f + pulse * 0.06f))
+            rotate(orbit) {
+                drawArc(cyan, 8f, 102f, false, style = Stroke(5f), topLeft = Offset(center.x - radius * 1.18f, center.y - radius * 1.18f), size = Size(radius * 2.36f, radius * 2.36f))
+                drawArc(violet, 188f, 108f, false, style = Stroke(5f), topLeft = Offset(center.x - radius * 1.18f, center.y - radius * 1.18f), size = Size(radius * 2.36f, radius * 2.36f))
+            }
+            val shield = Path().apply {
+                moveTo(center.x, center.y - radius)
+                lineTo(center.x + radius * 0.82f, center.y - radius * 0.5f)
+                lineTo(center.x + radius * 0.72f, center.y + radius * 0.55f)
+                lineTo(center.x, center.y + radius)
+                lineTo(center.x - radius * 0.72f, center.y + radius * 0.55f)
+                lineTo(center.x - radius * 0.82f, center.y - radius * 0.5f)
+                close()
+            }
+            drawPath(shield, Brush.linearGradient(listOf(Color(0xFFF8FBFF), Color(0xFFDCEBFF), Color(0xFFEDE4FF))))
+            drawPath(shield, Brush.linearGradient(listOf(cyan, violet)), style = Stroke(7f + pulse * 2f))
+            val grid = radius * 0.45f
+            for (line in -1..1) {
+                val p = line * grid / 2f
+                drawLine(cyan.copy(alpha = 0.20f), Offset(center.x - grid, center.y + p), Offset(center.x + grid, center.y + p), 2f)
+                drawLine(violet.copy(alpha = 0.18f), Offset(center.x + p, center.y - grid), Offset(center.x + p, center.y + grid), 2f)
+            }
         }
-        listOf(1, 4, 6, 8, 3).forEachIndexed { index, number ->
-            val column = index % 3
-            val row = index / 3
-            drawCircle(
-                gold.copy(alpha = 0.85f),
-                radius = boardSize * 0.035f,
-                center = Offset(left + (column + 0.5f) * boardSize / 3f, top + (row + 0.5f) * boardSize / 3f),
-            )
-        }
-        val arena = Path().apply {
-            moveTo(size.width * 0.12f, size.height * 0.84f)
-            quadraticTo(size.width * 0.5f, size.height * 0.61f, size.width * 0.88f, size.height * 0.84f)
-        }
-        drawPath(arena, gold, style = Stroke(12f))
-        drawLine(gold, Offset(size.width * 0.16f, size.height * 0.84f), Offset(size.width * 0.84f, size.height * 0.84f), 12f)
-        for (column in 0..4) {
-            val x = size.width * (0.24f + column * 0.13f)
-            drawLine(glow, Offset(x, size.height * 0.73f), Offset(x, size.height * 0.84f), 7f)
-        }
+        Text(
+            "9",
+            color = Color(0xFF102A56),
+            fontSize = 52.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.graphicsLayer {
+                scaleX = 1f + pulse * 0.045f
+                scaleY = scaleX
+                shadowElevation = 10f + pulse * 12f
+            },
+        )
     }
 }

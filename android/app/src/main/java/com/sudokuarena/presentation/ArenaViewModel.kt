@@ -22,6 +22,7 @@ import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
 import java.util.UUID
+import java.time.LocalDate
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -67,14 +68,21 @@ data class ArenaUiState(
     val soloBestMs: Long = 0,
     val soloNewRecord: Boolean = false,
     val message: String? = null,
+    val showTutorial: Boolean = false,
+    val isDailyChallenge: Boolean = false,
+    val totalXp: Int = 0,
+    val comboMessage: String? = null,
+    val rematchRequested: Boolean = false,
 ) {
     val canPlay: Boolean
-        get() = connected && (isSoloMode || (playerId != null && roomState?.phase == RoomPhase.PLAYING)) && selected != null &&
+        get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
             pendingRequestId == null && penaltyRemainingMs == 0L &&
             fogSwipesRemaining == 0 && !soloCompleted
 
     val ownPlayer: Player?
         get() = players.firstOrNull { it.id == playerId }
+
+    val level: Int get() = totalXp / 500 + 1
 }
 
 class ArenaViewModel(
@@ -86,12 +94,16 @@ class ArenaViewModel(
     private val leaderboardRepository: LeaderboardRepository,
     private val playerName: String,
     private val requestedRoomCode: String? = null,
+    private val isDailyChallenge: Boolean = false,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(
         ArenaUiState(
             isSoloMode = isSoloMode,
             isColorMode = isSoloMode && initialColorMode,
             soloBestMs = recordStore.soloBestMs(),
+            showTutorial = !recordStore.tutorialCompleted(),
+            isDailyChallenge = isDailyChallenge,
+            totalXp = recordStore.totalXp(),
         ),
     )
     val state: StateFlow<ArenaUiState> = mutableState.asStateFlow()
@@ -109,6 +121,7 @@ class ArenaViewModel(
     private var soloStartedAt = 0L
     private var roomRequestSent = false
     private var reconnectRoomCode = requestedRoomCode
+    private var soloChallengeToken: String? = null
 
     init {
         if (isSoloMode) {
@@ -167,6 +180,24 @@ class ArenaViewModel(
 
     fun newSoloGame() {
         if (isSoloMode) startSoloGame()
+    }
+
+    fun completeTutorial() {
+        recordStore.markTutorialCompleted()
+        mutableState.update { it.copy(showTutorial = false) }
+    }
+
+    fun requestRematch() {
+        if (isSoloMode) return
+        gateway?.requestRematch()
+        mutableState.update { it.copy(rematchRequested = true, message = "Voto de revancha enviado") }
+    }
+
+    fun toggleLoadoutPower(power: String) {
+        if (isSoloMode || power !in setOf("FOG", "REFLECT", "REVEAL")) return
+        val current = mutableState.value.ownPlayer?.powerLoadout.orEmpty()
+        val next = if (power in current) current - power else (current + power).takeLast(2)
+        if (next.size == 2) gateway?.setPowerLoadout(next)
     }
 
     fun setPowersEnabled(enabled: Boolean) {
@@ -249,7 +280,11 @@ class ArenaViewModel(
     }
 
     private fun startSoloGame() {
-        soloPuzzle = sudokuGenerator.generate()
+        soloChallengeToken = null
+        viewModelScope.launch {
+            soloChallengeToken = runCatching { leaderboardRepository.beginSoloChallenge() }.getOrNull()
+        }
+        soloPuzzle = sudokuGenerator.generate(if (isDailyChallenge) LocalDate.now().toEpochDay() else null)
         soloStartedAt = System.currentTimeMillis()
         blockedUntil = 0
         nearCompletionKeys = emptySet()
@@ -267,6 +302,9 @@ class ArenaViewModel(
             board = board,
             players = listOf(soloPlayer(score = 0)),
             soloBestMs = recordStore.soloBestMs(),
+            showTutorial = mutableState.value.showTutorial,
+            isDailyChallenge = isDailyChallenge,
+            totalXp = recordStore.totalXp(),
         )
     }
 
@@ -307,6 +345,8 @@ class ArenaViewModel(
     private fun finishSoloGame() {
         val elapsed = (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
         val newRecord = recordStore.recordSoloTime(elapsed)
+        val dailyBonus = isDailyChallenge && recordStore.markDailyCompleted(LocalDate.now().toString())
+        recordStore.addXp(100 + if (dailyBonus) 250 else 0)
         mutableState.update {
             it.copy(
                 soloCompleted = true,
@@ -314,10 +354,14 @@ class ArenaViewModel(
                 soloBestMs = recordStore.soloBestMs(),
                 soloNewRecord = newRecord,
                 selected = null,
+                totalXp = recordStore.totalXp(),
+                message = if (dailyBonus) "Reto diario completado: +350 XP" else "+100 XP",
             )
         }
         viewModelScope.launch {
-            runCatching { leaderboardRepository.submitSoloRecord(playerName, elapsed) }
+            soloChallengeToken?.let { token ->
+                runCatching { leaderboardRepository.submitSoloRecord(playerName, elapsed, token) }
+            }
         }
     }
 
@@ -356,14 +400,37 @@ class ArenaViewModel(
                     roomCode = event.roomState.roomCode,
                     isColorMode = event.roomState.config.tileType == TileType.COLORS,
                     matchRemainingMs = event.roomState.endsAt?.let { end -> (end - serverNow()).coerceAtLeast(0) } ?: 0,
+                    matchResults = if (event.roomState.phase == RoomPhase.PLAYING) emptyList() else it.matchResults,
+                    rematchRequested = if (event.roomState.phase == RoomPhase.PLAYING) false else it.rematchRequested,
                 )
             }
             is RealtimeEvent.MatchFinished -> mutableState.update {
-                it.copy(matchResults = event.results, selected = null, pendingRequestId = null)
+                val ownResult = event.results.firstOrNull { result -> result.playerId == it.playerId }
+                val xp = if (ownResult?.rank == 1) 180 else 80
+                recordStore.addXp(xp)
+                it.copy(
+                    matchResults = event.results,
+                    selected = null,
+                    pendingRequestId = null,
+                    totalXp = recordStore.totalXp(),
+                    message = "+$xp XP de arena",
+                )
+            }
+            is RealtimeEvent.SuddenDeath -> mutableState.update {
+                it.copy(message = "¡MUERTE SÚBITA! La próxima jugada correcta gana")
             }
             is RealtimeEvent.StateUpdated -> applySnapshot(event.snapshot)
-            is RealtimeEvent.MoveAccepted -> mutableState.update {
-                if (it.pendingRequestId == event.requestId) it.copy(pendingRequestId = null, selected = null) else it
+            is RealtimeEvent.MoveAccepted -> {
+                val comboText = if (event.comboMultiplier > 1) "COMBO x${event.comboMultiplier} · ${event.combo} aciertos" else null
+                mutableState.update {
+                    if (it.pendingRequestId == event.requestId) {
+                        it.copy(pendingRequestId = null, selected = null, comboMessage = comboText)
+                    } else it
+                }
+                if (comboText != null) viewModelScope.launch {
+                    delay(1_400)
+                    mutableState.update { current -> if (current.comboMessage == comboText) current.copy(comboMessage = null) else current }
+                }
             }
             is RealtimeEvent.MoveRejected -> mutableState.update {
                 if (it.pendingRequestId == event.requestId) {
@@ -488,6 +555,7 @@ class ArenaViewModel(
             leaderboardRepository: LeaderboardRepository,
             playerName: String,
             requestedRoomCode: String? = null,
+            isDailyChallenge: Boolean = false,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ArenaViewModel(
@@ -499,6 +567,7 @@ class ArenaViewModel(
                 leaderboardRepository = leaderboardRepository,
                 playerName = playerName,
                 requestedRoomCode = requestedRoomCode,
+                isDailyChallenge = isDailyChallenge,
             ) as T
         }
     }
