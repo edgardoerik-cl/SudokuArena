@@ -4,6 +4,7 @@ import { Server, type Socket } from "socket.io";
 import {
   BOARD_EVENT_DURATION_MS,
   BOARD_EVENT_INTERVAL_MS,
+  APP_VERSION,
   CLEAR_DELAY_MS,
   MATCH_DURATION_MS,
   createRandomSolution
@@ -46,6 +47,7 @@ const httpServer = createServer((request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({
       ok: true,
+      version: APP_VERSION,
       rooms: rooms.size,
       players: [...rooms.values()].reduce((total, room) => total + room.game.playerCount, 0)
     }));
