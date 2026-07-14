@@ -8,6 +8,11 @@ import com.sudokuarena.domain.GameRealtimeGateway
 import com.sudokuarena.domain.GameSnapshot
 import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.RealtimeEvent
+import com.sudokuarena.domain.RoomConfig
+import com.sudokuarena.domain.RoomPhase
+import com.sudokuarena.domain.RoomState
+import com.sudokuarena.domain.TeamMode
+import com.sudokuarena.domain.MatchResultEntry
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.WebSocket
@@ -51,8 +56,27 @@ class SocketGameClient(
             RealtimeEvent.Joined(
                 playerId = payload.getString("playerId"),
                 roomCode = payload.getString("roomCode"),
+                roomState = parseRoomState(payload.getJSONObject("roomState")),
                 snapshot = parseSnapshot(payload.getJSONObject("state")),
             )
+        } }
+        socket.on("room:state") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.RoomStateUpdated(parseRoomState(payload))
+        } }
+        socket.on("game:finished") { args -> parseSafely(args) { payload ->
+            val results = payload.getJSONArray("results").mapObjects { value ->
+                val result = value as JSONObject
+                MatchResultEntry(
+                    rank = result.getInt("rank"),
+                    playerId = result.getString("playerId"),
+                    name = result.getString("name"),
+                    score = result.getInt("score"),
+                    teamId = result.getString("teamId"),
+                    teamScore = result.getInt("teamScore"),
+                    role = result.getString("role"),
+                )
+            }
+            RealtimeEvent.MatchFinished(results, payload.getLong("finishedAt"))
         } }
         socket.on("room:error") { args -> parseSafely(args) { payload ->
             RealtimeEvent.RoomError(
@@ -142,6 +166,19 @@ class SocketGameClient(
         socket.emit("room:join", JSONObject().put("roomCode", roomCode))
     }
 
+    override fun configureRoom(config: RoomConfig) {
+        socket.emit(
+            "room:configure",
+            JSONObject()
+                .put("powersEnabled", config.powersEnabled)
+                .put("teamMode", config.teamMode.name),
+        )
+    }
+
+    override fun startRoom() {
+        socket.emit("room:start")
+    }
+
     override fun place(
         requestId: String,
         row: Int,
@@ -191,6 +228,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
                 clearing = cell.getBoolean("clearing"),
                 golden = cell.optBoolean("golden", false),
                 given = false,
+                ownerTeamId = if (cell.isNull("ownerTeamId")) null else cell.optString("ownerTeamId"),
             )
         }
     }
@@ -204,6 +242,9 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             score = player.getInt("score"),
             blockedUntil = player.getLong("blockedUntil"),
             energy = player.optInt("energy", 0),
+            teamId = player.optString("teamId", "PLAYER:${player.getString("id")}"),
+            role = player.optString("role", "PLAYER"),
+            teamScore = player.optInt("teamScore", player.getInt("score")),
         )
     }
     return GameSnapshot(
@@ -221,6 +262,21 @@ private fun parseBoardEvent(json: JSONObject): ActiveBoardEvent = ActiveBoardEve
     startedAt = json.getLong("startedAt"),
     endsAt = json.getLong("endsAt"),
 )
+
+private fun parseRoomState(json: JSONObject): RoomState {
+    val config = json.getJSONObject("config")
+    return RoomState(
+        roomCode = json.getString("roomCode"),
+        hostPlayerId = json.getString("hostPlayerId"),
+        config = RoomConfig(
+            powersEnabled = config.getBoolean("powersEnabled"),
+            teamMode = TeamMode.valueOf(config.getString("teamMode")),
+        ),
+        phase = RoomPhase.valueOf(json.getString("phase")),
+        startedAt = if (json.isNull("startedAt")) null else json.getLong("startedAt"),
+        endsAt = if (json.isNull("endsAt")) null else json.getLong("endsAt"),
+    )
+}
 
 private fun <T> JSONArray.mapObjects(transform: (Any) -> T): List<T> =
     List(length()) { index -> transform(get(index)) }

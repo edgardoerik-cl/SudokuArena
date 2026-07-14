@@ -8,6 +8,7 @@ data class BoardCell(
     val clearing: Boolean = false,
     val golden: Boolean = false,
     val given: Boolean = false,
+    val ownerTeamId: String? = null,
 )
 
 data class Player(
@@ -18,6 +19,36 @@ data class Player(
     val score: Int,
     val blockedUntil: Long,
     val energy: Int,
+    val teamId: String,
+    val role: String,
+    val teamScore: Int,
+)
+
+enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
+enum class RoomPhase { LOBBY, PLAYING, FINISHED }
+
+data class RoomConfig(
+    val powersEnabled: Boolean = true,
+    val teamMode: TeamMode = TeamMode.FFA,
+)
+
+data class RoomState(
+    val roomCode: String,
+    val hostPlayerId: String,
+    val config: RoomConfig,
+    val phase: RoomPhase,
+    val startedAt: Long?,
+    val endsAt: Long?,
+)
+
+data class MatchResultEntry(
+    val rank: Int,
+    val playerId: String,
+    val name: String,
+    val score: Int,
+    val teamId: String,
+    val teamScore: Int,
+    val role: String,
 )
 
 enum class BoardEventType { MIRROR_HOUR, GOLDEN_CELLS }
@@ -45,8 +76,15 @@ data class ConqueredSection(
 sealed interface RealtimeEvent {
     data object Connected : RealtimeEvent
     data object Disconnected : RealtimeEvent
-    data class Joined(val playerId: String, val roomCode: String, val snapshot: GameSnapshot) : RealtimeEvent
+    data class Joined(
+        val playerId: String,
+        val roomCode: String,
+        val roomState: RoomState,
+        val snapshot: GameSnapshot,
+    ) : RealtimeEvent
     data class RoomError(val code: String, val message: String) : RealtimeEvent
+    data class RoomStateUpdated(val roomState: RoomState) : RealtimeEvent
+    data class MatchFinished(val results: List<MatchResultEntry>, val finishedAt: Long) : RealtimeEvent
     data class StateUpdated(val snapshot: GameSnapshot) : RealtimeEvent
     data class MoveAccepted(val requestId: String, val revision: Long) : RealtimeEvent
     data class MoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
@@ -75,6 +113,8 @@ interface GameRealtimeGateway {
     fun disconnect()
     fun createRoom()
     fun joinRoom(roomCode: String)
+    fun configureRoom(config: RoomConfig)
+    fun startRoom()
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
     fun usePower(targetPlayerId: String)
     fun sendReaction(emojiId: String)

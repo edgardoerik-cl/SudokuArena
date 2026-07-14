@@ -12,6 +12,24 @@
 
 ## Estado público autoritativo online
 
+Cada sala publica además este estado de lobby/partida:
+
+```json
+{
+  "roomCode": "4821",
+  "hostPlayerId": "socket-host",
+  "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO" },
+  "phase": "PLAYING",
+  "startedAt": 1783915200000,
+  "endsAt": 1783915380000
+}
+```
+
+Modos: `FFA`, `TWO_V_TWO` y `THREE_V_ONE`. En 3v1 el Host es Jefe; sus
+aciertos base y carga de energía tienen multiplicador x2. El equipo de tres
+comparte `teamScore`. En 2v2 ambos integrantes también reciben el mismo total de
+equipo y las celdas publican `ownerTeamId` para compartir color/progreso.
+
 El servidor mantiene el tablero, energía, puntuación, bloqueo y clima. Android
 sólo envía intenciones y reemplaza su estado local al recibir un snapshot.
 
@@ -59,7 +77,10 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 |---|---|---|
 | Cliente → servidor | `room:create` | sin payload |
 | Cliente → servidor | `room:join` | `{ roomCode }` |
+| Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode }` |
+| Cliente → servidor | `room:start` | sin payload; sólo Host |
 | Servidor → cliente | `room:joined` | `{ roomCode }` |
+| Servidor → sala | `room:state` | configuración, fase y tiempos |
 | Servidor → cliente | `room:error` | `{ code, message }` |
 | Cliente → servidor | `player:place` | `{ requestId, row, column, value, clientRevision }` |
 | Cliente → servidor | `use_power` | `{ targetPlayerId }` |
@@ -75,6 +96,8 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → todos | `board_event_start` | `{ eventType, startedAt, endsAt }` |
 | Servidor → todos | `board_event_end` | `{ eventType }` |
 | Servidor → todos | `reaction_received` | `{ reactionId, playerId, emojiId, sentAt }` |
+| Servidor → sala | `game:started` | `{ startedAt, endsAt }` |
+| Servidor → sala | `game:finished` | `{ results, finishedAt }` |
 
 Emojis admitidos: `LAUGH`, `CRY`, `ANGRY` y `SURPRISED`. El servidor limita las
 reacciones a una cada 500 ms por conexión.
@@ -111,6 +134,9 @@ operación transaccional en Redis, además del adaptador Redis de Socket.IO.
   en local o `GameRealtimeGateway` online, sin depender de APIs Android.
 - `WelcomeScreen`: guarda nickname y bifurca entre Solitario, Crear Sala y
   Unirse a Sala.
+- `SplashScreen`/`ArenaLogo`: identidad visual 100% Canvas, sin recursos bitmap.
+- `RoomLobbyScreen`: configuración sincronizada y editable sólo por el Host.
+- `MatchResultsOverlay`: confeti Canvas y tarjetas escalonadas de clasificación.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.
 - `ArenaScreen`: dibuja oro y clima, anima la limpieza, muestra reacciones y
   captura swipes rápidos del overlay de niebla.

@@ -23,6 +23,8 @@ import com.sudokuarena.data.local.RandomSudokuGenerator
 import com.sudokuarena.presentation.ArenaRoute
 import com.sudokuarena.presentation.ArenaViewModel
 import com.sudokuarena.presentation.WelcomeScreen
+import com.sudokuarena.presentation.MultiplayerEntryScreen
+import com.sudokuarena.presentation.SplashScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,11 +41,17 @@ class MainActivity : ComponentActivity() {
 private fun SudokuArenaApp() {
     val context = LocalContext.current
     val preferences = remember(context) { PlayerPreferences(context) }
+    var screen by rememberSaveable { mutableStateOf("SPLASH") }
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
     var requestedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
 
-    if (mode == null) {
+    if (screen == "SPLASH") {
+        SplashScreen { screen = "WELCOME" }
+        return
+    }
+
+    if (screen == "WELCOME") {
         WelcomeScreen(
             initialNickname = preferences.nickname(),
             onSaveNickname = preferences::saveNickname,
@@ -51,17 +59,28 @@ private fun SudokuArenaApp() {
                 requestedRoomCode = null
                 mode = "SOLO"
                 sessionId += 1
+                screen = "GAME"
             },
+            onMultiplayerMode = { screen = "MULTIPLAYER_ENTRY" },
+        )
+        return
+    }
+
+    if (screen == "MULTIPLAYER_ENTRY") {
+        MultiplayerEntryScreen(
             onCreateRoom = {
                 requestedRoomCode = null
                 mode = "ONLINE"
                 sessionId += 1
+                screen = "GAME"
             },
             onJoinRoom = { code ->
                 requestedRoomCode = code
                 mode = "ONLINE"
                 sessionId += 1
+                screen = "GAME"
             },
+            onBack = { screen = "WELCOME" },
         )
         return
     }
@@ -92,6 +111,7 @@ private fun SudokuArenaApp() {
         sessionOwner.reset()
         mode = null
         requestedRoomCode = null
+        screen = "WELCOME"
     }
 }
 

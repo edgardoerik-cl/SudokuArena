@@ -3,6 +3,25 @@ export interface PublicCell {
   ownerId: string | null;
   clearing: boolean;
   golden: boolean;
+  ownerTeamId: string | null;
+}
+
+export type TeamMode = "FFA" | "TWO_V_TWO" | "THREE_V_ONE";
+export type PlayerRole = "PLAYER" | "TEAMMATE" | "BOSS" | "RAIDER";
+export type RoomPhase = "LOBBY" | "PLAYING" | "FINISHED";
+
+export interface RoomConfig {
+  powersEnabled: boolean;
+  teamMode: TeamMode;
+}
+
+export interface RoomState {
+  roomCode: string;
+  hostPlayerId: string;
+  config: RoomConfig;
+  phase: RoomPhase;
+  startedAt: number | null;
+  endsAt: number | null;
 }
 
 export interface PlayerState {
@@ -13,6 +32,9 @@ export interface PlayerState {
   score: number;
   blockedUntil: number;
   energy: number;
+  teamId: string;
+  role: PlayerRole;
+  teamScore: number;
 }
 
 export type BoardEventType = "MIRROR_HOUR" | "GOLDEN_CELLS";
@@ -48,6 +70,16 @@ export type ReactionEmoji = "LAUGH" | "CRY" | "ANGRY" | "SURPRISED";
 
 export interface ReactionProposal {
   emojiId: ReactionEmoji;
+}
+
+export interface MatchResultEntry {
+  rank: number;
+  playerId: string;
+  name: string;
+  score: number;
+  teamId: string;
+  teamScore: number;
+  role: PlayerRole;
 }
 
 export type SectionKind = "row" | "column" | "box";
@@ -97,7 +129,9 @@ export type PowerRejectionCode =
   | "TARGET_NOT_FOUND"
   | "SELF_TARGET"
   | "NOT_ENOUGH_ENERGY"
-  | "INVALID_TARGET";
+  | "INVALID_TARGET"
+  | "POWER_DISABLED"
+  | "SAME_TEAM";
 
 export type PowerResult =
   | {

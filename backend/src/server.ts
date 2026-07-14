@@ -5,19 +5,40 @@ import {
   BOARD_EVENT_DURATION_MS,
   BOARD_EVENT_INTERVAL_MS,
   CLEAR_DELAY_MS,
+  MATCH_DURATION_MS,
   createRandomSolution
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
-import type { BoardEventType, PlaceProposal, PowerProposal, ReactionEmoji, ReactionProposal } from "./types.js";
+import type {
+  BoardEventType,
+  PlaceProposal,
+  PowerProposal,
+  ReactionEmoji,
+  ReactionProposal,
+  RoomConfig,
+  RoomPhase,
+  RoomState,
+  TeamMode
+} from "./types.js";
 
 interface RoomRuntime {
   code: string;
   game: ArenaGame;
   boardEventTimeout: NodeJS.Timeout | null;
+  matchTimeout: NodeJS.Timeout | null;
+  hostPlayerId: string;
+  config: RoomConfig;
+  phase: RoomPhase;
+  startedAt: number | null;
+  endsAt: number | null;
 }
 
 const port = Number(process.env.PORT ?? 3000);
 const allowedOrigin = process.env.CORS_ORIGIN ?? "*";
+const requestedMatchDuration = Number(process.env.MATCH_DURATION_MS ?? MATCH_DURATION_MS);
+const matchDurationMs = Number.isFinite(requestedMatchDuration) && requestedMatchDuration > 0
+  ? requestedMatchDuration
+  : MATCH_DURATION_MS;
 const rooms = new Map<string, RoomRuntime>();
 
 const httpServer = createServer((request, response) => {
@@ -40,7 +61,7 @@ const io = new Server(httpServer, {
 const reactionEmojis = new Set<ReactionEmoji>(["LAUGH", "CRY", "ANGRY", "SURPRISED"]);
 
 const boardEventInterval = setInterval(() => {
-  for (const room of rooms.values()) startRandomBoardEvent(room);
+  for (const room of rooms.values()) if (room.phase === "PLAYING") startRandomBoardEvent(room);
 }, BOARD_EVENT_INTERVAL_MS);
 
 io.on("connection", (socket) => {
@@ -49,7 +70,7 @@ io.on("connection", (socket) => {
 
   socket.on("room:create", () => {
     if (socket.data.roomCode) return emitRoomError(socket, "ALREADY_IN_ROOM", "Ya estás dentro de una sala");
-    const room = createRoom();
+    const room = createRoom(socket.id);
     socket.emit("room:created", { roomCode: room.code });
     joinRoom(socket, room, requestedName);
   });
@@ -60,17 +81,41 @@ io.on("connection", (socket) => {
     if (!roomCode) return emitRoomError(socket, "INVALID_CODE", "Ingresa un código de 4 dígitos");
     const room = rooms.get(roomCode);
     if (!room) return emitRoomError(socket, "ROOM_NOT_FOUND", "La sala no existe o ya terminó");
+    if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     joinRoom(socket, room, requestedName);
+  });
+
+  socket.on("room:configure", (payload: Partial<RoomConfig>) => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.hostPlayerId !== socket.id) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede configurar");
+    if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
+    const teamMode = normalizeTeamMode(payload?.teamMode);
+    if (!teamMode || typeof payload?.powersEnabled !== "boolean") {
+      return emitRoomError(socket, "INVALID_CONFIG", "Configuración de sala inválida");
+    }
+    room.config = { powersEnabled: payload.powersEnabled, teamMode };
+    emitRoomState(room);
+  });
+
+  socket.on("room:start", () => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.hostPlayerId !== socket.id) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede iniciar");
+    if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
+    const minimumError = validatePlayerCount(room);
+    if (minimumError) return emitRoomError(socket, "INVALID_PLAYER_COUNT", minimumError);
+    startMatch(room);
   });
 
   socket.on("player:place", (payload: PlaceProposal) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
-    if (room.game.playerCount < 2) {
+    if (room.phase !== "PLAYING") {
       socket.emit("move:rejected", {
         requestId: typeof payload?.requestId === "string" ? payload.requestId : "",
-        code: "WAITING_FOR_PLAYERS",
-        message: "Esperando al menos un rival"
+        code: "MATCH_NOT_PLAYING",
+        message: "La partida todavía no está en curso"
       });
       return;
     }
@@ -120,6 +165,7 @@ io.on("connection", (socket) => {
   socket.on("use_power", (payload: PowerProposal) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.phase !== "PLAYING") return emitRoomError(socket, "MATCH_NOT_PLAYING", "La partida no está en curso");
     const result = room.game.useFogPower(socket.id, payload?.targetPlayerId);
     if (!result.accepted) {
       socket.emit("power_rejected", { code: result.code, message: result.message });
@@ -158,13 +204,19 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => leaveCurrentRoom(socket));
 });
 
-function createRoom(): RoomRuntime {
+function createRoom(hostPlayerId: string): RoomRuntime {
   let code: string;
   do code = String(Math.floor(1_000 + Math.random() * 9_000)); while (rooms.has(code));
   const room: RoomRuntime = {
     code,
     game: new ArenaGame(`arena-${code}`, createRandomSolution()),
-    boardEventTimeout: null
+    boardEventTimeout: null,
+    matchTimeout: null,
+    hostPlayerId,
+    config: { powersEnabled: true, teamMode: "FFA" },
+    phase: "LOBBY",
+    startedAt: null,
+    endsAt: null
   };
   rooms.set(code, room);
   return room;
@@ -182,9 +234,11 @@ function joinRoom(socket: Socket, room: RoomRuntime, playerName: string): void {
   socket.emit("game:joined", {
     playerId: player.id,
     roomCode: room.code,
+    roomState: toRoomState(room),
     state: room.game.snapshot()
   });
   emitState(room);
+  emitRoomState(room);
 }
 
 function leaveCurrentRoom(socket: Socket): void {
@@ -194,7 +248,11 @@ function leaveCurrentRoom(socket: Socket): void {
   if (room.game.removePlayer(socket.id)) emitState(room);
   if (room.game.playerCount === 0) {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
+    if (room.matchTimeout) clearTimeout(room.matchTimeout);
     rooms.delete(room.code);
+  } else if (room.hostPlayerId === socket.id) {
+    room.hostPlayerId = room.game.snapshot().players[0]!.id;
+    emitRoomState(room);
   }
 }
 
@@ -207,6 +265,21 @@ function emitState(room: RoomRuntime): void {
   io.to(room.code).emit("game:state", room.game.snapshot());
 }
 
+function emitRoomState(room: RoomRuntime): void {
+  io.to(room.code).emit("room:state", toRoomState(room));
+}
+
+function toRoomState(room: RoomRuntime): RoomState {
+  return {
+    roomCode: room.code,
+    hostPlayerId: room.hostPlayerId,
+    config: { ...room.config },
+    phase: room.phase,
+    startedAt: room.startedAt,
+    endsAt: room.endsAt
+  };
+}
+
 function emitRoomError(socket: Socket, code: string, message: string): void {
   socket.emit("room:error", { code, message });
 }
@@ -214,6 +287,43 @@ function emitRoomError(socket: Socket, code: string, message: string): void {
 function normalizeRoomCode(value: unknown): string | null {
   const code = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   return /^\d{4}$/.test(code) ? code : null;
+}
+
+function normalizeTeamMode(value: unknown): TeamMode | null {
+  return value === "FFA" || value === "TWO_V_TWO" || value === "THREE_V_ONE" ? value : null;
+}
+
+function validatePlayerCount(room: RoomRuntime): string | null {
+  const count = room.game.playerCount;
+  if (room.config.teamMode === "FFA" && count < 2) return "Se necesitan al menos 2 jugadores";
+  if (room.config.teamMode === "TWO_V_TWO" && count !== 4) return "El modo 2 vs 2 requiere exactamente 4 jugadores";
+  if (room.config.teamMode === "THREE_V_ONE" && count !== 4) return "El modo 3 vs 1 requiere exactamente 4 jugadores";
+  return null;
+}
+
+function startMatch(room: RoomRuntime): void {
+  room.phase = "PLAYING";
+  room.startedAt = Date.now();
+  room.endsAt = room.startedAt + matchDurationMs;
+  room.game.startMatch(room.config, room.hostPlayerId);
+  emitRoomState(room);
+  emitState(room);
+  io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
+  room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
+}
+
+function finishMatch(room: RoomRuntime): void {
+  if (rooms.get(room.code) !== room || room.phase !== "PLAYING") return;
+  room.phase = "FINISHED";
+  room.endsAt = Date.now();
+  if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
+  room.boardEventTimeout = null;
+  room.game.endBoardEvent();
+  const results = room.game.matchResults();
+  emitRoomState(room);
+  emitState(room);
+  io.to(room.code).emit("game:finished", { results, finishedAt: room.endsAt });
+  room.matchTimeout = null;
 }
 
 function startRandomBoardEvent(room: RoomRuntime): void {
@@ -241,7 +351,10 @@ httpServer.listen(port, "0.0.0.0", () => {
 
 function shutdown(): void {
   clearInterval(boardEventInterval);
-  for (const room of rooms.values()) if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
+  for (const room of rooms.values()) {
+    if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
+    if (room.matchTimeout) clearTimeout(room.matchTimeout);
+  }
   io.close(() => process.exit(0));
 }
 

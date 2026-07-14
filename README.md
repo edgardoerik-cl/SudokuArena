@@ -1,12 +1,12 @@
-# Sudoku Arena: Robo de Filas
+# Sudoku Arena
 
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `0.4.0` permite elegir entre Solitario 100% offline y Multijugador
-por salas de cuatro dígitos. Solitario genera y valida el Sudoku en el teléfono,
-guarda el récord personal y nunca abre un socket. Online conserva energía,
-niebla, clima, reacciones y validación autoritativa aislada por sala.
+La versión `0.5.0` incorpora identidad visual dibujada con Compose, Splash
+animado, perfil editable, lobby configurable, modos FFA/2v2/3v1 y resultados
+con confeti. Las partidas online duran tres minutos y siguen una máquina de
+estados autoritativa `LOBBY → PLAYING → FINISHED`.
 
 ## Estructura
 
@@ -32,7 +32,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-RoboDeFilas-v0.4.0-debug.apk`. No se debe subir ese archivo a Git:
+`SudokuArena-v0.5.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 El prototipo debe desplegarse con **una sola instancia**: el estado vive en la

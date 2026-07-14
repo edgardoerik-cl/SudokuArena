@@ -130,4 +130,42 @@ describe("ArenaGame", () => {
     if (result.accepted) assert.equal(result.goldenBonus, 50);
     assert.equal(game.snapshot().players[0]?.score, 60);
   });
+
+  it("comparte el puntaje de equipo y la conquista de celda en 2 vs 2", () => {
+    const game = new ArenaGame();
+    for (const id of ["p1", "p2", "p3", "p4"]) game.addPlayer(id, id);
+    game.startMatch({ powersEnabled: true, teamMode: "TWO_V_TWO" }, "p1");
+    game.place("p1", { requestId: "team", row: 0, column: 0, value: 5 });
+    const state = game.snapshot();
+
+    assert.equal(state.players.find((player) => player.id === "p1")?.teamScore, 10);
+    assert.equal(state.players.find((player) => player.id === "p3")?.teamScore, 10);
+    assert.equal(state.players.find((player) => player.id === "p2")?.teamScore, 0);
+    assert.equal(state.board[0]![0]!.ownerTeamId, "TEAM_A");
+  });
+
+  it("desactiva energía y niebla cuando el host apaga poderes", () => {
+    const game = new ArenaGame();
+    game.addPlayer("p1", "Host");
+    game.addPlayer("p2", "Rival");
+    game.startMatch({ powersEnabled: false, teamMode: "FFA" }, "p1");
+    game.place("p1", { requestId: "no-power", row: 0, column: 0, value: 5 });
+
+    assert.equal(game.snapshot().players.find((player) => player.id === "p1")?.energy, 0);
+    const power = game.useFogPower("p1", "p2");
+    assert.equal(power.accepted, false);
+    if (!power.accepted) assert.equal(power.code, "POWER_DISABLED");
+  });
+
+  it("otorga al Jefe carga y puntos dobles en 3 vs 1", () => {
+    const game = new ArenaGame();
+    for (const id of ["boss", "r1", "r2", "r3"]) game.addPlayer(id, id);
+    game.startMatch({ powersEnabled: true, teamMode: "THREE_V_ONE" }, "boss");
+    game.place("boss", { requestId: "boss-hit", row: 0, column: 0, value: 5 });
+    const boss = game.snapshot().players.find((player) => player.id === "boss");
+
+    assert.equal(boss?.role, "BOSS");
+    assert.equal(boss?.score, 20);
+    assert.equal(boss?.energy, 50);
+  });
 });

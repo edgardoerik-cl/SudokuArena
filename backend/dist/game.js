@@ -7,13 +7,16 @@ export class ArenaGame {
         value: null,
         ownerId: null,
         clearTokens: new Set(),
-        golden: false
+        golden: false,
+        ownerTeamId: null
     })));
     players = new Map();
     pendingSections = new Set();
     processedRequests = new Map();
+    teamScores = new Map();
     revision = 0;
     activeBoardEvent = null;
+    configuration = { powersEnabled: true, teamMode: "FFA" };
     constructor(gameId = "arena-main", solution = SOLUTION) {
         this.gameId = gameId;
         this.solution = solution;
@@ -33,12 +36,44 @@ export class ArenaGame {
             color: PLAYER_COLORS[slot] ?? PLAYER_COLORS[0],
             score: 0,
             blockedUntil: 0,
-            energy: 0
+            energy: 0,
+            teamId: `PLAYER:${id}`,
+            role: "PLAYER",
+            teamScore: 0
         };
         this.players.set(id, player);
         this.processedRequests.set(id, new Set());
+        this.teamScores.set(player.teamId, 0);
         this.revision += 1;
         return { ...player };
+    }
+    startMatch(config, hostPlayerId) {
+        this.configuration = { ...config };
+        this.teamScores.clear();
+        for (const player of this.players.values()) {
+            const assignment = teamAssignment(player, config.teamMode, hostPlayerId);
+            player.teamId = assignment.teamId;
+            player.role = assignment.role;
+            player.score = 0;
+            player.teamScore = 0;
+            player.energy = 0;
+            player.blockedUntil = 0;
+            this.teamScores.set(player.teamId, 0);
+        }
+        this.revision += 1;
+    }
+    matchResults() {
+        return [...this.players.values()]
+            .sort((left, right) => right.teamScore - left.teamScore || right.score - left.score || left.slot - right.slot)
+            .map((player, index) => ({
+            rank: index + 1,
+            playerId: player.id,
+            name: player.name,
+            score: player.score,
+            teamId: player.teamId,
+            teamScore: player.teamScore,
+            role: player.role
+        }));
     }
     removePlayer(id) {
         if (!this.players.delete(id))
@@ -94,13 +129,19 @@ export class ArenaGame {
         const player = this.players.get(playerId);
         if (!player)
             return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
+        if (!this.configuration.powersEnabled)
+            return powerReject("POWER_DISABLED", "Los poderes están desactivados");
         if (typeof targetPlayerId !== "string" || targetPlayerId.length === 0) {
             return powerReject("INVALID_TARGET", "Objetivo inválido");
         }
         if (targetPlayerId === playerId)
             return powerReject("SELF_TARGET", "No puedes atacarte a ti mismo");
-        if (!this.players.has(targetPlayerId))
+        const target = this.players.get(targetPlayerId);
+        if (!target)
             return powerReject("TARGET_NOT_FOUND", "El rival ya no está conectado");
+        if (this.configuration.teamMode !== "FFA" && target.teamId === player.teamId) {
+            return powerReject("SAME_TEAM", "No puedes atacar a un compañero");
+        }
         if (player.energy < FOG_POWER_COST) {
             return powerReject("NOT_ENOUGH_ENERGY", "Necesitas 100% de energía");
         }
@@ -147,14 +188,19 @@ export class ArenaGame {
         // respecto de los demás callbacks en este proceso Node.
         cell.value = proposal.value;
         cell.ownerId = playerId;
-        const cellPoints = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_CELL_POINTS : CELL_POINTS;
+        cell.ownerTeamId = player.teamId;
+        const bossMultiplier = player.role === "BOSS" ? 2 : 1;
+        const cellPoints = (this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_CELL_POINTS : CELL_POINTS) * bossMultiplier;
         const goldenBonus = cell.golden ? GOLDEN_CELL_BONUS : 0;
         cell.golden = false;
         player.score += cellPoints + goldenBonus;
-        player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_PER_HIT);
+        if (this.configuration.powersEnabled) {
+            player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_PER_HIT * bossMultiplier);
+        }
         const sections = this.completedSections(proposal.row, proposal.column);
         const bonus = SECTION_POINTS * sections.length * sections.length;
         player.score += bonus;
+        this.awardTeam(player.teamId, cellPoints + goldenBonus + bonus);
         const clearPlan = sections.length > 0 ? this.markForClearing(sections) : null;
         this.revision += 1;
         return {
@@ -181,6 +227,7 @@ export class ArenaGame {
             // vence ya la vacía. Así no puede escribirse hasta terminar ambos timers.
             cell.value = null;
             cell.ownerId = null;
+            cell.ownerTeamId = null;
             cell.golden = false;
         }
         for (const key of plan.sectionKeys)
@@ -242,13 +289,22 @@ export class ArenaGame {
         }
         return cells;
     }
+    awardTeam(teamId, points) {
+        const total = (this.teamScores.get(teamId) ?? 0) + points;
+        this.teamScores.set(teamId, total);
+        for (const player of this.players.values()) {
+            if (player.teamId === teamId)
+                player.teamScore = total;
+        }
+    }
 }
 function toPublicCell(cell) {
     return {
         value: cell.value,
         ownerId: cell.ownerId,
         clearing: cell.clearTokens.size > 0,
-        golden: cell.golden
+        golden: cell.golden,
+        ownerTeamId: cell.ownerTeamId
     };
 }
 function isValidProposal(proposal) {
@@ -293,5 +349,16 @@ function shuffle(values) {
         const target = Math.floor(Math.random() * (index + 1));
         [values[index], values[target]] = [values[target], values[index]];
     }
+}
+function teamAssignment(player, mode, hostPlayerId) {
+    if (mode === "TWO_V_TWO") {
+        return { teamId: player.slot % 2 === 0 ? "TEAM_A" : "TEAM_B", role: "TEAMMATE" };
+    }
+    if (mode === "THREE_V_ONE") {
+        return player.id === hostPlayerId
+            ? { teamId: "BOSS", role: "BOSS" }
+            : { teamId: "RAIDERS", role: "RAIDER" };
+    }
+    return { teamId: `PLAYER:${player.id}`, role: "PLAYER" };
 }
 //# sourceMappingURL=game.js.map

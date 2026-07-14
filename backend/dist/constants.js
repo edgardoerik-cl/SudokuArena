@@ -12,6 +12,7 @@ export const MIRROR_PENALTY_MS = 6_000;
 export const GOLDEN_CELL_BONUS = 50;
 export const BOARD_EVENT_INTERVAL_MS = 45_000;
 export const BOARD_EVENT_DURATION_MS = 10_000;
+export const MATCH_DURATION_MS = 180_000;
 export const PLAYER_COLORS = ["#E53935", "#1E88E5", "#43A047", "#FB8C00"];
 // Solución conocida. En producción se seleccionaría/generaría una por partida.
 export const SOLUTION = [

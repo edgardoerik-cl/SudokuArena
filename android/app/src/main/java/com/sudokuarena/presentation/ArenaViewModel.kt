@@ -11,6 +11,11 @@ import com.sudokuarena.domain.GameSnapshot
 import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.PlayerRecordStore
 import com.sudokuarena.domain.RealtimeEvent
+import com.sudokuarena.domain.RoomConfig
+import com.sudokuarena.domain.RoomPhase
+import com.sudokuarena.domain.RoomState
+import com.sudokuarena.domain.TeamMode
+import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
 import java.util.UUID
@@ -36,6 +41,9 @@ data class ArenaUiState(
     val isSoloMode: Boolean = false,
     val connected: Boolean = false,
     val roomCode: String? = null,
+    val roomState: RoomState? = null,
+    val matchRemainingMs: Long = 0,
+    val matchResults: List<MatchResultEntry> = emptyList(),
     val playerId: String? = null,
     val revision: Long = 0,
     val board: List<List<BoardCell>> = emptyBoard(),
@@ -56,7 +64,7 @@ data class ArenaUiState(
     val message: String? = null,
 ) {
     val canPlay: Boolean
-        get() = connected && (isSoloMode || (playerId != null && players.size >= 2)) && selected != null &&
+        get() = connected && (isSoloMode || (playerId != null && roomState?.phase == RoomPhase.PLAYING)) && selected != null &&
             pendingRequestId == null && penaltyRemainingMs == 0L &&
             fogSwipesRemaining == 0 && !soloCompleted
 
@@ -110,6 +118,9 @@ class ArenaViewModel(
                         boardEventRemainingMs = current.boardEvent
                             ?.let { (it.endsAt - now).coerceAtLeast(0) }
                             ?: 0,
+                        matchRemainingMs = current.roomState?.endsAt
+                            ?.let { (it - now).coerceAtLeast(0) }
+                            ?: 0,
                         soloElapsedMs = if (current.isSoloMode && !current.soloCompleted) {
                             (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
                         } else current.soloElapsedMs,
@@ -146,6 +157,22 @@ class ArenaViewModel(
 
     fun newSoloGame() {
         if (isSoloMode) startSoloGame()
+    }
+
+    fun setPowersEnabled(enabled: Boolean) {
+        if (isSoloMode) return
+        val current = mutableState.value.roomState ?: return
+        gateway?.configureRoom(current.config.copy(powersEnabled = enabled))
+    }
+
+    fun setTeamMode(mode: TeamMode) {
+        if (isSoloMode) return
+        val current = mutableState.value.roomState ?: return
+        gateway?.configureRoom(current.config.copy(teamMode = mode))
+    }
+
+    fun startOnlineMatch() {
+        if (!isSoloMode) gateway?.startRoom()
     }
 
     fun useFog(targetPlayerId: String) {
@@ -258,10 +285,27 @@ class ArenaViewModel(
             }
             is RealtimeEvent.Joined -> {
                 reconnectRoomCode = event.roomCode
-                mutableState.update { it.copy(playerId = event.playerId, roomCode = event.roomCode, message = null) }
+                mutableState.update {
+                    it.copy(
+                        playerId = event.playerId,
+                        roomCode = event.roomCode,
+                        roomState = event.roomState,
+                        message = null,
+                    )
+                }
                 applySnapshot(event.snapshot)
             }
             is RealtimeEvent.RoomError -> mutableState.update { it.copy(message = event.message) }
+            is RealtimeEvent.RoomStateUpdated -> mutableState.update {
+                it.copy(
+                    roomState = event.roomState,
+                    roomCode = event.roomState.roomCode,
+                    matchRemainingMs = event.roomState.endsAt?.let { end -> (end - serverNow()).coerceAtLeast(0) } ?: 0,
+                )
+            }
+            is RealtimeEvent.MatchFinished -> mutableState.update {
+                it.copy(matchResults = event.results, selected = null, pendingRequestId = null)
+            }
             is RealtimeEvent.StateUpdated -> applySnapshot(event.snapshot)
             is RealtimeEvent.MoveAccepted -> mutableState.update {
                 if (it.pendingRequestId == event.requestId) it.copy(pendingRequestId = null, selected = null) else it
@@ -390,6 +434,9 @@ private fun soloPlayer(score: Int): Player = Player(
     score = score,
     blockedUntil = 0,
     energy = 0,
+    teamId = "solo",
+    role = "PLAYER",
+    teamScore = score,
 )
 
 private fun emptyBoard(): List<List<BoardCell>> = List(9) { List(9) { BoardCell() } }

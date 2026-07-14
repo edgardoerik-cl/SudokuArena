@@ -12,7 +12,7 @@ const clients: Socket[] = [];
 before(async () => {
   server = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
     cwd: new URL("../", import.meta.url),
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), MATCH_DURATION_MS: "800" },
     stdio: "ignore"
   });
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -52,6 +52,17 @@ describe("matchmaking por salas", () => {
     assert.equal(bobState.roomCode, roomOne.roomCode);
     assert.equal(bobState.state.players.length, 2);
 
+    const configuredAtBob = nextMatchingEvent<any>(bob, "room:state", (state) => state.config.powersEnabled === false);
+    alice.emit("room:configure", { powersEnabled: false, teamMode: "FFA" });
+    const configured = await configuredAtBob;
+    assert.equal(configured.config.powersEnabled, false);
+
+    const startedAtBob = nextEvent<any>(bob, "game:started");
+    const finishedAtBob = nextEvent<any>(bob, "game:finished", 2_000);
+    alice.emit("room:start");
+    const started = await startedAtBob;
+    assert.ok(started.endsAt > started.startedAt);
+
     const carol = await connect("Carol");
     const carolJoined = nextEvent<any>(carol, "game:joined");
     carol.emit("room:create");
@@ -66,6 +77,9 @@ describe("matchmaking por salas", () => {
     assert.equal(reaction.emojiId, "LAUGH");
     await delay(150);
     assert.equal(leakedToCarol, false);
+    const finished = await finishedAtBob;
+    assert.equal(finished.results.length, 2);
+    assert.equal(finished.results[0].rank, 1);
   });
 });
 
@@ -87,6 +101,27 @@ function nextEvent<T = unknown>(socket: Socket, event: string, timeoutMs = 3_000
       resolve(payload);
     };
     socket.once(event, handler);
+  });
+}
+
+function nextMatchingEvent<T>(
+  socket: Socket,
+  event: string,
+  predicate: (payload: T) => boolean,
+  timeoutMs = 3_000
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off(event, handler);
+      reject(new Error(`Timeout esperando ${event}`));
+    }, timeoutMs);
+    const handler = (payload: T) => {
+      if (!predicate(payload)) return;
+      clearTimeout(timeout);
+      socket.off(event, handler);
+      resolve(payload);
+    };
+    socket.on(event, handler);
   });
 }
 

@@ -6,9 +6,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -62,6 +59,8 @@ import androidx.compose.ui.zIndex
 import com.sudokuarena.domain.BoardCell
 import com.sudokuarena.domain.BoardEventType
 import com.sudokuarena.domain.Player
+import com.sudokuarena.domain.RoomPhase
+import com.sudokuarena.domain.TeamMode
 import kotlin.math.floor
 
 @Composable
@@ -71,6 +70,18 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
     val haptics = remember(context) { HapticFeedbackController(context) }
     LaunchedEffect(viewModel, haptics) {
         viewModel.haptics.collect(haptics::play)
+    }
+
+    val roomState = state.roomState
+    if (!state.isSoloMode && (roomState == null || roomState.phase == RoomPhase.LOBBY)) {
+        RoomLobbyScreen(
+            state = state,
+            onPowersChanged = viewModel::setPowersEnabled,
+            onTeamModeChanged = viewModel::setTeamMode,
+            onStart = viewModel::startOnlineMatch,
+            onExit = onExit,
+        )
+        return
     }
 
     ArenaScreen(
@@ -120,7 +131,7 @@ fun ArenaScreen(
                 Text(
                     when {
                         state.isSoloMode -> "Solitario · ${formatDuration(state.soloElapsedMs)} · ${state.soloErrors} errores"
-                        state.connected && state.roomCode != null -> "En línea · Sala ${state.roomCode}"
+                        state.connected && state.roomCode != null -> "Sala ${state.roomCode} · ${formatDuration(state.matchRemainingMs)}"
                         else -> "Conectando…"
                     },
                     color = if (state.connected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
@@ -128,7 +139,7 @@ fun ArenaScreen(
                 if (!state.isSoloMode) BoardEventBanner(state)
                 Spacer(Modifier.height(8.dp))
                 Scoreboard(state)
-                if (!state.isSoloMode) {
+                if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
                     Spacer(Modifier.height(8.dp))
                     PowerPanel(state, onUseFog)
                 }
@@ -175,38 +186,14 @@ fun ArenaScreen(
                     modifier = Modifier.zIndex(20f),
                 )
             }
-            AnimatedVisibility(
-                visible = state.soloCompleted,
-                enter = fadeIn(tween(350)) + scaleIn(initialScale = 0.7f, animationSpec = tween(450)),
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .zIndex(30f),
-            ) {
-                SoloCompletionCard(state, onNewSoloGame, onExit)
+            if (state.soloCompleted || state.matchResults.isNotEmpty()) {
+                MatchResultsOverlay(
+                    state = state,
+                    onNewSoloGame = onNewSoloGame,
+                    onExit = onExit,
+                    modifier = Modifier.zIndex(30f),
+                )
             }
-        }
-    }
-}
-
-@Composable
-private fun SoloCompletionCard(state: ArenaUiState, onNewGame: () -> Unit, onExit: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 18.dp,
-        shape = RoundedCornerShape(22.dp),
-        modifier = Modifier.padding(24.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(if (state.soloNewRecord) "🏆 ¡NUEVO RÉCORD!" else "🎉 ¡Sudoku completado!", style = MaterialTheme.typography.headlineSmall)
-            Text("Tiempo: ${formatDuration(state.soloElapsedMs)}", style = MaterialTheme.typography.titleLarge)
-            Text("Mejor marca: ${formatDuration(state.soloBestMs)}")
-            Text("Errores: ${state.soloErrors}")
-            Button(onClick = onNewGame, modifier = Modifier.fillMaxWidth()) { Text("Jugar otro") }
-            TextButton(onClick = onExit) { Text("Volver al inicio") }
         }
     }
 }
@@ -247,8 +234,11 @@ private fun Scoreboard(state: ArenaUiState) {
                     ) {
                         Text(player.name, maxLines = 1, style = MaterialTheme.typography.labelMedium)
                         Text("${player.score} pts", style = MaterialTheme.typography.titleMedium)
-                        if (!state.isSoloMode) {
+                        if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
                             Text("⚡ ${player.energy}%", style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (!state.isSoloMode && state.roomState?.config?.teamMode != TeamMode.FFA) {
+                            Text("Equipo ${player.teamScore}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -302,7 +292,10 @@ private fun PowerPanel(state: ArenaUiState, onUseFog: (String) -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                state.players.filter { it.id != state.playerId }.forEach { target ->
+                state.players.filter { target ->
+                    target.id != state.playerId &&
+                        (state.roomState?.config?.teamMode == TeamMode.FFA || target.teamId != ownPlayer.teamId)
+                }.forEach { target ->
                     Button(
                         onClick = { onUseFog(target.id) },
                         modifier = Modifier.weight(1f),
@@ -347,7 +340,8 @@ private fun SudokuBoard(
         for (row in 0..8) for (column in 0..8) {
             val cell = board[row][column]
             val topLeft = Offset(column * cellSize, row * cellSize)
-            val ownerColor = cell.ownerId?.let { players[it]?.colorHex }?.let(::parseColor)
+            val ownerColor = cell.ownerTeamId?.let(::teamColor)
+                ?: cell.ownerId?.let { players[it]?.colorHex }?.let(::parseColor)
             val background = when {
                 selected == CellPosition(row, column) -> Color(0xFFFFF59D)
                 cell.golden -> Color(0xFFFFD54F)
@@ -502,6 +496,13 @@ private fun emojiFor(id: String): String = REACTIONS.firstOrNull { it.first == i
 
 private fun parseColor(hex: String): Color =
     runCatching { Color(AndroidColor.parseColor(hex)) }.getOrDefault(Color.Gray)
+
+private fun teamColor(teamId: String): Color = when (teamId) {
+    "TEAM_A", "RAIDERS" -> Color(0xFF1E88E5)
+    "TEAM_B" -> Color(0xFFE53935)
+    "BOSS" -> Color(0xFFFF8F00)
+    else -> Color.Gray
+}
 
 private fun formatDuration(milliseconds: Long): String {
     val totalSeconds = (milliseconds / 1_000).coerceAtLeast(0)
