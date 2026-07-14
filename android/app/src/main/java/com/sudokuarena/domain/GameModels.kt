@@ -7,6 +7,7 @@ data class BoardCell(
     val ownerId: String? = null,
     val clearing: Boolean = false,
     val golden: Boolean = false,
+    val given: Boolean = false,
 )
 
 data class Player(
@@ -44,7 +45,8 @@ data class ConqueredSection(
 sealed interface RealtimeEvent {
     data object Connected : RealtimeEvent
     data object Disconnected : RealtimeEvent
-    data class Joined(val playerId: String, val snapshot: GameSnapshot) : RealtimeEvent
+    data class Joined(val playerId: String, val roomCode: String, val snapshot: GameSnapshot) : RealtimeEvent
+    data class RoomError(val code: String, val message: String) : RealtimeEvent
     data class StateUpdated(val snapshot: GameSnapshot) : RealtimeEvent
     data class MoveAccepted(val requestId: String, val revision: Long) : RealtimeEvent
     data class MoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
@@ -71,6 +73,8 @@ interface GameRealtimeGateway {
     val events: Flow<RealtimeEvent>
     fun connect()
     fun disconnect()
+    fun createRoom()
+    fun joinRoom(roomCode: String)
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
     fun usePower(targetPlayerId: String)
     fun sendReaction(emojiId: String)

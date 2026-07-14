@@ -27,3 +27,24 @@ export const SOLUTION: readonly (readonly number[])[] = [
   [2, 8, 7, 4, 1, 9, 6, 3, 5],
   [3, 4, 5, 2, 8, 6, 1, 7, 9]
 ] as const;
+
+/** Genera una solución válida mediante permutaciones que preservan bloques 3x3. */
+export function createRandomSolution(): number[][] {
+  const digits = shuffled([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  const rows = shuffled([0, 1, 2]).flatMap((band) =>
+    shuffled([0, 1, 2]).map((row) => band * 3 + row)
+  );
+  const columns = shuffled([0, 1, 2]).flatMap((stack) =>
+    shuffled([0, 1, 2]).map((column) => stack * 3 + column)
+  );
+  return rows.map((row) => columns.map((column) => digits[SOLUTION[row]![column]! - 1]!));
+}
+
+function shuffled<T>(values: T[]): T[] {
+  const copy = [...values];
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[target]] = [copy[target]!, copy[index]!];
+  }
+  return copy;
+}

@@ -1,6 +1,16 @@
 # Arquitectura y contrato de tiempo real
 
-## Estado público autoritativo
+## Modos de juego
+
+- **Solitario:** `RandomSudokuGenerator` crea una solución y 45 casillas vacías
+  dentro de Android. `ArenaViewModel` valida localmente, aplica el bloqueo de 3
+  segundos y persiste nickname/récord mediante `PlayerRecordStore`. No se crea
+  `SocketGameClient`.
+- **Multijugador:** Android conecta Socket.IO y solicita crear o unirse a una
+  sala. Cada sala contiene su propio `ArenaGame`, solución, jugadores, clima y
+  temporizadores; ningún evento se transmite a otras salas.
+
+## Estado público autoritativo online
 
 El servidor mantiene el tablero, energía, puntuación, bloqueo y clima. Android
 sólo envía intenciones y reemplaza su estado local al recibir un snapshot.
@@ -47,10 +57,14 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 
 | Dirección | Evento | Payload esencial |
 |---|---|---|
+| Cliente → servidor | `room:create` | sin payload |
+| Cliente → servidor | `room:join` | `{ roomCode }` |
+| Servidor → cliente | `room:joined` | `{ roomCode }` |
+| Servidor → cliente | `room:error` | `{ code, message }` |
 | Cliente → servidor | `player:place` | `{ requestId, row, column, value, clientRevision }` |
 | Cliente → servidor | `use_power` | `{ targetPlayerId }` |
 | Cliente → servidor | `send_reaction` | `{ emojiId }` |
-| Servidor → cliente | `game:joined` | `{ playerId, state }` |
+| Servidor → cliente | `game:joined` | `{ playerId, roomCode, state }` |
 | Servidor → todos | `game:state` | snapshot completo |
 | Servidor → cliente | `move:accepted` | `{ requestId, revision, cellPoints, goldenBonus }` |
 | Servidor → cliente | `move:rejected` | `{ requestId, code, message }` |
@@ -78,11 +92,13 @@ reacciones a una cada 500 ms por conexión.
 - Completar secciones mantiene el bono `100 × cantidad²` y programa su limpieza
   un segundo después.
 
-## Concurrencia y despliegue
+## Salas, concurrencia y despliegue
 
-Los listeners que mutan el juego no contienen `await`: el event loop de Node
-ordena cada jugada, poder y consumo de bonificación. La segunda jugada sobre una
-casilla ya ocupada recibe `CELL_OCCUPIED`.
+Los códigos se generan entre `1000` y `9999`, no se reutilizan mientras la sala
+exista y admiten de 2 a 4 participantes (el creador puede esperar solo). La sala
+se destruye al salir su último jugador. Los listeners que mutan el juego no
+contienen `await`: el event loop de Node ordena cada jugada, poder y consumo de
+bonificación dentro de cada sala.
 
 Esta garantía requiere una sola instancia del backend porque el estado vive en
 memoria. Para escalar horizontalmente se necesita un actor por partida o una
@@ -91,8 +107,10 @@ operación transaccional en Redis, además del adaptador Redis de Socket.IO.
 ## Responsabilidades Android
 
 - `SocketGameClient`: traduce JSON a eventos de dominio.
-- `ArenaViewModel`: conserva UI reactiva, cuenta regresiva, niebla, reacciones y
-  emite intenciones hápticas sin depender de APIs Android.
+- `ArenaViewModel`: recibe `isSoloMode`; usa `SudokuGenerator`/`PlayerRecordStore`
+  en local o `GameRealtimeGateway` online, sin depender de APIs Android.
+- `WelcomeScreen`: guarda nickname y bifurca entre Solitario, Crear Sala y
+  Unirse a Sala.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.
 - `ArenaScreen`: dibuja oro y clima, anima la limpieza, muestra reacciones y
   captura swipes rápidos del overlay de niebla.

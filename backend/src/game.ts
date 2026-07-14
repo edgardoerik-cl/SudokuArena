@@ -50,7 +50,10 @@ export class ArenaGame {
   private revision = 0;
   private activeBoardEvent: ActiveBoardEvent | null = null;
 
-  constructor(readonly gameId = "arena-main") {}
+  constructor(
+    readonly gameId = "arena-main",
+    private readonly solution: readonly (readonly number[])[] = SOLUTION
+  ) {}
 
   get playerCount(): number {
     return this.players.size;
@@ -171,7 +174,7 @@ export class ArenaGame {
       return reject(requestId, "CELL_OCCUPIED", "La casilla ya está ocupada");
     }
 
-    if (SOLUTION[proposal.row]![proposal.column] !== proposal.value) {
+    if (this.solution[proposal.row]![proposal.column] !== proposal.value) {
       const penaltyMs = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_PENALTY_MS : PENALTY_MS;
       player.blockedUntil = now + penaltyMs;
       this.revision += 1;

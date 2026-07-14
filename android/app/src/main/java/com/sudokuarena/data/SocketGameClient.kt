@@ -48,7 +48,17 @@ class SocketGameClient(
             emit(RealtimeEvent.Failure(args.firstOrNull()?.toString() ?: "Error de conexión"))
         }
         socket.on("game:joined") { args -> parseSafely(args) { payload ->
-            RealtimeEvent.Joined(payload.getString("playerId"), parseSnapshot(payload.getJSONObject("state")))
+            RealtimeEvent.Joined(
+                playerId = payload.getString("playerId"),
+                roomCode = payload.getString("roomCode"),
+                snapshot = parseSnapshot(payload.getJSONObject("state")),
+            )
+        } }
+        socket.on("room:error") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.RoomError(
+                code = payload.getString("code"),
+                message = payload.getString("message"),
+            )
         } }
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
         socket.on("move:accepted") { args -> parseSafely(args) { payload ->
@@ -124,6 +134,14 @@ class SocketGameClient(
         socket.disconnect()
     }
 
+    override fun createRoom() {
+        socket.emit("room:create")
+    }
+
+    override fun joinRoom(roomCode: String) {
+        socket.emit("room:join", JSONObject().put("roomCode", roomCode))
+    }
+
     override fun place(
         requestId: String,
         row: Int,
@@ -172,6 +190,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
                 ownerId = if (cell.isNull("ownerId")) null else cell.getString("ownerId"),
                 clearing = cell.getBoolean("clearing"),
                 golden = cell.optBoolean("golden", false),
+                given = false,
             )
         }
     }

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BOARD_SIZE, CELL_POINTS, ENERGY_PER_HIT, FOG_POWER_COST, GOLDEN_CELL_BONUS, MAX_PLAYERS, MAX_ENERGY, MIRROR_CELL_POINTS, MIRROR_PENALTY_MS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
 export class ArenaGame {
     gameId;
+    solution;
     board = Array.from({ length: BOARD_SIZE }, () => Array.from({ length: BOARD_SIZE }, () => ({
         value: null,
         ownerId: null,
@@ -13,8 +14,9 @@ export class ArenaGame {
     processedRequests = new Map();
     revision = 0;
     activeBoardEvent = null;
-    constructor(gameId = "arena-main") {
+    constructor(gameId = "arena-main", solution = SOLUTION) {
         this.gameId = gameId;
+        this.solution = solution;
     }
     get playerCount() {
         return this.players.size;
@@ -132,7 +134,7 @@ export class ArenaGame {
         if (cell.value !== null) {
             return reject(requestId, "CELL_OCCUPIED", "La casilla ya está ocupada");
         }
-        if (SOLUTION[proposal.row][proposal.column] !== proposal.value) {
+        if (this.solution[proposal.row][proposal.column] !== proposal.value) {
             const penaltyMs = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_PENALTY_MS : PENALTY_MS;
             player.blockedUntil = now + penaltyMs;
             this.revision += 1;

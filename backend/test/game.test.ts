@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ArenaGame } from "../src/game.js";
-import { SOLUTION } from "../src/constants.js";
+import { SOLUTION, createRandomSolution } from "../src/constants.js";
 
 describe("ArenaGame", () => {
+  it("genera soluciones aleatorias válidas para salas independientes", () => {
+    const solution = createRandomSolution();
+    const expected = "123456789";
+    assert.equal(solution.length, 9);
+    for (const row of solution) assert.equal([...row].sort().join(""), expected);
+    for (let column = 0; column < 9; column += 1) {
+      assert.equal(solution.map((row) => row[column]).sort().join(""), expected);
+    }
+    for (let box = 0; box < 9; box += 1) {
+      const values: number[] = [];
+      const startRow = Math.floor(box / 3) * 3;
+      const startColumn = (box % 3) * 3;
+      for (let row = startRow; row < startRow + 3; row += 1) {
+        for (let column = startColumn; column < startColumn + 3; column += 1) values.push(solution[row]![column]!);
+      }
+      assert.equal(values.sort().join(""), expected);
+    }
+  });
+
   it("acepta al primero y rechaza al segundo en la misma casilla", () => {
     const game = new ArenaGame();
     game.addPlayer("p1", "Ada");

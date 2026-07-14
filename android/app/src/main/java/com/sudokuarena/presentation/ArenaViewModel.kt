@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.sudokuarena.domain.ActiveBoardEvent
 import com.sudokuarena.domain.BoardCell
-import com.sudokuarena.domain.BoardEventType
 import com.sudokuarena.domain.ConqueredSection
 import com.sudokuarena.domain.GameRealtimeGateway
 import com.sudokuarena.domain.GameSnapshot
 import com.sudokuarena.domain.Player
+import com.sudokuarena.domain.PlayerRecordStore
 import com.sudokuarena.domain.RealtimeEvent
+import com.sudokuarena.domain.SudokuGenerator
+import com.sudokuarena.domain.SudokuPuzzle
 import java.util.UUID
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -28,13 +30,12 @@ data class CellPosition(val row: Int, val column: Int)
 
 enum class HapticCue { CLICK, DANGER, CRESCENDO }
 
-data class ReactionUi(
-    val reactionId: String,
-    val emojiId: String,
-)
+data class ReactionUi(val reactionId: String, val emojiId: String)
 
 data class ArenaUiState(
+    val isSoloMode: Boolean = false,
     val connected: Boolean = false,
+    val roomCode: String? = null,
     val playerId: String? = null,
     val revision: Long = 0,
     val board: List<List<BoardCell>> = emptyBoard(),
@@ -47,20 +48,35 @@ data class ArenaUiState(
     val fogSwipesRemaining: Int = 0,
     val reactions: Map<String, ReactionUi> = emptyMap(),
     val conquestMessage: String? = null,
+    val soloElapsedMs: Long = 0,
+    val soloErrors: Int = 0,
+    val soloCompleted: Boolean = false,
+    val soloBestMs: Long = 0,
+    val soloNewRecord: Boolean = false,
     val message: String? = null,
 ) {
     val canPlay: Boolean
-        get() = connected && selected != null && pendingRequestId == null &&
-            penaltyRemainingMs == 0L && fogSwipesRemaining == 0
+        get() = connected && (isSoloMode || (playerId != null && players.size >= 2)) && selected != null &&
+            pendingRequestId == null && penaltyRemainingMs == 0L &&
+            fogSwipesRemaining == 0 && !soloCompleted
 
     val ownPlayer: Player?
         get() = players.firstOrNull { it.id == playerId }
 }
 
 class ArenaViewModel(
-    private val gateway: GameRealtimeGateway,
+    private val isSoloMode: Boolean,
+    private val gateway: GameRealtimeGateway?,
+    private val sudokuGenerator: SudokuGenerator,
+    private val recordStore: PlayerRecordStore,
+    private val requestedRoomCode: String? = null,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(ArenaUiState())
+    private val mutableState = MutableStateFlow(
+        ArenaUiState(
+            isSoloMode = isSoloMode,
+            soloBestMs = recordStore.soloBestMs(),
+        ),
+    )
     val state: StateFlow<ArenaUiState> = mutableState.asStateFlow()
 
     private val mutableHaptics = MutableSharedFlow<HapticCue>(
@@ -72,24 +88,36 @@ class ArenaViewModel(
     private var blockedUntil = 0L
     private var serverClockOffsetMs = 0L
     private var nearCompletionKeys: Set<String> = emptySet()
+    private var soloPuzzle: SudokuPuzzle? = null
+    private var soloStartedAt = 0L
+    private var roomRequestSent = false
+    private var reconnectRoomCode = requestedRoomCode
 
     init {
-        viewModelScope.launch { gateway.events.collect(::handleEvent) }
+        if (isSoloMode) {
+            startSoloGame()
+        } else {
+            val onlineGateway = requireNotNull(gateway) { "El modo online requiere GameRealtimeGateway" }
+            viewModelScope.launch { onlineGateway.events.collect(::handleEvent) }
+            onlineGateway.connect()
+        }
         viewModelScope.launch {
             while (isActive) {
-                val serverNow = System.currentTimeMillis() + serverClockOffsetMs
+                val now = serverNow()
                 mutableState.update { current ->
                     current.copy(
-                        penaltyRemainingMs = (blockedUntil - serverNow).coerceAtLeast(0),
+                        penaltyRemainingMs = (blockedUntil - now).coerceAtLeast(0),
                         boardEventRemainingMs = current.boardEvent
-                            ?.let { (it.endsAt - serverNow).coerceAtLeast(0) }
+                            ?.let { (it.endsAt - now).coerceAtLeast(0) }
                             ?: 0,
+                        soloElapsedMs = if (current.isSoloMode && !current.soloCompleted) {
+                            (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
+                        } else current.soloElapsedMs,
                     )
                 }
                 delay(100)
             }
         }
-        gateway.connect()
     }
 
     fun select(row: Int, column: Int) {
@@ -104,27 +132,37 @@ class ArenaViewModel(
         val current = mutableState.value
         val selected = current.selected ?: return
         if (!current.canPlay || value !in 1..9) return
-
         mutableHaptics.tryEmit(HapticCue.CLICK)
+
+        if (isSoloMode) {
+            placeSolo(selected, value)
+            return
+        }
+
         val requestId = UUID.randomUUID().toString()
         mutableState.update { it.copy(pendingRequestId = requestId, message = null) }
-        // No hay escritura optimista: el snapshot del servidor resuelve carreras.
-        gateway.place(requestId, selected.row, selected.column, value, current.revision)
+        gateway?.place(requestId, selected.row, selected.column, value, current.revision)
+    }
+
+    fun newSoloGame() {
+        if (isSoloMode) startSoloGame()
     }
 
     fun useFog(targetPlayerId: String) {
+        if (isSoloMode) return
         val current = mutableState.value
         if (current.ownPlayer?.energy != 100 || targetPlayerId == current.playerId) return
-        gateway.usePower(targetPlayerId)
+        gateway?.usePower(targetPlayerId)
         mutableState.update { it.copy(message = "Lanzando niebla…") }
     }
 
     fun sendReaction(emojiId: String) {
-        if (emojiId !in ALLOWED_REACTIONS) return
-        gateway.sendReaction(emojiId)
+        if (isSoloMode || emojiId !in ALLOWED_REACTIONS) return
+        gateway?.sendReaction(emojiId)
     }
 
     fun cleanFogSwipe() {
+        if (isSoloMode) return
         mutableState.update { current ->
             val remaining = (current.fogSwipesRemaining - 1).coerceAtLeast(0)
             current.copy(
@@ -134,16 +172,96 @@ class ArenaViewModel(
         }
     }
 
+    private fun startSoloGame() {
+        soloPuzzle = sudokuGenerator.generate()
+        soloStartedAt = System.currentTimeMillis()
+        blockedUntil = 0
+        nearCompletionKeys = emptySet()
+        val board = soloPuzzle!!.initialBoard.map { row ->
+            row.map { value ->
+                BoardCell(value = value, ownerId = null, given = value != null)
+            }
+        }
+        mutableState.value = ArenaUiState(
+            isSoloMode = true,
+            connected = true,
+            roomCode = null,
+            playerId = SOLO_PLAYER_ID,
+            board = board,
+            players = listOf(soloPlayer(score = 0)),
+            soloBestMs = recordStore.soloBestMs(),
+        )
+    }
+
+    private fun placeSolo(position: CellPosition, value: Int) {
+        val puzzle = soloPuzzle ?: return
+        if (puzzle.solution[position.row][position.column] != value) {
+            blockedUntil = System.currentTimeMillis() + SOLO_PENALTY_MS
+            mutableHaptics.tryEmit(HapticCue.DANGER)
+            mutableState.update {
+                it.copy(
+                    selected = null,
+                    soloErrors = it.soloErrors + 1,
+                    message = "Número incorrecto: bloqueo de 3 segundos",
+                )
+            }
+            return
+        }
+
+        mutableState.update { current ->
+            val updatedBoard = current.board.mapIndexed { row, cells ->
+                if (row != position.row) cells else cells.mapIndexed { column, cell ->
+                    if (column == position.column) cell.copy(value = value, ownerId = SOLO_PLAYER_ID) else cell
+                }
+            }
+            val updatedScore = (current.ownPlayer?.score ?: 0) + 10
+            current.copy(
+                board = updatedBoard,
+                players = listOf(soloPlayer(updatedScore)),
+                selected = null,
+                revision = current.revision + 1,
+                message = null,
+            )
+        }
+        emitNearCompletionIfNeeded(mutableState.value.board)
+        if (mutableState.value.board.all { row -> row.all { it.value != null } }) finishSoloGame()
+    }
+
+    private fun finishSoloGame() {
+        val elapsed = (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
+        val newRecord = recordStore.recordSoloTime(elapsed)
+        mutableState.update {
+            it.copy(
+                soloCompleted = true,
+                soloElapsedMs = elapsed,
+                soloBestMs = recordStore.soloBestMs(),
+                soloNewRecord = newRecord,
+                selected = null,
+            )
+        }
+    }
+
     private fun handleEvent(event: RealtimeEvent) {
         when (event) {
-            RealtimeEvent.Connected -> mutableState.update { it.copy(connected = true, message = null) }
-            RealtimeEvent.Disconnected -> mutableState.update {
-                it.copy(connected = false, pendingRequestId = null, message = "Reconectando…")
+            RealtimeEvent.Connected -> {
+                mutableState.update { it.copy(connected = true, message = "Entrando a la sala…") }
+                if (!roomRequestSent) {
+                    roomRequestSent = true
+                    reconnectRoomCode?.let { gateway?.joinRoom(it) } ?: gateway?.createRoom()
+                }
+            }
+            RealtimeEvent.Disconnected -> {
+                roomRequestSent = false
+                mutableState.update {
+                    it.copy(connected = false, playerId = null, pendingRequestId = null, message = "Reconectando…")
+                }
             }
             is RealtimeEvent.Joined -> {
-                mutableState.update { it.copy(playerId = event.playerId) }
+                reconnectRoomCode = event.roomCode
+                mutableState.update { it.copy(playerId = event.playerId, roomCode = event.roomCode, message = null) }
                 applySnapshot(event.snapshot)
             }
+            is RealtimeEvent.RoomError -> mutableState.update { it.copy(message = event.message) }
             is RealtimeEvent.StateUpdated -> applySnapshot(event.snapshot)
             is RealtimeEvent.MoveAccepted -> mutableState.update {
                 if (it.pendingRequestId == event.requestId) it.copy(pendingRequestId = null, selected = null) else it
@@ -159,25 +277,21 @@ class ArenaViewModel(
                 mutableState.update { it.copy(pendingRequestId = null, selected = null) }
             }
             is RealtimeEvent.SectionConquered -> showConquest(event)
-            is RealtimeEvent.PowerReceived -> {
-                if (event.type == "FOG") {
-                    mutableHaptics.tryEmit(HapticCue.DANGER)
-                    mutableState.update {
-                        it.copy(
-                            selected = null,
-                            fogSwipesRemaining = FOG_SWIPES,
-                            message = "¡Ataque de niebla! Desliza rápido para limpiar la tinta",
-                        )
-                    }
+            is RealtimeEvent.PowerReceived -> if (event.type == "FOG") {
+                mutableHaptics.tryEmit(HapticCue.DANGER)
+                mutableState.update {
+                    it.copy(
+                        selected = null,
+                        fogSwipesRemaining = FOG_SWIPES,
+                        message = "¡Ataque de niebla! Desliza rápido para limpiar la tinta",
+                    )
                 }
             }
             is RealtimeEvent.PowerRejected -> mutableState.update { it.copy(message = event.message) }
             is RealtimeEvent.BoardEventStarted -> mutableState.update {
                 it.copy(boardEvent = event.event, boardEventRemainingMs = event.event.endsAt - serverNow())
             }
-            is RealtimeEvent.BoardEventEnded -> mutableState.update {
-                it.copy(boardEvent = null, boardEventRemainingMs = 0)
-            }
+            is RealtimeEvent.BoardEventEnded -> mutableState.update { it.copy(boardEvent = null, boardEventRemainingMs = 0) }
             is RealtimeEvent.ReactionReceived -> showReaction(event)
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }
@@ -213,13 +327,7 @@ class ArenaViewModel(
         serverClockOffsetMs = snapshot.serverTime - System.currentTimeMillis()
         val ownId = mutableState.value.playerId
         blockedUntil = snapshot.players.firstOrNull { it.id == ownId }?.blockedUntil ?: blockedUntil
-
-        val currentNearCompletionKeys = nearCompletions(snapshot.board)
-        if ((currentNearCompletionKeys - nearCompletionKeys).isNotEmpty()) {
-            mutableHaptics.tryEmit(HapticCue.CRESCENDO)
-        }
-        nearCompletionKeys = currentNearCompletionKeys
-
+        emitNearCompletionIfNeeded(snapshot.board)
         mutableState.update { current ->
             val selected = current.selected?.takeIf { position ->
                 snapshot.board[position.row][position.column].let { it.value == null && !it.clearing }
@@ -231,30 +339,58 @@ class ArenaViewModel(
                 boardEvent = snapshot.boardEvent,
                 boardEventRemainingMs = snapshot.boardEvent?.let { (it.endsAt - serverNow()).coerceAtLeast(0) } ?: 0,
                 selected = selected,
-                message = current.message.takeUnless { it == "Lanzando niebla…" },
+                message = current.message.takeUnless { it == "Lanzando niebla…" || it == "Entrando a la sala…" },
             )
         }
+    }
+
+    private fun emitNearCompletionIfNeeded(board: List<List<BoardCell>>) {
+        val currentKeys = nearCompletions(board)
+        if ((currentKeys - nearCompletionKeys).isNotEmpty()) mutableHaptics.tryEmit(HapticCue.CRESCENDO)
+        nearCompletionKeys = currentKeys
     }
 
     private fun serverNow(): Long = System.currentTimeMillis() + serverClockOffsetMs
 
     override fun onCleared() {
-        gateway.disconnect()
+        gateway?.disconnect()
         super.onCleared()
     }
 
     companion object {
         private const val FOG_SWIPES = 6
+        private const val SOLO_PENALTY_MS = 3_000L
+        private const val SOLO_PLAYER_ID = "solo"
         private val ALLOWED_REACTIONS = setOf("LAUGH", "CRY", "ANGRY", "SURPRISED")
 
-        fun factory(gateway: GameRealtimeGateway): ViewModelProvider.Factory =
-            object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T =
-                    ArenaViewModel(gateway) as T
-            }
+        fun factory(
+            isSoloMode: Boolean,
+            gateway: GameRealtimeGateway?,
+            sudokuGenerator: SudokuGenerator,
+            recordStore: PlayerRecordStore,
+            requestedRoomCode: String? = null,
+        ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = ArenaViewModel(
+                isSoloMode = isSoloMode,
+                gateway = gateway,
+                sudokuGenerator = sudokuGenerator,
+                recordStore = recordStore,
+                requestedRoomCode = requestedRoomCode,
+            ) as T
+        }
     }
 }
+
+private fun soloPlayer(score: Int): Player = Player(
+    id = "solo",
+    name = "Tú",
+    slot = 0,
+    colorHex = "#1E88E5",
+    score = score,
+    blockedUntil = 0,
+    energy = 0,
+)
 
 private fun emptyBoard(): List<List<BoardCell>> = List(9) { List(9) { BoardCell() } }
 
@@ -263,6 +399,7 @@ private fun friendlyRejectionMessage(code: String, fallback: String): String = w
     "CELL_CLEARING" -> "Espera a que termine la conquista"
     "INCORRECT_VALUE" -> "Número incorrecto: bloqueo temporal"
     "BLOCKED" -> "Aún estás bloqueado"
+    "WAITING_FOR_PLAYERS" -> "Esperando al menos un rival"
     else -> fallback
 }
 
