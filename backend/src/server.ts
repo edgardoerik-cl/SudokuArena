@@ -15,6 +15,7 @@ import type {
   BotDifficulty,
   BoardEventType,
   PlaceProposal,
+  PlaceResult,
   PowerProposal,
   ReactionEmoji,
   ReactionProposal,
@@ -28,6 +29,8 @@ import type {
 interface BotRuntime {
   timer: NodeJS.Timeout | null;
   disabledUntil: number;
+  lastProgressAt: number;
+  failedActions: number;
 }
 
 interface RoomRuntime {
@@ -143,20 +146,37 @@ io.on("connection", (socket) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
     if (room.phase !== "PLAYING") return emitRoomError(socket, "MATCH_NOT_PLAYING", "La partida no está en curso");
-    const result = room.game.useFogPower(socket.id, payload?.targetPlayerId);
+    const powerType = payload?.type ?? "FOG";
+    if (powerType !== "FOG" && powerType !== "REFLECT" && powerType !== "REVEAL") {
+      socket.emit("power_rejected", { code: "INVALID_POWER", message: "Poder no permitido" });
+      return;
+    }
+    const result = powerType === "REFLECT"
+      ? room.game.useReflectPower(socket.id)
+      : powerType === "REVEAL"
+        ? room.game.useRevealPower(socket.id, payload?.row, payload?.column, payload?.requestId)
+        : room.game.useFogPower(socket.id, payload?.targetPlayerId);
     if (!result.accepted) {
       socket.emit("power_rejected", { code: result.code, message: result.message });
       return;
     }
-
-    socket.emit("power_used", { type: result.type, targetPlayerId: result.targetPlayerId });
-    const targetedBot = room.bots.get(result.targetPlayerId);
-    if (targetedBot) targetedBot.disabledUntil = Date.now() + 4_000;
-    io.to(result.targetPlayerId).emit("power_received", {
-      type: result.type,
-      attackerId: result.attackerId
-    });
-    emitState(room);
+    if (result.type === "FOG") {
+      socket.emit("power_used", {
+        type: result.type,
+        targetPlayerId: result.targetPlayerId,
+        reflected: result.reflected
+      });
+      applyFogDelivery(room, result.attackerId, result.recipientPlayerId, result.reflected ? result.targetPlayerId : undefined);
+      emitState(room);
+      return;
+    }
+    if (result.type === "REFLECT") {
+      socket.emit("power_used", { type: result.type, shieldUntil: result.shieldUntil });
+      emitState(room);
+      return;
+    }
+    socket.emit("power_used", { type: result.type, row: payload.row, column: payload.column });
+    publishAcceptedPlacement(room, socket.id, result.placement);
   });
 
   socket.on("send_reaction", (payload: ReactionProposal) => {
@@ -333,7 +353,7 @@ function fillRoomWithBots(room: RoomRuntime): void {
     const player = room.game.addPlayer(id, baseName, true);
     if (!player) break;
     usedNames.add(player.name);
-    room.bots.set(id, { timer: null, disabledUntil: 0 });
+    room.bots.set(id, { timer: null, disabledUntil: 0, lastProgressAt: Date.now(), failedActions: 0 });
   }
   emitState(room);
   emitRoomState(room);
@@ -348,7 +368,7 @@ function resolveBossPlayerId(room: RoomRuntime): string {
   return room.hostPlayerId;
 }
 
-function processPlacement(room: RoomRuntime, playerId: string, payload: PlaceProposal, responder?: Socket): void {
+function processPlacement(room: RoomRuntime, playerId: string, payload: PlaceProposal, responder?: Socket): PlaceResult {
   // El event loop conserva orden estricto tanto para sockets como para timers IA.
   const result = room.game.place(playerId, payload);
   if (!result.accepted) {
@@ -365,9 +385,19 @@ function processPlacement(room: RoomRuntime, playerId: string, payload: PlacePro
       });
     }
     if (result.stateChanged) emitState(room);
-    return;
+    return result;
   }
 
+  publishAcceptedPlacement(room, playerId, result, responder);
+  return result;
+}
+
+function publishAcceptedPlacement(
+  room: RoomRuntime,
+  playerId: string,
+  result: Extract<PlaceResult, { accepted: true }>,
+  responder?: Socket
+): void {
   responder?.emit("move:accepted", {
     requestId: result.requestId,
     revision: result.revision,
@@ -402,11 +432,72 @@ function scheduleBotAction(room: RoomRuntime, botId: string): void {
   runtime.timer = setTimeout(() => {
     runtime.timer = null;
     if (rooms.get(room.code) !== room || room.phase !== "PLAYING") return;
-    runBotPower(room, botId);
-    const proposal = room.game.createBotProposal(botId, profile.accuracy);
-    if (proposal) processPlacement(room, botId, proposal);
+    if (!runBotSupportPower(room, botId, runtime)) {
+      runBotPower(room, botId);
+      const proposal = room.game.createBotProposal(botId, profile.accuracy);
+      if (proposal) {
+        const result = processPlacement(room, botId, proposal);
+        if (result.accepted) {
+          runtime.lastProgressAt = Date.now();
+          runtime.failedActions = 0;
+        } else if (result.code !== "BLOCKED") {
+          runtime.failedActions += 1;
+        }
+      }
+    }
     scheduleBotAction(room, botId);
   }, delay);
+}
+
+function runBotSupportPower(room: RoomRuntime, botId: string, runtime: BotRuntime): boolean {
+  if (!room.config.powersEnabled) return false;
+  const now = Date.now();
+  const snapshot = room.game.snapshot(now);
+  const bot = snapshot.players.find((player) => player.id === botId);
+  if (!bot) return false;
+  const rivals = snapshot.players.filter((player) =>
+    player.id !== botId && (room.config.teamMode === "FFA" || player.teamId !== bot.teamId)
+  );
+
+  if (bot.energy >= 100 && bot.shieldUntil <= now && rivals.some((player) => player.energy >= 100)) {
+    const shield = room.game.useReflectPower(botId, now);
+    if (shield.accepted && shield.type === "REFLECT") {
+      emitState(room);
+      return true;
+    }
+  }
+
+  const stuck = runtime.failedActions >= 2 || now - runtime.lastProgressAt >= 7_000;
+  if (bot.energy >= 50 && stuck) {
+    const target = room.game.createBotProposal(botId, 1);
+    if (target) {
+      const reveal = room.game.useRevealPower(botId, target.row, target.column, `bot-reveal-${randomUUID()}`, now);
+      if (reveal.accepted && reveal.type === "REVEAL") {
+        publishAcceptedPlacement(room, botId, reveal.placement);
+        runtime.lastProgressAt = now;
+        runtime.failedActions = 0;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function applyFogDelivery(
+  room: RoomRuntime,
+  attackerId: string,
+  recipientPlayerId: string,
+  reflectedBy?: string
+): void {
+  const targetedBot = room.bots.get(recipientPlayerId);
+  if (targetedBot) targetedBot.disabledUntil = Date.now() + 4_000;
+  io.to(recipientPlayerId).emit("power_received", {
+    type: "FOG",
+    attackerId,
+    reflected: reflectedBy !== undefined,
+    reflectedBy
+  });
+  if (reflectedBy) io.to(reflectedBy).emit("power_reflected", { attackerId });
 }
 
 function runBotPower(room: RoomRuntime, botId: string): void {
@@ -420,8 +511,8 @@ function runBotPower(room: RoomRuntime, botId: string): void {
   const target = targets[Math.floor(Math.random() * targets.length)];
   if (!target) return;
   const result = room.game.useFogPower(botId, target.id);
-  if (!result.accepted) return;
-  io.to(target.id).emit("power_received", { type: result.type, attackerId: botId });
+  if (!result.accepted || result.type !== "FOG") return;
+  applyFogDelivery(room, botId, result.recipientPlayerId, result.reflected ? result.targetPlayerId : undefined);
   emitState(room);
 }
 

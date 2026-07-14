@@ -40,6 +40,7 @@ export interface PlayerState {
   role: PlayerRole;
   teamScore: number;
   isBot: boolean;
+  shieldUntil: number;
 }
 
 export type BoardEventType = "MIRROR_HOUR" | "GOLDEN_CELLS";
@@ -68,7 +69,11 @@ export interface PlaceProposal {
 }
 
 export interface PowerProposal {
-  targetPlayerId: string;
+  type?: "FOG" | "REFLECT" | "REVEAL";
+  targetPlayerId?: string;
+  row?: number;
+  column?: number;
+  requestId?: string;
 }
 
 export type ReactionEmoji = "LAUGH" | "CRY" | "ANGRY" | "SURPRISED";
@@ -137,14 +142,31 @@ export type PowerRejectionCode =
   | "NOT_ENOUGH_ENERGY"
   | "INVALID_TARGET"
   | "POWER_DISABLED"
-  | "SAME_TEAM";
+  | "SAME_TEAM"
+  | "INVALID_CELL"
+  | "CELL_UNAVAILABLE"
+  | "PLAYER_BLOCKED";
 
 export type PowerResult =
   | {
       accepted: true;
       attackerId: string;
       targetPlayerId: string;
+      recipientPlayerId: string;
+      reflected: boolean;
       type: "FOG";
+    }
+  | {
+      accepted: true;
+      playerId: string;
+      shieldUntil: number;
+      type: "REFLECT";
+    }
+  | {
+      accepted: true;
+      playerId: string;
+      placement: Extract<PlaceResult, { accepted: true }>;
+      type: "REVEAL";
     }
   | {
       accepted: false;

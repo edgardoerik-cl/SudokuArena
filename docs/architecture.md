@@ -84,7 +84,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → sala | `room:state` | configuración, fase y tiempos |
 | Servidor → cliente | `room:error` | `{ code, message }` |
 | Cliente → servidor | `player:place` | `{ requestId, row, column, value, clientRevision }` |
-| Cliente → servidor | `use_power` | `{ targetPlayerId }` |
+| Cliente → servidor | `use_power` | `{ type, targetPlayerId?, row?, column?, requestId? }` |
 | Cliente → servidor | `send_reaction` | `{ emojiId }` |
 | Servidor → cliente | `game:joined` | `{ playerId, roomCode, state }` |
 | Servidor → todos | `game:state` | snapshot completo |
@@ -93,6 +93,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → cliente | `player:penalty` | `{ requestId, blockedUntil, reason }` |
 | Servidor → todos | `game:section-conquered` | `{ playerId, sections, bonus, clearAt }` |
 | Servidor → rival | `power_received` | `{ type: "FOG", attackerId }` |
+| Servidor → defensor | `power_reflected` | `{ attackerId }` |
 | Servidor → atacante | `power_used` / `power_rejected` | resultado del poder |
 | Servidor → todos | `board_event_start` | `{ eventType, startedAt, endsAt }` |
 | Servidor → todos | `board_event_end` | `{ eventType }` |
@@ -106,8 +107,11 @@ reacciones a una cada 500 ms por conexión.
 ## Reglas competitivas
 
 - Cada acierto entrega 10 puntos y 25 de energía, hasta un máximo de 100.
-- Niebla cuesta 100 de energía, exige un rival conectado y no permite atacarse
-  a sí mismo.
+- Niebla cuesta 100 de energía, exige un rival y se devuelve al atacante si el
+  objetivo mantiene un Escudo de Espejo activo.
+- Escudo de Espejo cuesta 100 y protege durante cinco segundos.
+- Ojo de Lince cuesta 50, coloca la solución de la casilla seleccionada desde el
+  servidor y concede puntos sin recargar energía por esa colocación automática.
 - Cada 45 segundos comienza un evento aleatorio de 10 segundos.
 - Hora Espejo entrega 20 puntos por acierto y amplía el bloqueo por error de 3
   a 6 segundos.
@@ -131,6 +135,8 @@ bonificación dentro de cada sala.
 - `EASY`, `MEDIUM` y `HARD` controlan el intervalo y la probabilidad de acierto.
 - El Bot sólo genera una propuesta; `ArenaGame.place` valida y aplica exactamente
   las mismas carreras, puntos, energía, error y bloqueo que para un socket humano.
+- Activa Escudo si detecta un rival con energía completa y usa Ojo de Lince tras
+  dos intentos fallidos o siete segundos sin progreso.
 - Tres humanos en 3v1 reciben un Jefe IA. Con un humano, éste es Jefe contra tres
   Bots. Las victorias de Bots no se registran en el Cuadro de Honor.
 

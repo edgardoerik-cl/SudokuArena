@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BOARD_SIZE, CELL_POINTS, ENERGY_PER_HIT, FOG_POWER_COST, GOLDEN_CELL_BONUS, MAX_PLAYERS, MAX_ENERGY, MIRROR_CELL_POINTS, MIRROR_PENALTY_MS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
+import { BOARD_SIZE, CELL_POINTS, ENERGY_PER_HIT, FOG_POWER_COST, REFLECT_POWER_COST, REVEAL_POWER_COST, REFLECT_DURATION_MS, GOLDEN_CELL_BONUS, MAX_PLAYERS, MAX_ENERGY, MIRROR_CELL_POINTS, MIRROR_PENALTY_MS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
 export class ArenaGame {
     gameId;
     solution;
@@ -48,7 +48,8 @@ export class ArenaGame {
             teamId: `PLAYER:${id}`,
             role: "PLAYER",
             teamScore: 0,
-            isBot
+            isBot,
+            shieldUntil: 0
         };
         this.players.set(id, player);
         this.processedRequests.set(id, new Set());
@@ -67,6 +68,7 @@ export class ArenaGame {
             player.teamScore = 0;
             player.energy = 0;
             player.blockedUntil = 0;
+            player.shieldUntil = 0;
             this.teamScores.set(player.teamId, 0);
         }
         this.revision += 1;
@@ -155,7 +157,7 @@ export class ArenaGame {
         this.revision += 1;
         return true;
     }
-    useFogPower(playerId, targetPlayerId) {
+    useFogPower(playerId, targetPlayerId, now = Date.now()) {
         const player = this.players.get(playerId);
         if (!player)
             return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
@@ -176,10 +178,69 @@ export class ArenaGame {
             return powerReject("NOT_ENOUGH_ENERGY", "Necesitas 100% de energía");
         }
         player.energy -= FOG_POWER_COST;
+        const reflected = target.shieldUntil > now;
+        const recipientPlayerId = reflected ? playerId : target.id;
         this.revision += 1;
-        return { accepted: true, attackerId: playerId, targetPlayerId, type: "FOG" };
+        return {
+            accepted: true,
+            attackerId: playerId,
+            targetPlayerId: target.id,
+            recipientPlayerId,
+            reflected,
+            type: "FOG"
+        };
     }
-    place(playerId, proposal, now = Date.now()) {
+    useReflectPower(playerId, now = Date.now()) {
+        const player = this.players.get(playerId);
+        if (!player)
+            return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
+        if (!this.configuration.powersEnabled)
+            return powerReject("POWER_DISABLED", "Los poderes están desactivados");
+        if (player.blockedUntil > now)
+            return powerReject("PLAYER_BLOCKED", "No puedes activar poderes mientras estás bloqueado");
+        if (player.energy < REFLECT_POWER_COST)
+            return powerReject("NOT_ENOUGH_ENERGY", "Necesitas 100% de energía");
+        player.energy -= REFLECT_POWER_COST;
+        player.shieldUntil = now + REFLECT_DURATION_MS;
+        this.revision += 1;
+        return { accepted: true, playerId, shieldUntil: player.shieldUntil, type: "REFLECT" };
+    }
+    useRevealPower(playerId, row, column, requestId, now = Date.now()) {
+        const player = this.players.get(playerId);
+        if (!player)
+            return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
+        if (!this.configuration.powersEnabled)
+            return powerReject("POWER_DISABLED", "Los poderes están desactivados");
+        if (player.blockedUntil > now)
+            return powerReject("PLAYER_BLOCKED", "No puedes activar poderes mientras estás bloqueado");
+        if (player.energy < REVEAL_POWER_COST)
+            return powerReject("NOT_ENOUGH_ENERGY", "Necesitas 50% de energía");
+        if (!Number.isInteger(row) ||
+            !Number.isInteger(column) ||
+            Number(row) < 0 ||
+            Number(row) >= BOARD_SIZE ||
+            Number(column) < 0 ||
+            Number(column) >= BOARD_SIZE) {
+            return powerReject("INVALID_CELL", "Selecciona una casilla válida");
+        }
+        const target = this.board[Number(row)][Number(column)];
+        if (target.value !== null || target.clearTokens.size > 0) {
+            return powerReject("CELL_UNAVAILABLE", "La casilla seleccionada no está disponible");
+        }
+        player.energy -= REVEAL_POWER_COST;
+        const placement = this.place(playerId, {
+            requestId: typeof requestId === "string" && requestId.length > 0 ? requestId : `reveal-${randomUUID()}`,
+            row: Number(row),
+            column: Number(column),
+            value: this.solution[Number(row)][Number(column)]
+        }, now, { grantEnergy: false });
+        if (!placement.accepted) {
+            player.energy = Math.min(MAX_ENERGY, player.energy + REVEAL_POWER_COST);
+            return powerReject("CELL_UNAVAILABLE", placement.message);
+        }
+        return { accepted: true, playerId, placement, type: "REVEAL" };
+    }
+    place(playerId, proposal, now = Date.now(), options = {}) {
         const requestId = typeof proposal?.requestId === "string" ? proposal.requestId : "";
         if (!isValidProposal(proposal)) {
             return reject(requestId, "INVALID_PAYLOAD", "Jugada fuera de rango o mal formada");
@@ -224,7 +285,7 @@ export class ArenaGame {
         const goldenBonus = cell.golden ? GOLDEN_CELL_BONUS : 0;
         cell.golden = false;
         player.score += cellPoints + goldenBonus;
-        if (this.configuration.powersEnabled) {
+        if (this.configuration.powersEnabled && options.grantEnergy !== false) {
             player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_PER_HIT * bossMultiplier);
         }
         const sections = this.completedSections(proposal.row, proposal.column);

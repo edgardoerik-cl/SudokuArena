@@ -93,6 +93,46 @@ describe("ArenaGame", () => {
     assert.equal(game.snapshot().players.find((player) => player.id === "p1")?.energy, 0);
   });
 
+  it("refleja Niebla contra el atacante durante el Escudo de Espejo", () => {
+    const game = new ArenaGame();
+    game.addPlayer("attacker", "Atacante");
+    game.addPlayer("defender", "Defensor");
+    for (let column = 0; column < 4; column += 1) {
+      game.place("attacker", { requestId: `a-${column}`, row: 0, column, value: SOLUTION[0]![column]! });
+      game.place("defender", { requestId: `d-${column}`, row: 1, column, value: SOLUTION[1]![column]! });
+    }
+    const shield = game.useReflectPower("defender", 10_000);
+    assert.equal(shield.accepted, true);
+    const fog = game.useFogPower("attacker", "defender", 12_000);
+    assert.equal(fog.accepted, true);
+    if (fog.accepted && fog.type === "FOG") {
+      assert.equal(fog.reflected, true);
+      assert.equal(fog.recipientPlayerId, "attacker");
+    }
+  });
+
+  it("Ojo de Lince coloca la solución, da puntos y consume exactamente 50 de energía", () => {
+    const game = new ArenaGame();
+    game.addPlayer("p1", "Ada");
+    game.place("p1", { requestId: "charge-1", row: 0, column: 0, value: SOLUTION[0]![0]! });
+    game.place("p1", { requestId: "charge-2", row: 0, column: 1, value: SOLUTION[0]![1]! });
+    const reveal = game.useRevealPower("p1", 0, 2, "reveal", 5_000);
+    assert.equal(reveal.accepted, true);
+    const state = game.snapshot();
+    assert.equal(state.board[0]![2]!.value, SOLUTION[0]![2]);
+    assert.equal(state.board[0]![2]!.ownerId, "p1");
+    assert.equal(state.players[0]?.score, 30);
+    assert.equal(state.players[0]?.energy, 0);
+  });
+
+  it("asigna los cuatro colores neón de identidad sin repetir", () => {
+    const game = new ArenaGame();
+    for (const id of ["p1", "p2", "p3", "p4"]) game.addPlayer(id, id);
+    assert.deepEqual(game.snapshot().players.map((player) => player.color), [
+      "#00A8FF", "#FF2DAA", "#00C853", "#FF8A00"
+    ]);
+  });
+
   it("aplica puntos dobles y penalización de seis segundos en Hora Espejo", () => {
     const game = new ArenaGame();
     game.addPlayer("p1", "Ada");

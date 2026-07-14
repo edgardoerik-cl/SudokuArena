@@ -123,7 +123,18 @@ class SocketGameClient(
             RealtimeEvent.PowerReceived(
                 attackerId = payload.getString("attackerId"),
                 type = payload.getString("type"),
+                reflected = payload.optBoolean("reflected", false),
+                reflectedBy = payload.optString("reflectedBy").takeIf(String::isNotBlank),
             )
+        } }
+        socket.on("power_used") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.PowerUsed(
+                type = payload.getString("type"),
+                reflected = payload.optBoolean("reflected", false),
+            )
+        } }
+        socket.on("power_reflected") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.PowerReflected(payload.getString("attackerId"))
         } }
         socket.on("power_rejected") { args -> parseSafely(args) { payload ->
             RealtimeEvent.PowerRejected(payload.getString("message"))
@@ -204,8 +215,19 @@ class SocketGameClient(
         socket.emit("player:place", payload)
     }
 
-    override fun usePower(targetPlayerId: String) {
-        socket.emit("use_power", JSONObject().put("targetPlayerId", targetPlayerId))
+    override fun usePower(
+        type: String,
+        targetPlayerId: String?,
+        row: Int?,
+        column: Int?,
+        requestId: String?,
+    ) {
+        val payload = JSONObject().put("type", type)
+        targetPlayerId?.let { payload.put("targetPlayerId", it) }
+        row?.let { payload.put("row", it) }
+        column?.let { payload.put("column", it) }
+        requestId?.let { payload.put("requestId", it) }
+        socket.emit("use_power", payload)
     }
 
     override fun sendReaction(emojiId: String) {
@@ -255,6 +277,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             role = player.optString("role", "PLAYER"),
             teamScore = player.optInt("teamScore", player.getInt("score")),
             isBot = player.optBoolean("isBot", false),
+            shieldUntil = player.optLong("shieldUntil", 0),
         )
     }
     return GameSnapshot(

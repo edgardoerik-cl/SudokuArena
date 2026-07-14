@@ -23,6 +23,7 @@ data class Player(
     val role: String,
     val teamScore: Int,
     val isBot: Boolean = false,
+    val shieldUntil: Long = 0,
 )
 
 enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
@@ -100,7 +101,14 @@ sealed interface RealtimeEvent {
         val sections: List<ConqueredSection>,
         val bonus: Int,
     ) : RealtimeEvent
-    data class PowerReceived(val attackerId: String, val type: String) : RealtimeEvent
+    data class PowerReceived(
+        val attackerId: String,
+        val type: String,
+        val reflected: Boolean = false,
+        val reflectedBy: String? = null,
+    ) : RealtimeEvent
+    data class PowerUsed(val type: String, val reflected: Boolean = false) : RealtimeEvent
+    data class PowerReflected(val attackerId: String) : RealtimeEvent
     data class PowerRejected(val message: String) : RealtimeEvent
     data class BoardEventStarted(val event: ActiveBoardEvent) : RealtimeEvent
     data class BoardEventEnded(val type: BoardEventType?) : RealtimeEvent
@@ -123,6 +131,12 @@ interface GameRealtimeGateway {
     fun startRoom()
     fun fillWithAi()
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
-    fun usePower(targetPlayerId: String)
+    fun usePower(
+        type: String,
+        targetPlayerId: String? = null,
+        row: Int? = null,
+        column: Int? = null,
+        requestId: String? = null,
+    )
     fun sendReaction(emojiId: String)
 }

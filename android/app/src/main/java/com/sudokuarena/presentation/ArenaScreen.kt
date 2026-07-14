@@ -11,6 +11,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -98,7 +99,9 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         state = state,
         onCellSelected = viewModel::select,
         onNumber = viewModel::place,
-        onUseFog = viewModel::useFog,
+            onUseFog = viewModel::useFog,
+            onUseReflect = viewModel::useReflect,
+            onUseReveal = viewModel::useReveal,
         onReaction = viewModel::sendReaction,
         onFogSwipe = viewModel::cleanFogSwipe,
         onNewSoloGame = viewModel::newSoloGame,
@@ -112,6 +115,8 @@ fun ArenaScreen(
     onCellSelected: (row: Int, column: Int) -> Unit,
     onNumber: (Int) -> Unit,
     onUseFog: (String) -> Unit,
+    onUseReflect: () -> Unit,
+    onUseReveal: () -> Unit,
     onReaction: (String) -> Unit,
     onFogSwipe: () -> Unit,
     onNewSoloGame: () -> Unit,
@@ -158,7 +163,7 @@ fun ArenaScreen(
                 Scoreboard(state)
                 if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
                     Spacer(Modifier.height(8.dp))
-                    PowerPanel(state, onUseFog)
+                    PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
                 }
                 Spacer(Modifier.height(8.dp))
                 SudokuBoard(
@@ -198,6 +203,9 @@ fun ArenaScreen(
                 TilePad(enabled = state.canPlay, isColorMode = state.isColorMode, onTile = onNumber)
             }
 
+            if ((state.ownPlayer?.shieldUntil ?: 0) > state.serverNowMs) {
+                ShieldAuraOverlay(Modifier.zIndex(8f))
+            }
             if (state.fogSwipesRemaining > 0) {
                 FogInkOverlay(
                     swipesRemaining = state.fogSwipesRemaining,
@@ -220,6 +228,29 @@ fun ArenaScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ShieldAuraOverlay(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "shieldAura")
+    val pulse by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        label = "shieldAuraPulse",
+    )
+    Canvas(modifier.fillMaxSize()) {
+        drawRect(
+            color = Color(0xFF7C3AED).copy(alpha = 0.24f + pulse * 0.28f),
+            style = Stroke(width = 8f + pulse * 7f),
+        )
+        drawCircle(
+            color = Color(0xFF00A8FF).copy(alpha = 0.05f + pulse * 0.05f),
+            radius = size.minDimension * (0.48f + pulse * 0.05f),
+            center = center,
+            style = Stroke(width = 10f),
+        )
     }
 }
 
@@ -250,8 +281,14 @@ private fun Scoreboard(state: ArenaUiState) {
     ) {
         state.players.forEach { player ->
             val color = parseColor(player.colorHex)
+            val shieldActive = player.shieldUntil > state.serverNowMs
             Box(modifier = Modifier.weight(1f)) {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { shadowElevation = if (shieldActive) 18f else 2f },
+                    border = if (shieldActive) BorderStroke(3.dp, Color(0xFF7C3AED)) else null,
+                ) {
                     Column(
                         Modifier
                             .background(color.copy(alpha = if (player.id == state.playerId) 0.28f else 0.13f))
@@ -261,6 +298,7 @@ private fun Scoreboard(state: ArenaUiState) {
                         Text("${player.score} pts", style = MaterialTheme.typography.titleMedium)
                         if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
                             Text("⚡ ${player.energy}%", style = MaterialTheme.typography.labelSmall)
+                            if (shieldActive) Text("🛡 ESCUDO", color = Color(0xFF6D28D9), fontWeight = FontWeight.Black)
                         }
                         if (!state.isSoloMode && state.roomState?.config?.teamMode != TeamMode.FFA) {
                             Text("Equipo ${player.teamScore}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -299,7 +337,12 @@ private fun FloatingReaction(reaction: ReactionUi, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun PowerPanel(state: ArenaUiState, onUseFog: (String) -> Unit) {
+private fun PowerPanel(
+    state: ArenaUiState,
+    onUseFog: (String) -> Unit,
+    onUseReflect: () -> Unit,
+    onUseReveal: () -> Unit,
+) {
     val ownPlayer = state.ownPlayer ?: return
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -312,7 +355,24 @@ private fun PowerPanel(state: ArenaUiState, onUseFog: (String) -> Unit) {
                     .height(8.dp),
             )
         }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Button(
+                onClick = onUseReflect,
+                enabled = ownPlayer.energy >= 100 && ownPlayer.shieldUntil <= state.serverNowMs,
+                modifier = Modifier.weight(1f),
+            ) { Text("🛡 Escudo · 100%", maxLines = 1) }
+            Button(
+                onClick = onUseReveal,
+                enabled = ownPlayer.energy >= 50 && state.selected != null,
+                modifier = Modifier.weight(1f),
+            ) { Text("👁 Ojo · 50%", maxLines = 1) }
+        }
         if (ownPlayer.energy >= 100) {
+            Text("Niebla ofensiva", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 6.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -367,16 +427,25 @@ private fun SudokuBoard(
         for (row in 0..8) for (column in 0..8) {
             val cell = board[row][column]
             val topLeft = Offset(column * cellSize, row * cellSize)
-            val ownerColor = cell.ownerTeamId?.let(::teamColor)
-                ?: cell.ownerId?.let { players[it]?.colorHex }?.let(::parseColor)
+            // La conquista muestra al jugador exacto, incluso cuando el puntaje es de equipo.
+            val ownerColor = cell.ownerId?.let { players[it]?.colorHex }?.let(::parseColor)
+                ?: cell.ownerTeamId?.let(::teamColor)
             val background = when {
                 selected == CellPosition(row, column) -> Color(0xFFFFF59D)
                 cell.golden -> Color(0xFFFFD54F)
-                ownerColor != null -> ownerColor.copy(alpha = if (cell.clearing) 0.55f else 0.30f)
+                ownerColor != null -> ownerColor.copy(alpha = if (cell.clearing) 0.48f else 0.24f)
                 cell.clearing -> Color.LightGray
                 else -> Color.Transparent
             }
             drawRect(background, topLeft, Size(cellSize, cellSize))
+            if (ownerColor != null) {
+                drawRect(
+                    ownerColor.copy(alpha = 0.82f),
+                    topLeft,
+                    Size(cellSize, cellSize),
+                    style = Stroke(width = 2.2f),
+                )
+            }
             if (cell.golden) {
                 drawRect(Color(0xFFFFA000), topLeft, Size(cellSize, cellSize), style = Stroke(width = 4f))
             }

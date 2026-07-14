@@ -1,8 +1,15 @@
 package com.sudokuarena.presentation
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +21,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -30,17 +39,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.painterResource
-import com.sudokuarena.R
 import com.sudokuarena.domain.LeaderboardRepository
+import kotlin.math.sin
 
 @Composable
 fun WelcomeScreen(
@@ -58,23 +69,19 @@ fun WelcomeScreen(
 
     Box(
         modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(22.dp),
+            .fillMaxSize(),
     ) {
-        BrandWatermark(Modifier.align(Alignment.Center))
+        AnimatedArenaBackground()
+        ArenaBrandHeader(Modifier.align(Alignment.TopCenter).padding(top = 28.dp))
         if (!hasProfile) {
             Column(
-                modifier = Modifier.align(Alignment.Center),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 90.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Image(
-                    painter = painterResource(R.drawable.sudoku_arena_icon),
-                    contentDescription = "Logo de Sudoku Arena",
-                    modifier = Modifier.size(150.dp),
-                )
-                Text("SUDOKU ARENA", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
                 Text("Crea tu perfil para entrar a la arena")
                 OutlinedTextField(
                     value = firstNickname,
@@ -83,7 +90,8 @@ fun WelcomeScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button(
+                NeonArenaButton(
+                    text = "Crear perfil",
                     onClick = {
                         val clean = firstNickname.trim()
                         if (clean.isNotEmpty()) {
@@ -93,33 +101,38 @@ fun WelcomeScreen(
                     },
                     enabled = firstNickname.trim().isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Crear perfil") }
+                )
             }
         } else {
             // Tras crear el perfil, el centro queda reservado únicamente a los modos.
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Button(
+                NeonArenaButton(
+                    text = "Modo Solitario",
                     onClick = onSoloMode,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(72.dp),
-                ) { Text("Modo Solitario", style = MaterialTheme.typography.titleLarge) }
-                Button(
+                )
+                NeonArenaButton(
+                    text = "Modo Multijugador",
                     onClick = onMultiplayerMode,
+                    secondary = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(72.dp),
-                ) { Text("Modo Multijugador", style = MaterialTheme.typography.titleLarge) }
+                )
             }
 
             Row(
                 modifier = Modifier
-                    .align(Alignment.BottomStart),
+                    .align(Alignment.BottomStart)
+                    .padding(22.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 FloatingActionButton(onClick = { showProfile = true }) {
@@ -149,22 +162,94 @@ fun WelcomeScreen(
 }
 
 @Composable
-private fun BrandWatermark(modifier: Modifier = Modifier) {
+private fun ArenaBrandHeader(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier.alpha(0.075f),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Image(
-            painter = painterResource(R.drawable.sudoku_arena_icon),
-            contentDescription = null,
-            modifier = Modifier.size(330.dp),
-        )
+        ArenaLogo(Modifier.size(132.dp))
         Text(
             "SUDOKU ARENA",
-            style = MaterialTheme.typography.displaySmall,
+            style = MaterialTheme.typography.headlineLarge.copy(
+                shadow = Shadow(Color(0x990057D9), blurRadius = 18f),
+            ),
             fontWeight = FontWeight.Black,
-            color = MaterialTheme.colorScheme.primary,
+            color = ArenaColors.Ink,
         )
+    }
+}
+
+@Composable
+private fun AnimatedArenaBackground() {
+    val transition = rememberInfiniteTransition(label = "welcomeMotion")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(12_000, easing = LinearEasing)),
+        label = "welcomePhase",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(Color(0xFFF9FBFF), Color(0xFFE8F0FF), Color(0xFFF1E9FF), Color(0xFFFFFFFF)),
+                    start = Offset(phase * 900f, 0f),
+                    end = Offset((1f - phase) * 900f, 1_700f),
+                ),
+            ),
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            repeat(24) { index ->
+                val depth = 0.35f + (index % 5) * 0.13f
+                val baseX = ((index * 73) % 101) / 101f * size.width
+                val drift = sin((phase * 6.283f + index) * depth) * (18f + index % 4 * 8f)
+                val progress = (((index * 37) % 100) / 100f + phase * (0.10f + depth * 0.10f)) % 1f
+                val center = Offset(baseX + drift, size.height * (1f - progress))
+                val alpha = 0.05f + depth * 0.09f
+                val color = if (index % 2 == 0) ArenaColors.ElectricBlue else ArenaColors.Violet
+                if (index % 3 == 0) {
+                    val side = 18f + depth * 24f
+                    drawRoundRect(
+                        color.copy(alpha = alpha),
+                        topLeft = Offset(center.x - side / 2f, center.y - side / 2f),
+                        size = Size(side, side),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f),
+                        style = Stroke(2f),
+                    )
+                } else {
+                    drawCircle(color.copy(alpha = alpha), radius = 5f + depth * 10f, center = center)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NeonArenaButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    secondary: Boolean = false,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val accent = if (secondary) ArenaColors.Violet else ArenaColors.ElectricBlue
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        interactionSource = interaction,
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(if (pressed) 3.dp else 2.dp, accent.copy(alpha = if (pressed) 1f else 0.72f)),
+        colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = Color.White),
+        modifier = modifier.graphicsLayer {
+            scaleX = if (pressed) 0.975f else 1f
+            scaleY = scaleX
+            shadowElevation = if (pressed) 24f else 12f
+        },
+    ) {
+        Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
     }
 }
 

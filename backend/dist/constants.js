@@ -1,5 +1,5 @@
 export const BOARD_SIZE = 9;
-export const APP_VERSION = "0.8.0";
+export const APP_VERSION = "0.9.0";
 export const MAX_PLAYERS = 4;
 export const CELL_POINTS = 10;
 export const SECTION_POINTS = 100;
@@ -8,13 +8,16 @@ export const CLEAR_DELAY_MS = 1_000;
 export const ENERGY_PER_HIT = 25;
 export const MAX_ENERGY = 100;
 export const FOG_POWER_COST = 100;
+export const REFLECT_POWER_COST = 100;
+export const REVEAL_POWER_COST = 50;
+export const REFLECT_DURATION_MS = 5_000;
 export const MIRROR_CELL_POINTS = 20;
 export const MIRROR_PENALTY_MS = 6_000;
 export const GOLDEN_CELL_BONUS = 50;
 export const BOARD_EVENT_INTERVAL_MS = 45_000;
 export const BOARD_EVENT_DURATION_MS = 10_000;
 export const MATCH_DURATION_MS = 180_000;
-export const PLAYER_COLORS = ["#E53935", "#1E88E5", "#43A047", "#FB8C00"];
+export const PLAYER_COLORS = ["#00A8FF", "#FF2DAA", "#00C853", "#FF8A00"];
 // Solución conocida. En producción se seleccionaría/generaría una por partida.
 export const SOLUTION = [
     [5, 3, 4, 6, 7, 8, 9, 1, 2],

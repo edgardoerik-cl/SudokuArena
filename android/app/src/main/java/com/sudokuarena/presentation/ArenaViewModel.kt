@@ -44,6 +44,7 @@ data class ArenaUiState(
     val isSoloMode: Boolean = false,
     val isColorMode: Boolean = false,
     val connected: Boolean = false,
+    val serverNowMs: Long = System.currentTimeMillis(),
     val roomCode: String? = null,
     val roomState: RoomState? = null,
     val matchRemainingMs: Long = 0,
@@ -123,6 +124,7 @@ class ArenaViewModel(
                 mutableState.update { current ->
                     current.copy(
                         penaltyRemainingMs = (blockedUntil - now).coerceAtLeast(0),
+                        serverNowMs = now,
                         boardEventRemainingMs = current.boardEvent
                             ?.let { (it.endsAt - now).coerceAtLeast(0) }
                             ?: 0,
@@ -203,8 +205,31 @@ class ArenaViewModel(
         if (isSoloMode) return
         val current = mutableState.value
         if (current.ownPlayer?.energy != 100 || targetPlayerId == current.playerId) return
-        gateway?.usePower(targetPlayerId)
+        gateway?.usePower(type = "FOG", targetPlayerId = targetPlayerId)
         mutableState.update { it.copy(message = "Lanzando niebla…") }
+    }
+
+    fun useReflect() {
+        if (isSoloMode || mutableState.value.ownPlayer?.energy != 100) return
+        gateway?.usePower(type = "REFLECT")
+        mutableState.update { it.copy(message = "Activando Escudo de Espejo…") }
+    }
+
+    fun useReveal() {
+        if (isSoloMode) return
+        val current = mutableState.value
+        val selected = current.selected ?: run {
+            mutableState.update { it.copy(message = "Selecciona una casilla para usar Ojo de Lince") }
+            return
+        }
+        if ((current.ownPlayer?.energy ?: 0) < 50) return
+        gateway?.usePower(
+            type = "REVEAL",
+            row = selected.row,
+            column = selected.column,
+            requestId = "reveal-${UUID.randomUUID()}",
+        )
+        mutableState.update { it.copy(message = "Ojo de Lince revelando la ficha…") }
     }
 
     fun sendReaction(emojiId: String) {
@@ -357,9 +382,26 @@ class ArenaViewModel(
                     it.copy(
                         selected = null,
                         fogSwipesRemaining = FOG_SWIPES,
-                        message = "¡Ataque de niebla! Desliza rápido para limpiar la tinta",
+                        message = if (event.reflected) {
+                            "¡Tu Niebla fue reflejada! Desliza rápido para limpiar"
+                        } else {
+                            "¡Ataque de niebla! Desliza rápido para limpiar la tinta"
+                        },
                     )
                 }
+            }
+            is RealtimeEvent.PowerUsed -> mutableState.update {
+                it.copy(
+                    message = when (event.type) {
+                        "REFLECT" -> "Escudo de Espejo activo durante 5 segundos"
+                        "REVEAL" -> "Ojo de Lince completó la casilla"
+                        "FOG" -> if (event.reflected) "El rival reflejó tu Niebla" else "Niebla lanzada"
+                        else -> it.message
+                    },
+                )
+            }
+            is RealtimeEvent.PowerReflected -> mutableState.update {
+                it.copy(message = "¡Escudo de Espejo! El sabotaje volvió al atacante")
             }
             is RealtimeEvent.PowerRejected -> mutableState.update { it.copy(message = event.message) }
             is RealtimeEvent.BoardEventStarted -> mutableState.update {
