@@ -13,6 +13,7 @@ import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.RoomState
 import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.TileType
+import com.sudokuarena.domain.BotDifficulty
 import com.sudokuarena.domain.MatchResultEntry
 import io.socket.client.IO
 import io.socket.client.Socket
@@ -75,6 +76,7 @@ class SocketGameClient(
                     teamId = result.getString("teamId"),
                     teamScore = result.getInt("teamScore"),
                     role = result.getString("role"),
+                    isBot = result.optBoolean("isBot", false),
                 )
             }
             RealtimeEvent.MatchFinished(results, payload.getLong("finishedAt"))
@@ -173,12 +175,17 @@ class SocketGameClient(
             JSONObject()
                 .put("powersEnabled", config.powersEnabled)
                 .put("teamMode", config.teamMode.name)
-                .put("tileType", config.tileType.name),
+                .put("tileType", config.tileType.name)
+                .put("botDifficulty", config.botDifficulty.name),
         )
     }
 
     override fun startRoom() {
         socket.emit("room:start")
+    }
+
+    override fun fillWithAi() {
+        socket.emit("fill_with_ai")
     }
 
     override fun place(
@@ -247,6 +254,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             teamId = player.optString("teamId", "PLAYER:${player.getString("id")}"),
             role = player.optString("role", "PLAYER"),
             teamScore = player.optInt("teamScore", player.getInt("score")),
+            isBot = player.optBoolean("isBot", false),
         )
     }
     return GameSnapshot(
@@ -274,6 +282,7 @@ private fun parseRoomState(json: JSONObject): RoomState {
             powersEnabled = config.getBoolean("powersEnabled"),
             teamMode = TeamMode.valueOf(config.getString("teamMode")),
             tileType = TileType.valueOf(config.optString("tileType", "NUMBERS")),
+            botDifficulty = BotDifficulty.valueOf(config.optString("botDifficulty", "MEDIUM")),
         ),
         phase = RoomPhase.valueOf(json.getString("phase")),
         startedAt = if (json.isNull("startedAt")) null else json.getLong("startedAt"),

@@ -86,6 +86,8 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onPowersChanged = viewModel::setPowersEnabled,
             onTeamModeChanged = viewModel::setTeamMode,
             onTileTypeChanged = viewModel::setTileType,
+            onBotDifficultyChanged = viewModel::setBotDifficulty,
+            onFillWithAi = viewModel::fillWithAi,
             onStart = viewModel::startOnlineMatch,
             onExit = onExit,
         )
@@ -255,7 +257,7 @@ private fun Scoreboard(state: ArenaUiState) {
                             .background(color.copy(alpha = if (player.id == state.playerId) 0.28f else 0.13f))
                             .padding(7.dp),
                     ) {
-                        Text(player.name, maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        Text("${if (player.isBot) "🤖 " else ""}${player.name}", maxLines = 1, style = MaterialTheme.typography.labelMedium)
                         Text("${player.score} pts", style = MaterialTheme.typography.titleMedium)
                         if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
                             Text("⚡ ${player.energy}%", style = MaterialTheme.typography.labelSmall)

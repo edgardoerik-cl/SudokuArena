@@ -22,16 +22,19 @@ data class Player(
     val teamId: String,
     val role: String,
     val teamScore: Int,
+    val isBot: Boolean = false,
 )
 
 enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
 enum class TileType { NUMBERS, COLORS }
+enum class BotDifficulty { EASY, MEDIUM, HARD }
 enum class RoomPhase { LOBBY, PLAYING, FINISHED }
 
 data class RoomConfig(
     val powersEnabled: Boolean = true,
     val teamMode: TeamMode = TeamMode.FFA,
     val tileType: TileType = TileType.NUMBERS,
+    val botDifficulty: BotDifficulty = BotDifficulty.MEDIUM,
 )
 
 data class RoomState(
@@ -51,6 +54,7 @@ data class MatchResultEntry(
     val teamId: String,
     val teamScore: Int,
     val role: String,
+    val isBot: Boolean = false,
 )
 
 enum class BoardEventType { MIRROR_HOUR, GOLDEN_CELLS }
@@ -117,6 +121,7 @@ interface GameRealtimeGateway {
     fun joinRoom(roomCode: String)
     fun configureRoom(config: RoomConfig)
     fun startRoom()
+    fun fillWithAi()
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
     fun usePower(targetPlayerId: String)
     fun sendReaction(emojiId: String)

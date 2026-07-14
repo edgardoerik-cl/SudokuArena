@@ -1,6 +1,7 @@
 package com.sudokuarena.presentation
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -36,6 +38,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
+import com.sudokuarena.R
 import com.sudokuarena.domain.LeaderboardRepository
 
 @Composable
@@ -55,16 +59,21 @@ fun WelcomeScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F111A))
+            .background(MaterialTheme.colorScheme.background)
             .padding(22.dp),
     ) {
+        BrandWatermark(Modifier.align(Alignment.Center))
         if (!hasProfile) {
             Column(
                 modifier = Modifier.align(Alignment.Center),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ArenaLogo(Modifier.size(150.dp))
+                Image(
+                    painter = painterResource(R.drawable.sudoku_arena_icon),
+                    contentDescription = "Logo de Sudoku Arena",
+                    modifier = Modifier.size(150.dp),
+                )
                 Text("SUDOKU ARENA", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
                 Text("Crea tu perfil para entrar a la arena")
                 OutlinedTextField(
@@ -110,9 +119,8 @@ fun WelcomeScreen(
 
             Row(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                    .align(Alignment.BottomStart),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 FloatingActionButton(onClick = { showProfile = true }) {
                     ControlIcon(ControlIconType.PROFILE)
@@ -137,6 +145,26 @@ fun WelcomeScreen(
     }
     if (showHonor) {
         LeaderboardBottomSheet(repository = leaderboardRepository, onDismiss = { showHonor = false })
+    }
+}
+
+@Composable
+private fun BrandWatermark(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.alpha(0.075f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Image(
+            painter = painterResource(R.drawable.sudoku_arena_icon),
+            contentDescription = null,
+            modifier = Modifier.size(330.dp),
+        )
+        Text(
+            "SUDOKU ARENA",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Black,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }
 
@@ -166,7 +194,7 @@ private enum class ControlIconType { PROFILE, TROPHY }
 @Composable
 private fun ControlIcon(type: ControlIconType) {
     Canvas(Modifier.size(27.dp)) {
-        val color = Color(0xFF00F0FF)
+        val color = ArenaColors.ElectricBlue
         if (type == ControlIconType.PROFILE) {
             drawCircle(color, radius = size.minDimension * 0.18f, center = Offset(size.width / 2f, size.height * 0.32f), style = Stroke(2.6f))
             drawArc(

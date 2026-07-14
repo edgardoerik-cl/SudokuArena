@@ -3,7 +3,8 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `0.7.1` incorpora el Splash Art y el icono adaptativo definitivos,
+La versión `0.8.0` incorpora Bots autoritativos con dificultad configurable,
+tema claro de alto contraste, menú con marca de agua, Splash Art e icono definitivos,
 pantalla inmersiva, fichas de números o colores y perfil persistente,
 Cuadro de Honor global, lobby configurable, modos FFA/2v2/3v1 y feedback visual
 para victoria, error y sabotaje. Las partidas online duran tres minutos y siguen
@@ -33,7 +34,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-v0.7.1-debug.apk`. No se debe subir ese archivo a Git:
+`SudokuArena-v0.8.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

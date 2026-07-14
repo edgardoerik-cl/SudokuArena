@@ -8,6 +8,7 @@ export interface PublicCell {
 
 export type TeamMode = "FFA" | "TWO_V_TWO" | "THREE_V_ONE";
 export type TileType = "NUMBERS" | "COLORS";
+export type BotDifficulty = "EASY" | "MEDIUM" | "HARD";
 export type PlayerRole = "PLAYER" | "TEAMMATE" | "BOSS" | "RAIDER";
 export type RoomPhase = "LOBBY" | "PLAYING" | "FINISHED";
 
@@ -15,6 +16,7 @@ export interface RoomConfig {
   powersEnabled: boolean;
   teamMode: TeamMode;
   tileType: TileType;
+  botDifficulty: BotDifficulty;
 }
 
 export interface RoomState {
@@ -37,6 +39,7 @@ export interface PlayerState {
   teamId: string;
   role: PlayerRole;
   teamScore: number;
+  isBot: boolean;
 }
 
 export type BoardEventType = "MIRROR_HOUR" | "GOLDEN_CELLS";
@@ -82,6 +85,7 @@ export interface MatchResultEntry {
   teamId: string;
   teamScore: number;
   role: PlayerRole;
+  isBot: boolean;
 }
 
 export type SectionKind = "row" | "column" | "box";

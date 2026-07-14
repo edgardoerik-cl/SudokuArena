@@ -136,7 +136,7 @@ private fun AnimatedResultCard(result: MatchResultEntry, index: Int, showTeamSco
             ) {
                 Text(rankMedal(result.rank), style = MaterialTheme.typography.headlineMedium)
                 Column(Modifier.weight(1f)) {
-                    Text(result.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("${if (result.isBot) "🤖 " else ""}${result.name}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     if (result.role == "BOSS") Text("JEFE", color = Color(0xFFC62828), fontWeight = FontWeight.Bold)
                     else if (result.role == "RAIDER") Text("EQUIPO ASALTANTE", color = Color(0xFF1565C0))
                 }

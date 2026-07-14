@@ -19,7 +19,7 @@ before(async () => {
     env: {
       ...process.env,
       PORT: String(port),
-      MATCH_DURATION_MS: "800",
+      MATCH_DURATION_MS: "2500",
       LEADERBOARD_FILE: leaderboardFile
     },
     stdio: "ignore"
@@ -87,7 +87,7 @@ describe("matchmaking por salas", () => {
     assert.equal(configured.config.tileType, "COLORS");
 
     const startedAtBob = nextEvent<any>(bob, "game:started");
-    const finishedAtBob = nextEvent<any>(bob, "game:finished", 2_000);
+    const finishedAtBob = nextEvent<any>(bob, "game:finished", 4_000);
     alice.emit("room:start");
     const started = await startedAtBob;
     assert.ok(started.endsAt > started.startedAt);
@@ -97,6 +97,29 @@ describe("matchmaking por salas", () => {
     carol.emit("room:create");
     const roomTwo = await carolJoined;
     assert.notEqual(roomTwo.roomCode, roomOne.roomCode);
+    const botJoined = nextMatchingEvent<any>(carol, "game:state", (state) =>
+      state.players.length === 2 && state.players.some((player: any) => player.isBot)
+    );
+    carol.emit("fill_with_ai");
+    const hybridState = await botJoined;
+    assert.equal(hybridState.players.filter((player: any) => player.isBot).length, 1);
+    const configuredAtCarol = nextMatchingEvent<any>(
+      carol,
+      "room:state",
+      (state) => state.config.botDifficulty === "HARD"
+    );
+    carol.emit("room:configure", {
+      powersEnabled: true,
+      teamMode: "FFA",
+      tileType: "COLORS",
+      botDifficulty: "HARD"
+    });
+    await configuredAtCarol;
+    const botActed = nextMatchingEvent<any>(carol, "game:state", (state) =>
+      state.players.some((player: any) => player.isBot && (player.score > 0 || player.blockedUntil > state.serverTime))
+    , 2_200);
+    carol.emit("room:start");
+    await botActed;
 
     let leakedToCarol = false;
     carol.once("reaction_received", () => { leakedToCarol = true; });

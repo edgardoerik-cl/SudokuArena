@@ -55,7 +55,12 @@ export class ArenaGame {
   private readonly teamScores = new Map<string, number>();
   private revision = 0;
   private activeBoardEvent: ActiveBoardEvent | null = null;
-  private configuration: RoomConfig = { powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS" };
+  private configuration: RoomConfig = {
+    powersEnabled: true,
+    teamMode: "FFA",
+    tileType: "NUMBERS",
+    botDifficulty: "MEDIUM"
+  };
 
   constructor(
     readonly gameId = "arena-main",
@@ -66,7 +71,11 @@ export class ArenaGame {
     return this.players.size;
   }
 
-  addPlayer(id: string, rawName: string): PlayerState | null {
+  get humanPlayerCount(): number {
+    return [...this.players.values()].filter((player) => !player.isBot).length;
+  }
+
+  addPlayer(id: string, rawName: string, isBot = false): PlayerState | null {
     if (this.players.size >= MAX_PLAYERS) return null;
 
     const usedSlots = new Set([...this.players.values()].map((player) => player.slot));
@@ -81,7 +90,8 @@ export class ArenaGame {
       energy: 0,
       teamId: `PLAYER:${id}`,
       role: "PLAYER",
-      teamScore: 0
+      teamScore: 0,
+      isBot
     };
     this.players.set(id, player);
     this.processedRequests.set(id, new Set());
@@ -116,8 +126,28 @@ export class ArenaGame {
         score: player.score,
         teamId: player.teamId,
         teamScore: player.teamScore,
-        role: player.role
+        role: player.role,
+        isBot: player.isBot
       }));
+  }
+
+  /**
+   * Genera una intención de Bot; `place` sigue siendo la única autoridad que
+   * valida la casilla, aplica carreras, puntos y penalizaciones.
+   */
+  createBotProposal(playerId: string, accuracy: number): PlaceProposal | null {
+    const player = this.players.get(playerId);
+    if (!player?.isBot) return null;
+    const candidates = this.emptyPlayableCells();
+    if (candidates.length === 0) return null;
+    shuffle(candidates);
+    const { row, column } = candidates[0]!;
+    const solutionValue = this.solution[row]![column]!;
+    const isCorrect = Math.random() < Math.max(0, Math.min(1, accuracy));
+    const value = isCorrect
+      ? solutionValue
+      : ((solutionValue + 1 + Math.floor(Math.random() * 8) - 1) % 9) + 1;
+    return { requestId: `bot-${randomUUID()}`, row, column, value, clientRevision: this.revision };
   }
 
   removePlayer(id: string): boolean {

@@ -57,7 +57,7 @@ fun LeaderboardBottomSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF111522),
+        containerColor = ArenaColors.Surface,
     ) {
         Column(
             modifier = Modifier
@@ -67,7 +67,7 @@ fun LeaderboardBottomSheet(
         ) {
             Text("CUADRO DE HONOR", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(12.dp))
-            TabRow(selectedTabIndex = selectedTab, containerColor = Color(0xFF111522)) {
+            TabRow(selectedTabIndex = selectedTab, containerColor = ArenaColors.Surface) {
                 Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Solitario ⏱") })
                 Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Multijugador 🏆") })
             }
@@ -107,13 +107,13 @@ private data class HonorRow(val rank: Int, val nickname: String, val value: Stri
 @Composable
 private fun HonorCard(row: HonorRow) {
     val accent = when (row.rank) {
-        1 -> Color(0xFFFFD54F)
-        2 -> Color(0xFFCFD8DC)
-        3 -> Color(0xFFCD7F32)
-        else -> Color(0xFF263247)
+        1 -> Color(0xFF8A5A00)
+        2 -> Color(0xFF52606D)
+        3 -> Color(0xFF8A4B08)
+        else -> ArenaColors.Border
     }
     Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF171D2D)),
+        colors = CardDefaults.cardColors(containerColor = ArenaColors.Surface),
         border = BorderStroke(if (row.rank <= 3) 1.5.dp else 1.dp, accent.copy(alpha = 0.9f)),
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier

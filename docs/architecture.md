@@ -18,7 +18,7 @@ Cada sala publica además este estado de lobby/partida:
 {
   "roomCode": "4821",
   "hostPlayerId": "socket-host",
-  "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO", "tileType": "COLORS" },
+  "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO", "tileType": "COLORS", "botDifficulty": "HARD" },
   "phase": "PLAYING",
   "startedAt": 1783915200000,
   "endsAt": 1783915380000
@@ -77,7 +77,8 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 |---|---|---|
 | Cliente → servidor | `room:create` | sin payload |
 | Cliente → servidor | `room:join` | `{ roomCode }` |
-| Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode, tileType }` |
+| Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode, tileType, botDifficulty }` |
+| Host → servidor | `fill_with_ai` | Completa el mínimo FFA o los cuatro slots de equipo con Bots |
 | Cliente → servidor | `room:start` | sin payload; sólo Host |
 | Servidor → cliente | `room:joined` | `{ roomCode }` |
 | Servidor → sala | `room:state` | configuración, fase y tiempos |
@@ -119,9 +120,19 @@ reacciones a una cada 500 ms por conexión.
 
 Los códigos se generan entre `1000` y `9999`, no se reutilizan mientras la sala
 exista y admiten de 2 a 4 participantes (el creador puede esperar solo). La sala
-se destruye al salir su último jugador. Los listeners que mutan el juego no
+se destruye al salir su último jugador humano. Los listeners que mutan el juego no
 contienen `await`: el event loop de Node ordena cada jugada, poder y consumo de
 bonificación dentro de cada sala.
+
+### Bots autoritativos
+
+- En FFA, el primer `fill_with_ai` con un solo humano crea un duelo 1v1; una
+  segunda pulsación puede completar cuatro. En 2v2 y 3v1 completa cuatro slots.
+- `EASY`, `MEDIUM` y `HARD` controlan el intervalo y la probabilidad de acierto.
+- El Bot sólo genera una propuesta; `ArenaGame.place` valida y aplica exactamente
+  las mismas carreras, puntos, energía, error y bloqueo que para un socket humano.
+- Tres humanos en 3v1 reciben un Jefe IA. Con un humano, éste es Jefe contra tres
+  Bots. Las victorias de Bots no se registran en el Cuadro de Honor.
 
 Esta garantía requiere una sola instancia del backend porque el estado vive en
 memoria. Para escalar horizontalmente se necesita un actor por partida o una
@@ -134,7 +145,7 @@ operación transaccional en Redis, además del adaptador Redis de Socket.IO.
   en local o `GameRealtimeGateway` online, sin depender de APIs Android.
 - `WelcomeScreen`: guarda nickname y bifurca entre Solitario, Crear Sala y
   Unirse a Sala.
-- `SplashScreen`/`ArenaLogo`: identidad visual 100% Canvas, sin recursos bitmap.
+- `SplashScreen`/`ArenaLogo`: Splash Art bitmap animado e identidad Canvas auxiliar.
 - `RoomLobbyScreen`: configuración sincronizada y editable sólo por el Host.
 - `MatchResultsOverlay`: confeti Canvas y tarjetas escalonadas de clasificación.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.

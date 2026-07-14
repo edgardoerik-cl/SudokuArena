@@ -16,6 +16,7 @@ import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.RoomState
 import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.TileType
+import com.sudokuarena.domain.BotDifficulty
 import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
@@ -182,6 +183,16 @@ class ArenaViewModel(
         if (isSoloMode) return
         val current = mutableState.value.roomState ?: return
         gateway?.configureRoom(current.config.copy(tileType = type))
+    }
+
+    fun setBotDifficulty(difficulty: BotDifficulty) {
+        if (isSoloMode) return
+        val current = mutableState.value.roomState ?: return
+        gateway?.configureRoom(current.config.copy(botDifficulty = difficulty))
+    }
+
+    fun fillWithAi() {
+        if (!isSoloMode) gateway?.fillWithAi()
     }
 
     fun startOnlineMatch() {

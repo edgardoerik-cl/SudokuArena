@@ -6,9 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -31,20 +28,14 @@ import com.sudokuarena.presentation.WelcomeScreen
 import com.sudokuarena.presentation.MultiplayerEntryScreen
 import com.sudokuarena.presentation.SudokuArenaSplashScreen
 import com.sudokuarena.presentation.SoloSetupScreen
+import com.sudokuarena.presentation.SudokuArenaTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableImmersiveMode()
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Color(0xFF00DDEB),
-                    secondary = Color(0xFFFFC857),
-                    background = Color(0xFF0F111A),
-                    surface = Color(0xFF171B28),
-                ),
-            ) {
+            SudokuArenaTheme {
                 SudokuArenaApp()
             }
         }

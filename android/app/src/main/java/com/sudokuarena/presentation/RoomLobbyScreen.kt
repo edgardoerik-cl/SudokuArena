@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -25,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.TileType
+import com.sudokuarena.domain.BotDifficulty
 
 @Composable
 fun RoomLobbyScreen(
@@ -32,6 +35,8 @@ fun RoomLobbyScreen(
     onPowersChanged: (Boolean) -> Unit,
     onTeamModeChanged: (TeamMode) -> Unit,
     onTileTypeChanged: (TileType) -> Unit,
+    onBotDifficultyChanged: (BotDifficulty) -> Unit,
+    onFillWithAi: () -> Unit,
     onStart: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -40,6 +45,7 @@ fun RoomLobbyScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -59,7 +65,7 @@ fun RoomLobbyScreen(
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("JUGADORES ${state.players.size}/4", style = MaterialTheme.typography.labelLarge)
                     state.players.forEach { player ->
-                        Text("• ${player.name}${if (player.id == room.hostPlayerId) "  👑" else ""}")
+                        Text("• ${if (player.isBot) "🤖 " else ""}${player.name}${if (player.id == room.hostPlayerId) "  👑" else ""}")
                     }
                 }
             }
@@ -88,6 +94,20 @@ fun RoomLobbyScreen(
                         onSelected = onTileTypeChanged,
                     )
                     Spacer(Modifier.height(8.dp))
+                    Text("DIFICULTAD DE IA", style = MaterialTheme.typography.labelLarge)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        BotDifficulty.entries.forEach { difficulty ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = room.config.botDifficulty == difficulty,
+                                    onClick = { onBotDifficultyChanged(difficulty) },
+                                    enabled = isHost,
+                                )
+                                Text(botDifficultyLabel(difficulty))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Text("MODO DE EQUIPO", style = MaterialTheme.typography.labelLarge)
                     TeamMode.entries.forEach { mode ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -104,6 +124,11 @@ fun RoomLobbyScreen(
 
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (isHost) {
+                OutlinedButton(
+                    onClick = onFillWithAi,
+                    enabled = state.players.size < 4,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("🤖 Llenar con IA") }
                 val validCount = when (room.config.teamMode) {
                     TeamMode.FFA -> state.players.size >= 2
                     TeamMode.TWO_V_TWO, TeamMode.THREE_V_ONE -> state.players.size == 4
@@ -127,4 +152,10 @@ private fun playerRequirement(mode: TeamMode): String = when (mode) {
     TeamMode.FFA -> "Esperando al menos 2 jugadores"
     TeamMode.TWO_V_TWO -> "Se requieren 4 jugadores"
     TeamMode.THREE_V_ONE -> "Se requieren 4 jugadores"
+}
+
+private fun botDifficultyLabel(difficulty: BotDifficulty): String = when (difficulty) {
+    BotDifficulty.EASY -> "Fácil"
+    BotDifficulty.MEDIUM -> "Media"
+    BotDifficulty.HARD -> "Difícil"
 }
