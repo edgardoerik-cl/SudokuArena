@@ -32,13 +32,11 @@ ser recortado por máscaras circulares; deja el escudo dentro del 66% central.
 
 ## Splash Art vertical
 
-Exporta el arte final preferentemente como WebP de 1080×1920 px y guárdalo en:
+El arte final se encuentra en:
 
 ```text
-app/src/main/res/drawable-nodpi/sudoku_arena_splash_art.webp
+app/src/main/res/drawable-nodpi/sudoku_arena_splash_art.png
 ```
 
-Antes, elimina el provisional `sudoku_arena_splash_art.xml`: Android no permite
-dos recursos con el mismo nombre aunque tengan distinta extensión. `nodpi` evita
-que Android reescale el bitmap por densidad; Compose lo recorta con
+`nodpi` evita que Android reescale el bitmap por densidad; Compose lo recorta con
 `ContentScale.Crop` para llenar cualquier proporción sin deformarlo.

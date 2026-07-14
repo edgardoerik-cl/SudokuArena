@@ -12,8 +12,8 @@ android {
         applicationId = "com.sudokuarena"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.7.0"
+        versionCode = 8
+        versionName = "0.7.1"
 
         val socketUrl = providers.gradleProperty("SOCKET_URL")
             .getOrElse("http://10.0.2.2:3000")
