@@ -6,6 +6,7 @@ data class BoardCell(
     val value: Int? = null,
     val ownerId: String? = null,
     val clearing: Boolean = false,
+    val golden: Boolean = false,
 )
 
 data class Player(
@@ -15,6 +16,15 @@ data class Player(
     val colorHex: String,
     val score: Int,
     val blockedUntil: Long,
+    val energy: Int,
+)
+
+enum class BoardEventType { MIRROR_HOUR, GOLDEN_CELLS }
+
+data class ActiveBoardEvent(
+    val type: BoardEventType,
+    val startedAt: Long,
+    val endsAt: Long,
 )
 
 data class GameSnapshot(
@@ -23,6 +33,7 @@ data class GameSnapshot(
     val serverTime: Long,
     val board: List<List<BoardCell>>,
     val players: List<Player>,
+    val boardEvent: ActiveBoardEvent?,
 )
 
 data class ConqueredSection(
@@ -43,6 +54,15 @@ sealed interface RealtimeEvent {
         val sections: List<ConqueredSection>,
         val bonus: Int,
     ) : RealtimeEvent
+    data class PowerReceived(val attackerId: String, val type: String) : RealtimeEvent
+    data class PowerRejected(val message: String) : RealtimeEvent
+    data class BoardEventStarted(val event: ActiveBoardEvent) : RealtimeEvent
+    data class BoardEventEnded(val type: BoardEventType?) : RealtimeEvent
+    data class ReactionReceived(
+        val reactionId: String,
+        val playerId: String,
+        val emojiId: String,
+    ) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 
@@ -52,4 +72,6 @@ interface GameRealtimeGateway {
     fun connect()
     fun disconnect()
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
+    fun usePower(targetPlayerId: String)
+    fun sendReaction(emojiId: String)
 }

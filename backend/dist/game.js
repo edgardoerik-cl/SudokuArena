@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { BOARD_SIZE, CELL_POINTS, MAX_PLAYERS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
+import { BOARD_SIZE, CELL_POINTS, ENERGY_PER_HIT, FOG_POWER_COST, GOLDEN_CELL_BONUS, MAX_PLAYERS, MAX_ENERGY, MIRROR_CELL_POINTS, MIRROR_PENALTY_MS, PENALTY_MS, PLAYER_COLORS, SECTION_POINTS, SOLUTION } from "./constants.js";
 export class ArenaGame {
     gameId;
     board = Array.from({ length: BOARD_SIZE }, () => Array.from({ length: BOARD_SIZE }, () => ({
         value: null,
         ownerId: null,
-        clearTokens: new Set()
+        clearTokens: new Set(),
+        golden: false
     })));
     players = new Map();
     pendingSections = new Set();
     processedRequests = new Map();
     revision = 0;
+    activeBoardEvent = null;
     constructor(gameId = "arena-main") {
         this.gameId = gameId;
     }
@@ -28,7 +30,8 @@ export class ArenaGame {
             slot,
             color: PLAYER_COLORS[slot] ?? PLAYER_COLORS[0],
             score: 0,
-            blockedUntil: 0
+            blockedUntil: 0,
+            energy: 0
         };
         this.players.set(id, player);
         this.processedRequests.set(id, new Set());
@@ -57,8 +60,51 @@ export class ArenaGame {
             board: this.board.map((row) => row.map(toPublicCell)),
             players: [...this.players.values()]
                 .sort((a, b) => a.slot - b.slot)
-                .map((player) => ({ ...player }))
+                .map((player) => ({ ...player })),
+            boardEvent: this.activeBoardEvent ? { ...this.activeBoardEvent } : null
         };
+    }
+    startBoardEvent(type, now = Date.now(), durationMs = 10_000) {
+        if (this.activeBoardEvent)
+            return null;
+        this.activeBoardEvent = { type, startedAt: now, endsAt: now + durationMs };
+        if (type === "GOLDEN_CELLS") {
+            const candidates = this.emptyPlayableCells();
+            shuffle(candidates);
+            for (const { row, column } of candidates.slice(0, 2)) {
+                this.board[row][column].golden = true;
+            }
+        }
+        this.revision += 1;
+        return { ...this.activeBoardEvent };
+    }
+    endBoardEvent(expectedType) {
+        if (!this.activeBoardEvent || (expectedType && this.activeBoardEvent.type !== expectedType))
+            return false;
+        for (const row of this.board)
+            for (const cell of row)
+                cell.golden = false;
+        this.activeBoardEvent = null;
+        this.revision += 1;
+        return true;
+    }
+    useFogPower(playerId, targetPlayerId) {
+        const player = this.players.get(playerId);
+        if (!player)
+            return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
+        if (typeof targetPlayerId !== "string" || targetPlayerId.length === 0) {
+            return powerReject("INVALID_TARGET", "Objetivo inválido");
+        }
+        if (targetPlayerId === playerId)
+            return powerReject("SELF_TARGET", "No puedes atacarte a ti mismo");
+        if (!this.players.has(targetPlayerId))
+            return powerReject("TARGET_NOT_FOUND", "El rival ya no está conectado");
+        if (player.energy < FOG_POWER_COST) {
+            return powerReject("NOT_ENOUGH_ENERGY", "Necesitas 100% de energía");
+        }
+        player.energy -= FOG_POWER_COST;
+        this.revision += 1;
+        return { accepted: true, attackerId: playerId, targetPlayerId, type: "FOG" };
     }
     place(playerId, proposal, now = Date.now()) {
         const requestId = typeof proposal?.requestId === "string" ? proposal.requestId : "";
@@ -87,7 +133,8 @@ export class ArenaGame {
             return reject(requestId, "CELL_OCCUPIED", "La casilla ya está ocupada");
         }
         if (SOLUTION[proposal.row][proposal.column] !== proposal.value) {
-            player.blockedUntil = now + PENALTY_MS;
+            const penaltyMs = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_PENALTY_MS : PENALTY_MS;
+            player.blockedUntil = now + penaltyMs;
             this.revision += 1;
             return {
                 ...reject(requestId, "INCORRECT_VALUE", "Número incorrecto", true),
@@ -98,7 +145,11 @@ export class ArenaGame {
         // respecto de los demás callbacks en este proceso Node.
         cell.value = proposal.value;
         cell.ownerId = playerId;
-        player.score += CELL_POINTS;
+        const cellPoints = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_CELL_POINTS : CELL_POINTS;
+        const goldenBonus = cell.golden ? GOLDEN_CELL_BONUS : 0;
+        cell.golden = false;
+        player.score += cellPoints + goldenBonus;
+        player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_PER_HIT);
         const sections = this.completedSections(proposal.row, proposal.column);
         const bonus = SECTION_POINTS * sections.length * sections.length;
         player.score += bonus;
@@ -110,6 +161,8 @@ export class ArenaGame {
             revision: this.revision,
             sections,
             bonus,
+            cellPoints,
+            goldenBonus,
             clearPlan
         };
     }
@@ -126,6 +179,7 @@ export class ArenaGame {
             // vence ya la vacía. Así no puede escribirse hasta terminar ambos timers.
             cell.value = null;
             cell.ownerId = null;
+            cell.golden = false;
         }
         for (const key of plan.sectionKeys)
             this.pendingSections.delete(key);
@@ -175,9 +229,25 @@ export class ArenaGame {
             column: startColumn + (offset % 3)
         }));
     }
+    emptyPlayableCells() {
+        const cells = [];
+        for (let row = 0; row < BOARD_SIZE; row += 1) {
+            for (let column = 0; column < BOARD_SIZE; column += 1) {
+                const cell = this.board[row][column];
+                if (cell.value === null && cell.clearTokens.size === 0)
+                    cells.push({ row, column });
+            }
+        }
+        return cells;
+    }
 }
 function toPublicCell(cell) {
-    return { value: cell.value, ownerId: cell.ownerId, clearing: cell.clearTokens.size > 0 };
+    return {
+        value: cell.value,
+        ownerId: cell.ownerId,
+        clearing: cell.clearTokens.size > 0,
+        golden: cell.golden
+    };
 }
 function isValidProposal(proposal) {
     return (proposal !== null &&
@@ -212,5 +282,14 @@ function sectionKey(section) {
 function sanitizeName(rawName, fallbackNumber) {
     const clean = typeof rawName === "string" ? rawName.trim().replace(/\s+/g, " ").slice(0, 24) : "";
     return clean || `Jugador ${fallbackNumber}`;
+}
+function powerReject(code, message) {
+    return { accepted: false, code, message };
+}
+function shuffle(values) {
+    for (let index = values.length - 1; index > 0; index -= 1) {
+        const target = Math.floor(Math.random() * (index + 1));
+        [values[index], values[target]] = [values[target], values[index]];
+    }
 }
 //# sourceMappingURL=game.js.map

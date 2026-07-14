@@ -52,4 +52,63 @@ describe("ArenaGame", () => {
     game.executeClear(finalResult.clearPlan!);
     assert.equal(game.snapshot().board[0]!.every((cell) => cell.value === null), true);
   });
+
+  it("acumula energía y consume 100% al lanzar niebla", () => {
+    const game = new ArenaGame();
+    game.addPlayer("p1", "Ada");
+    game.addPlayer("p2", "Linus");
+
+    for (let column = 0; column < 4; column += 1) {
+      game.place("p1", {
+        requestId: `energy-${column}`,
+        row: 0,
+        column,
+        value: SOLUTION[0]![column]!
+      });
+    }
+
+    assert.equal(game.snapshot().players.find((player) => player.id === "p1")?.energy, 100);
+    assert.equal(game.useFogPower("p1", "p1").accepted, false);
+    const power = game.useFogPower("p1", "p2");
+    assert.equal(power.accepted, true);
+    assert.equal(game.snapshot().players.find((player) => player.id === "p1")?.energy, 0);
+  });
+
+  it("aplica puntos dobles y penalización de seis segundos en Hora Espejo", () => {
+    const game = new ArenaGame();
+    game.addPlayer("p1", "Ada");
+    game.startBoardEvent("MIRROR_HOUR", 10_000);
+
+    const correct = game.place("p1", { requestId: "mirror-ok", row: 0, column: 0, value: 5 }, 10_100);
+    const wrong = game.place("p1", { requestId: "mirror-bad", row: 0, column: 1, value: 9 }, 10_200);
+
+    assert.equal(correct.accepted, true);
+    if (correct.accepted) assert.equal(correct.cellPoints, 20);
+    assert.equal(game.snapshot().players[0]?.score, 20);
+    assert.equal(wrong.accepted, false);
+    if (!wrong.accepted) assert.equal(wrong.blockedUntil, 16_200);
+  });
+
+  it("marca dos casillas doradas y entrega el bono al primer acierto", () => {
+    const game = new ArenaGame();
+    game.addPlayer("p1", "Ada");
+    game.startBoardEvent("GOLDEN_CELLS", 1_000);
+    const snapshot = game.snapshot();
+    const goldenCells = snapshot.board.flatMap((row, rowIndex) =>
+      row.map((cell, column) => ({ cell, row: rowIndex, column })).filter(({ cell }) => cell.golden)
+    );
+
+    assert.equal(goldenCells.length, 2);
+    const golden = goldenCells[0]!;
+    const result = game.place("p1", {
+      requestId: "golden",
+      row: golden.row,
+      column: golden.column,
+      value: SOLUTION[golden.row]![golden.column]!
+    });
+
+    assert.equal(result.accepted, true);
+    if (result.accepted) assert.equal(result.goldenBonus, 50);
+    assert.equal(game.snapshot().players[0]?.score, 60);
+  });
 });

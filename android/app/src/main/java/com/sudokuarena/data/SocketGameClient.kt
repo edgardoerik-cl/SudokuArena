@@ -1,6 +1,8 @@
 package com.sudokuarena.data
 
 import com.sudokuarena.domain.BoardCell
+import com.sudokuarena.domain.ActiveBoardEvent
+import com.sudokuarena.domain.BoardEventType
 import com.sudokuarena.domain.ConqueredSection
 import com.sudokuarena.domain.GameRealtimeGateway
 import com.sudokuarena.domain.GameSnapshot
@@ -80,6 +82,34 @@ class SocketGameClient(
                 bonus = payload.getInt("bonus"),
             )
         } }
+        socket.on("power_received") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.PowerReceived(
+                attackerId = payload.getString("attackerId"),
+                type = payload.getString("type"),
+            )
+        } }
+        socket.on("power_rejected") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.PowerRejected(payload.getString("message"))
+        } }
+        socket.on("board_event_start") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.BoardEventStarted(parseBoardEvent(payload))
+        } }
+        socket.on("board_event_end") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.BoardEventEnded(
+                payload.optString("eventType").takeIf(String::isNotBlank)?.let(BoardEventType::valueOf),
+            )
+        } }
+        socket.on("reaction_received") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.ReactionReceived(
+                reactionId = payload.getString("reactionId"),
+                playerId = payload.getString("playerId"),
+                emojiId = payload.getString("emojiId"),
+            )
+        } }
+        socket.on("reaction_rejected") { args ->
+            val message = (args.firstOrNull() as? JSONObject)?.optString("message") ?: "Reacción no permitida"
+            emit(RealtimeEvent.Failure(message))
+        }
         socket.on("arena:full") { args ->
             val message = (args.firstOrNull() as? JSONObject)?.optString("message") ?: "Arena llena"
             emit(RealtimeEvent.Failure(message))
@@ -110,6 +140,14 @@ class SocketGameClient(
         socket.emit("player:place", payload)
     }
 
+    override fun usePower(targetPlayerId: String) {
+        socket.emit("use_power", JSONObject().put("targetPlayerId", targetPlayerId))
+    }
+
+    override fun sendReaction(emojiId: String) {
+        socket.emit("send_reaction", JSONObject().put("emojiId", emojiId))
+    }
+
     private fun parseSafely(args: Array<out Any>, parser: (JSONObject) -> RealtimeEvent) {
         runCatching { parser(args.first() as JSONObject) }
             .onSuccess(::emit)
@@ -133,6 +171,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
                 value = if (cell.isNull("value")) null else cell.getInt("value"),
                 ownerId = if (cell.isNull("ownerId")) null else cell.getString("ownerId"),
                 clearing = cell.getBoolean("clearing"),
+                golden = cell.optBoolean("golden", false),
             )
         }
     }
@@ -145,6 +184,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             colorHex = player.getString("color"),
             score = player.getInt("score"),
             blockedUntil = player.getLong("blockedUntil"),
+            energy = player.optInt("energy", 0),
         )
     }
     return GameSnapshot(
@@ -153,8 +193,15 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
         serverTime = json.getLong("serverTime"),
         board = board,
         players = players,
+        boardEvent = json.optJSONObject("boardEvent")?.let(::parseBoardEvent),
     )
 }
+
+private fun parseBoardEvent(json: JSONObject): ActiveBoardEvent = ActiveBoardEvent(
+    type = BoardEventType.valueOf(json.getString(if (json.has("type")) "type" else "eventType")),
+    startedAt = json.getLong("startedAt"),
+    endsAt = json.getLong("endsAt"),
+)
 
 private fun <T> JSONArray.mapObjects(transform: (Any) -> T): List<T> =
     List(length()) { index -> transform(get(index)) }

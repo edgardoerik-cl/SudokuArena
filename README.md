@@ -3,6 +3,11 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
+La versión `0.3.0` incorpora energía y ataques de niebla, eventos globales de
+Hora Espejo y Casillas de Oro, reacciones rápidas, vibración háptica y animación
+de conquista. Toda puntuación, penalización y consumo de energía se valida en
+el servidor.
+
 ## Estructura
 
 - `backend/`: estado en memoria, validación, concurrencia y tests.
@@ -27,7 +32,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-RoboDeFilas-v0.2.0-debug.apk`. No se debe subir ese archivo a Git:
+`SudokuArena-RoboDeFilas-v0.3.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 El prototipo debe desplegarse con **una sola instancia**: el estado vive en la

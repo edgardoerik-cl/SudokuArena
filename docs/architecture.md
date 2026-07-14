@@ -1,19 +1,28 @@
 # Arquitectura y contrato de tiempo real
 
-## Esquema público del estado
+## Estado público autoritativo
 
-El servidor conserva internamente `Set<string>` de tokens de limpieza por
-casilla. Esos tokens no salen por red; el cliente solo recibe `clearing`.
+El servidor mantiene el tablero, energía, puntuación, bloqueo y clima. Android
+sólo envía intenciones y reemplaza su estado local al recibir un snapshot.
 
 ```json
 {
   "gameId": "arena-main",
   "revision": 42,
   "serverTime": 1783915200000,
+  "boardEvent": {
+    "type": "GOLDEN_CELLS",
+    "startedAt": 1783915200000,
+    "endsAt": 1783915210000
+  },
   "board": [
     [
-      { "value": 5, "ownerId": "socket-A", "clearing": false },
-      { "value": null, "ownerId": null, "clearing": false }
+      {
+        "value": null,
+        "ownerId": null,
+        "clearing": false,
+        "golden": true
+      }
     ]
   ],
   "players": [
@@ -23,57 +32,67 @@ casilla. Esos tokens no salen por red; el cliente solo recibe `clearing`.
       "slot": 0,
       "color": "#E53935",
       "score": 230,
-      "blockedUntil": 0
+      "blockedUntil": 0,
+      "energy": 75
     }
   ]
 }
 ```
 
-`board` siempre contiene 9 filas de 9 casillas. `blockedUntil` y `serverTime`
-son epoch milliseconds; el cliente calcula un pequeño offset de reloj al recibir
-cada snapshot. `revision` crece con cada mutación autoritativa.
+`board` siempre contiene 9 filas de 9 casillas. La solución completa nunca se
+serializa. `revision` aumenta con cada mutación y `serverTime` permite que el
+cliente calcule la cuenta regresiva usando el reloj del servidor.
 
-La solución completa no se serializa. Permanece únicamente en el servidor y
-permite validar una casilla aun después de que una sección haya sido vaciada.
-
-## Eventos
+## Eventos Socket.IO
 
 | Dirección | Evento | Payload esencial |
 |---|---|---|
 | Cliente → servidor | `player:place` | `{ requestId, row, column, value, clientRevision }` |
+| Cliente → servidor | `use_power` | `{ targetPlayerId }` |
+| Cliente → servidor | `send_reaction` | `{ emojiId }` |
 | Servidor → cliente | `game:joined` | `{ playerId, state }` |
 | Servidor → todos | `game:state` | snapshot completo |
-| Servidor → cliente | `move:accepted` | `{ requestId, revision }` |
+| Servidor → cliente | `move:accepted` | `{ requestId, revision, cellPoints, goldenBonus }` |
 | Servidor → cliente | `move:rejected` | `{ requestId, code, message }` |
 | Servidor → cliente | `player:penalty` | `{ requestId, blockedUntil, reason }` |
 | Servidor → todos | `game:section-conquered` | `{ playerId, sections, bonus, clearAt }` |
+| Servidor → rival | `power_received` | `{ type: "FOG", attackerId }` |
+| Servidor → atacante | `power_used` / `power_rejected` | resultado del poder |
+| Servidor → todos | `board_event_start` | `{ eventType, startedAt, endsAt }` |
+| Servidor → todos | `board_event_end` | `{ eventType }` |
+| Servidor → todos | `reaction_received` | `{ reactionId, playerId, emojiId, sentAt }` |
 
-Códigos de rechazo: `INVALID_PAYLOAD`, `PLAYER_NOT_FOUND`, `BLOCKED`,
-`CELL_OCCUPIED`, `CELL_CLEARING`, `INCORRECT_VALUE` y `DUPLICATE_REQUEST`.
+Emojis admitidos: `LAUGH`, `CRY`, `ANGRY` y `SURPRISED`. El servidor limita las
+reacciones a una cada 500 ms por conexión.
 
-## Flujo y concurrencia
+## Reglas competitivas
 
-1. Android envía una intención y mantiene la casilla como pendiente.
-2. El listener del servidor valida y muta el tablero sin ningún `await` entre
-   lectura y escritura. El event loop de Node procesa esos callbacks uno por uno.
-3. La primera intención recibida ocupa la casilla e incrementa `revision`; la
-   siguiente observa la casilla ocupada y recibe `CELL_OCCUPIED`.
-4. El snapshot se emite después de la mutación. Android reemplaza su tablero,
-   en vez de intentar fusionar cambios localmente.
-5. Una sección completa se marca `clearing` y se vacía tras 1 segundo. Tokens
-   internos bloquean sus casillas durante limpiezas solapadas, evitando que un
-   temporizador anterior borre una jugada posterior.
+- Cada acierto entrega 10 puntos y 25 de energía, hasta un máximo de 100.
+- Niebla cuesta 100 de energía, exige un rival conectado y no permite atacarse
+  a sí mismo.
+- Cada 45 segundos comienza un evento aleatorio de 10 segundos.
+- Hora Espejo entrega 20 puntos por acierto y amplía el bloqueo por error de 3
+  a 6 segundos.
+- Casillas de Oro marca dos casillas vacías. El primer acierto en cada una suma
+  50 puntos adicionales y consume inmediatamente la marca.
+- Completar secciones mantiene el bono `100 × cantidad²` y programa su limpieza
+  un segundo después.
 
-Esta garantía solo cubre un proceso Node. Con varias réplicas, el orden global
-debe imponerse fuera del proceso.
+## Concurrencia y despliegue
 
-## Puntuación del prototipo
+Los listeners que mutan el juego no contienen `await`: el event loop de Node
+ordena cada jugada, poder y consumo de bonificación. La segunda jugada sobre una
+casilla ya ocupada recibe `CELL_OCCUPIED`.
 
-- Casilla correcta: 10 puntos.
-- Secciones completadas por la misma jugada: `100 × cantidad²` puntos. Así, una
-  jugada que completa fila y columna entrega 400 puntos de conquista.
+Esta garantía requiere una sola instancia del backend porque el estado vive en
+memoria. Para escalar horizontalmente se necesita un actor por partida o una
+operación transaccional en Redis, además del adaptador Redis de Socket.IO.
 
-El “mazo recargable” queda detrás de un futuro contrato privado
-`player:inventory`: no se inventó todavía una cadencia/capacidad porque esas
-reglas afectan directamente el balance. En este MVP los dígitos 1–9 son
-ilimitados.
+## Responsabilidades Android
+
+- `SocketGameClient`: traduce JSON a eventos de dominio.
+- `ArenaViewModel`: conserva UI reactiva, cuenta regresiva, niebla, reacciones y
+  emite intenciones hápticas sin depender de APIs Android.
+- `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.
+- `ArenaScreen`: dibuja oro y clima, anima la limpieza, muestra reacciones y
+  captura swipes rápidos del overlay de niebla.

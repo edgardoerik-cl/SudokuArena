@@ -2,6 +2,7 @@ export interface PublicCell {
   value: number | null;
   ownerId: string | null;
   clearing: boolean;
+  golden: boolean;
 }
 
 export interface PlayerState {
@@ -11,6 +12,15 @@ export interface PlayerState {
   color: string;
   score: number;
   blockedUntil: number;
+  energy: number;
+}
+
+export type BoardEventType = "MIRROR_HOUR" | "GOLDEN_CELLS";
+
+export interface ActiveBoardEvent {
+  type: BoardEventType;
+  startedAt: number;
+  endsAt: number;
 }
 
 export interface GameState {
@@ -19,6 +29,7 @@ export interface GameState {
   serverTime: number;
   board: PublicCell[][];
   players: PlayerState[];
+  boardEvent: ActiveBoardEvent | null;
 }
 
 export interface PlaceProposal {
@@ -27,6 +38,16 @@ export interface PlaceProposal {
   column: number;
   value: number;
   clientRevision?: number;
+}
+
+export interface PowerProposal {
+  targetPlayerId: string;
+}
+
+export type ReactionEmoji = "LAUGH" | "CRY" | "ANGRY" | "SURPRISED";
+
+export interface ReactionProposal {
+  emojiId: ReactionEmoji;
 }
 
 export type SectionKind = "row" | "column" | "box";
@@ -58,6 +79,8 @@ export type PlaceResult =
       revision: number;
       sections: ConqueredSection[];
       bonus: number;
+      cellPoints: number;
+      goldenBonus: number;
       clearPlan: ClearPlan | null;
     }
   | {
@@ -67,4 +90,24 @@ export type PlaceResult =
       message: string;
       stateChanged: boolean;
       blockedUntil?: number;
+    };
+
+export type PowerRejectionCode =
+  | "PLAYER_NOT_FOUND"
+  | "TARGET_NOT_FOUND"
+  | "SELF_TARGET"
+  | "NOT_ENOUGH_ENERGY"
+  | "INVALID_TARGET";
+
+export type PowerResult =
+  | {
+      accepted: true;
+      attackerId: string;
+      targetPlayerId: string;
+      type: "FOG";
+    }
+  | {
+      accepted: false;
+      code: PowerRejectionCode;
+      message: string;
     };

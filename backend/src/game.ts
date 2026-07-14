@@ -2,7 +2,13 @@ import { randomUUID } from "node:crypto";
 import {
   BOARD_SIZE,
   CELL_POINTS,
+  ENERGY_PER_HIT,
+  FOG_POWER_COST,
+  GOLDEN_CELL_BONUS,
   MAX_PLAYERS,
+  MAX_ENERGY,
+  MIRROR_CELL_POINTS,
+  MIRROR_PENALTY_MS,
   PENALTY_MS,
   PLAYER_COLORS,
   SECTION_POINTS,
@@ -10,11 +16,14 @@ import {
 } from "./constants.js";
 import type {
   ClearPlan,
+  ActiveBoardEvent,
+  BoardEventType,
   ConqueredSection,
   GameState,
   PlaceProposal,
   PlaceResult,
   PlayerState,
+  PowerResult,
   PublicCell
 } from "./types.js";
 
@@ -22,6 +31,7 @@ interface InternalCell {
   value: number | null;
   ownerId: string | null;
   clearTokens: Set<string>;
+  golden: boolean;
 }
 
 export class ArenaGame {
@@ -29,7 +39,8 @@ export class ArenaGame {
     Array.from({ length: BOARD_SIZE }, () => ({
       value: null,
       ownerId: null,
-      clearTokens: new Set<string>()
+      clearTokens: new Set<string>(),
+      golden: false
     }))
   );
 
@@ -37,6 +48,7 @@ export class ArenaGame {
   private readonly pendingSections = new Set<string>();
   private readonly processedRequests = new Map<string, Set<string>>();
   private revision = 0;
+  private activeBoardEvent: ActiveBoardEvent | null = null;
 
   constructor(readonly gameId = "arena-main") {}
 
@@ -55,7 +67,8 @@ export class ArenaGame {
       slot,
       color: PLAYER_COLORS[slot] ?? PLAYER_COLORS[0],
       score: 0,
-      blockedUntil: 0
+      blockedUntil: 0,
+      energy: 0
     };
     this.players.set(id, player);
     this.processedRequests.set(id, new Set());
@@ -85,8 +98,47 @@ export class ArenaGame {
       board: this.board.map((row) => row.map(toPublicCell)),
       players: [...this.players.values()]
         .sort((a, b) => a.slot - b.slot)
-        .map((player) => ({ ...player }))
+        .map((player) => ({ ...player })),
+      boardEvent: this.activeBoardEvent ? { ...this.activeBoardEvent } : null
     };
+  }
+
+  startBoardEvent(type: BoardEventType, now = Date.now(), durationMs = 10_000): ActiveBoardEvent | null {
+    if (this.activeBoardEvent) return null;
+    this.activeBoardEvent = { type, startedAt: now, endsAt: now + durationMs };
+    if (type === "GOLDEN_CELLS") {
+      const candidates = this.emptyPlayableCells();
+      shuffle(candidates);
+      for (const { row, column } of candidates.slice(0, 2)) {
+        this.board[row]![column]!.golden = true;
+      }
+    }
+    this.revision += 1;
+    return { ...this.activeBoardEvent };
+  }
+
+  endBoardEvent(expectedType?: BoardEventType): boolean {
+    if (!this.activeBoardEvent || (expectedType && this.activeBoardEvent.type !== expectedType)) return false;
+    for (const row of this.board) for (const cell of row) cell.golden = false;
+    this.activeBoardEvent = null;
+    this.revision += 1;
+    return true;
+  }
+
+  useFogPower(playerId: string, targetPlayerId: unknown): PowerResult {
+    const player = this.players.get(playerId);
+    if (!player) return powerReject("PLAYER_NOT_FOUND", "Jugador no registrado");
+    if (typeof targetPlayerId !== "string" || targetPlayerId.length === 0) {
+      return powerReject("INVALID_TARGET", "Objetivo inválido");
+    }
+    if (targetPlayerId === playerId) return powerReject("SELF_TARGET", "No puedes atacarte a ti mismo");
+    if (!this.players.has(targetPlayerId)) return powerReject("TARGET_NOT_FOUND", "El rival ya no está conectado");
+    if (player.energy < FOG_POWER_COST) {
+      return powerReject("NOT_ENOUGH_ENERGY", "Necesitas 100% de energía");
+    }
+    player.energy -= FOG_POWER_COST;
+    this.revision += 1;
+    return { accepted: true, attackerId: playerId, targetPlayerId, type: "FOG" };
   }
 
   place(playerId: string, proposal: PlaceProposal, now = Date.now()): PlaceResult {
@@ -120,7 +172,8 @@ export class ArenaGame {
     }
 
     if (SOLUTION[proposal.row]![proposal.column] !== proposal.value) {
-      player.blockedUntil = now + PENALTY_MS;
+      const penaltyMs = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_PENALTY_MS : PENALTY_MS;
+      player.blockedUntil = now + penaltyMs;
       this.revision += 1;
       return {
         ...reject(requestId, "INCORRECT_VALUE", "Número incorrecto", true),
@@ -132,7 +185,11 @@ export class ArenaGame {
     // respecto de los demás callbacks en este proceso Node.
     cell.value = proposal.value;
     cell.ownerId = playerId;
-    player.score += CELL_POINTS;
+    const cellPoints = this.activeBoardEvent?.type === "MIRROR_HOUR" ? MIRROR_CELL_POINTS : CELL_POINTS;
+    const goldenBonus = cell.golden ? GOLDEN_CELL_BONUS : 0;
+    cell.golden = false;
+    player.score += cellPoints + goldenBonus;
+    player.energy = Math.min(MAX_ENERGY, player.energy + ENERGY_PER_HIT);
 
     const sections = this.completedSections(proposal.row, proposal.column);
     const bonus = SECTION_POINTS * sections.length * sections.length;
@@ -147,6 +204,8 @@ export class ArenaGame {
       revision: this.revision,
       sections,
       bonus,
+      cellPoints,
+      goldenBonus,
       clearPlan
     };
   }
@@ -163,6 +222,7 @@ export class ArenaGame {
       // vence ya la vacía. Así no puede escribirse hasta terminar ambos timers.
       cell.value = null;
       cell.ownerId = null;
+      cell.golden = false;
     }
     for (const key of plan.sectionKeys) this.pendingSections.delete(key);
     if (changed) this.revision += 1;
@@ -213,10 +273,26 @@ export class ArenaGame {
       column: startColumn + (offset % 3)
     }));
   }
+
+  private emptyPlayableCells(): Array<{ row: number; column: number }> {
+    const cells: Array<{ row: number; column: number }> = [];
+    for (let row = 0; row < BOARD_SIZE; row += 1) {
+      for (let column = 0; column < BOARD_SIZE; column += 1) {
+        const cell = this.board[row]![column]!;
+        if (cell.value === null && cell.clearTokens.size === 0) cells.push({ row, column });
+      }
+    }
+    return cells;
+  }
 }
 
 function toPublicCell(cell: InternalCell): PublicCell {
-  return { value: cell.value, ownerId: cell.ownerId, clearing: cell.clearTokens.size > 0 };
+  return {
+    value: cell.value,
+    ownerId: cell.ownerId,
+    clearing: cell.clearTokens.size > 0,
+    golden: cell.golden
+  };
 }
 
 function isValidProposal(proposal: PlaceProposal): boolean {
@@ -261,4 +337,18 @@ function sectionKey(section: ConqueredSection): string {
 function sanitizeName(rawName: string, fallbackNumber: number): string {
   const clean = typeof rawName === "string" ? rawName.trim().replace(/\s+/g, " ").slice(0, 24) : "";
   return clean || `Jugador ${fallbackNumber}`;
+}
+
+function powerReject(
+  code: Extract<PowerResult, { accepted: false }>["code"],
+  message: string
+): Extract<PowerResult, { accepted: false }> {
+  return { accepted: false, code, message };
+}
+
+function shuffle<T>(values: T[]): void {
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [values[index], values[target]] = [values[target]!, values[index]!];
+  }
 }
