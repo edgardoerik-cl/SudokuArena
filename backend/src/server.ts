@@ -20,7 +20,8 @@ import type {
   RoomConfig,
   RoomPhase,
   RoomState,
-  TeamMode
+  TeamMode,
+  TileType
 } from "./types.js";
 
 interface RoomRuntime {
@@ -83,10 +84,14 @@ io.on("connection", (socket) => {
     if (room.hostPlayerId !== socket.id) return emitRoomError(socket, "HOST_ONLY", "Sólo el host puede configurar");
     if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     const teamMode = normalizeTeamMode(payload?.teamMode);
-    if (!teamMode || typeof payload?.powersEnabled !== "boolean") {
+    // tileType ausente conserva la opción actual para clientes 0.6 instalados.
+    const tileType = payload?.tileType === undefined
+      ? room.config.tileType
+      : normalizeTileType(payload.tileType);
+    if (!teamMode || !tileType || typeof payload?.powersEnabled !== "boolean") {
       return emitRoomError(socket, "INVALID_CONFIG", "Configuración de sala inválida");
     }
-    room.config = { powersEnabled: payload.powersEnabled, teamMode };
+    room.config = { powersEnabled: payload.powersEnabled, teamMode, tileType };
     emitRoomState(room);
   });
 
@@ -205,7 +210,7 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     boardEventTimeout: null,
     matchTimeout: null,
     hostPlayerId,
-    config: { powersEnabled: true, teamMode: "FFA" },
+    config: { powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS" },
     phase: "LOBBY",
     startedAt: null,
     endsAt: null
@@ -283,6 +288,10 @@ function normalizeRoomCode(value: unknown): string | null {
 
 function normalizeTeamMode(value: unknown): TeamMode | null {
   return value === "FFA" || value === "TWO_V_TWO" || value === "THREE_V_ONE" ? value : null;
+}
+
+function normalizeTileType(value: unknown): TileType | null {
+  return value === "NUMBERS" || value === "COLORS" ? value : null;
 }
 
 function validatePlayerCount(room: RoomRuntime): string | null {

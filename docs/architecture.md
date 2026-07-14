@@ -18,7 +18,7 @@ Cada sala publica además este estado de lobby/partida:
 {
   "roomCode": "4821",
   "hostPlayerId": "socket-host",
-  "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO" },
+  "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO", "tileType": "COLORS" },
   "phase": "PLAYING",
   "startedAt": 1783915200000,
   "endsAt": 1783915380000
@@ -77,7 +77,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 |---|---|---|
 | Cliente → servidor | `room:create` | sin payload |
 | Cliente → servidor | `room:join` | `{ roomCode }` |
-| Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode }` |
+| Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode, tileType }` |
 | Cliente → servidor | `room:start` | sin payload; sólo Host |
 | Servidor → cliente | `room:joined` | `{ roomCode }` |
 | Servidor → sala | `room:state` | configuración, fase y tiempos |

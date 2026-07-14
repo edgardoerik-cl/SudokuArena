@@ -25,11 +25,13 @@ data class Player(
 )
 
 enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
+enum class TileType { NUMBERS, COLORS }
 enum class RoomPhase { LOBBY, PLAYING, FINISHED }
 
 data class RoomConfig(
     val powersEnabled: Boolean = true,
     val teamMode: TeamMode = TeamMode.FFA,
+    val tileType: TileType = TileType.NUMBERS,
 )
 
 data class RoomState(

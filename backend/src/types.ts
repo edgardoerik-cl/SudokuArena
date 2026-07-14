@@ -7,12 +7,14 @@ export interface PublicCell {
 }
 
 export type TeamMode = "FFA" | "TWO_V_TWO" | "THREE_V_ONE";
+export type TileType = "NUMBERS" | "COLORS";
 export type PlayerRole = "PLAYER" | "TEAMMATE" | "BOSS" | "RAIDER";
 export type RoomPhase = "LOBBY" | "PLAYING" | "FINISHED";
 
 export interface RoomConfig {
   powersEnabled: boolean;
   teamMode: TeamMode;
+  tileType: TileType;
 }
 
 export interface RoomState {

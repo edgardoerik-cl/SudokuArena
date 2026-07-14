@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recurso provisional. Sustituir por sudoku_arena_splash_art.webp o .png. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="1080dp"
+    android:height="1920dp"
+    android:viewportWidth="1080"
+    android:viewportHeight="1920">
+    <path android:fillColor="#070918" android:pathData="M0,0H1080V1920H0Z" />
+    <path android:fillColor="#17205A" android:pathData="M0,0H1080V1040H0Z" />
+    <path android:fillColor="#22114A" android:pathData="M0,690L540,430L1080,690V1920H0Z" />
+    <path android:fillColor="#1900F0FF" android:pathData="M540,510L1010,1920H70Z" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M60,1540Q540,1160 1020,1540M20,1660Q540,1270 1060,1660M0,1790Q540,1380 1080,1790"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="10" />
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M120,1920L540,560M300,1920L540,560M780,1920L540,560M960,1920L540,560"
+        android:strokeColor="#8B5CF6"
+        android:strokeAlpha="0.55"
+        android:strokeWidth="7" />
+</vector>

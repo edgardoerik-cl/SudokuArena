@@ -24,12 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TeamMode
+import com.sudokuarena.domain.TileType
 
 @Composable
 fun RoomLobbyScreen(
     state: ArenaUiState,
     onPowersChanged: (Boolean) -> Unit,
     onTeamModeChanged: (TeamMode) -> Unit,
+    onTileTypeChanged: (TileType) -> Unit,
     onStart: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -79,6 +81,12 @@ fun RoomLobbyScreen(
                             enabled = isHost,
                         )
                     }
+                    Spacer(Modifier.height(8.dp))
+                    TileTypeSelector(
+                        selected = room.config.tileType,
+                        enabled = isHost,
+                        onSelected = onTileTypeChanged,
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text("MODO DE EQUIPO", style = MaterialTheme.typography.labelLarge)
                     TeamMode.entries.forEach { mode ->

@@ -81,9 +81,10 @@ describe("matchmaking por salas", () => {
     assert.equal(bobState.state.players.length, 2);
 
     const configuredAtBob = nextMatchingEvent<any>(bob, "room:state", (state) => state.config.powersEnabled === false);
-    alice.emit("room:configure", { powersEnabled: false, teamMode: "FFA" });
+    alice.emit("room:configure", { powersEnabled: false, teamMode: "FFA", tileType: "COLORS" });
     const configured = await configuredAtBob;
     assert.equal(configured.config.powersEnabled, false);
+    assert.equal(configured.config.tileType, "COLORS");
 
     const startedAtBob = nextEvent<any>(bob, "game:started");
     const finishedAtBob = nextEvent<any>(bob, "game:finished", 2_000);

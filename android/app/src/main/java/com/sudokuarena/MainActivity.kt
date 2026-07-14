@@ -3,6 +3,9 @@ package com.sudokuarena
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
@@ -27,10 +30,12 @@ import com.sudokuarena.presentation.ArenaViewModel
 import com.sudokuarena.presentation.WelcomeScreen
 import com.sudokuarena.presentation.MultiplayerEntryScreen
 import com.sudokuarena.presentation.SudokuArenaSplashScreen
+import com.sudokuarena.presentation.SoloSetupScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableImmersiveMode()
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -44,6 +49,20 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) enableImmersiveMode()
+    }
+
+    private fun enableImmersiveMode() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
 }
 
 @Composable
@@ -54,6 +73,7 @@ private fun SudokuArenaApp() {
     var screen by rememberSaveable { mutableStateOf("SPLASH") }
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
     var requestedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
+    var soloColorMode by rememberSaveable { mutableStateOf(false) }
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
 
     if (screen == "SPLASH") {
@@ -68,11 +88,23 @@ private fun SudokuArenaApp() {
             onSaveNickname = preferences::saveNickname,
             onSoloMode = {
                 requestedRoomCode = null
+                screen = "SOLO_SETUP"
+            },
+            onMultiplayerMode = { screen = "MULTIPLAYER_ENTRY" },
+        )
+        return
+    }
+
+    if (screen == "SOLO_SETUP") {
+        SoloSetupScreen(
+            isColorMode = soloColorMode,
+            onColorModeChanged = { soloColorMode = it },
+            onStart = {
                 mode = "SOLO"
                 sessionId += 1
                 screen = "GAME"
             },
-            onMultiplayerMode = { screen = "MULTIPLAYER_ENTRY" },
+            onBack = { screen = "WELCOME" },
         )
         return
     }
@@ -107,6 +139,7 @@ private fun SudokuArenaApp() {
     val factory = remember(sessionId) {
         ArenaViewModel.factory(
             isSoloMode = isSolo,
+            initialColorMode = isSolo && soloColorMode,
             gateway = gateway,
             sudokuGenerator = RandomSudokuGenerator(),
             recordStore = preferences,

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -91,6 +92,12 @@ fun MatchResultsOverlay(
                     "Tiempo ${formatResultDuration(state.soloElapsedMs)} · Récord ${formatResultDuration(state.soloBestMs)} · ${state.soloErrors} errores",
                     color = Color(0xFFFFCA28),
                 )
+            }
+            if (state.isColorMode) {
+                Text("MODO COLORES", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    SudokuTilePalette.colors.forEach { color -> ColorTile(color, Modifier.size(18.dp)) }
+                }
             }
             Spacer(Modifier.height(18.dp))
             results.forEachIndexed { index, result ->

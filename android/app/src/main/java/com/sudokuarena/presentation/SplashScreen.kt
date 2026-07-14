@@ -8,6 +8,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,12 +30,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.sudokuarena.R
 
 @Composable
 fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
@@ -57,15 +61,31 @@ fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
     }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(Color(0xFF283593), Color(0xFF10142E), Color(0xFF070918)),
-                ),
-            ),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
+        // Sustituir el recurso XML provisional por el WEBP/PNG final con el mismo nombre.
+        Image(
+            painter = painterResource(R.drawable.sudoku_arena_splash_art),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    this.alpha = alpha.value
+                    scaleX = 1.06f - alpha.value * 0.06f
+                    scaleY = 1.06f - alpha.value * 0.06f
+                },
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.22f), Color.Transparent, Color(0xDD070918)),
+                    ),
+                ),
+        )
         Canvas(Modifier.fillMaxSize()) {
             val horizon = size.height * 0.43f
             val vanishingPoint = Offset(size.width / 2f, horizon)
@@ -103,6 +123,12 @@ fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
             ArenaLogo(Modifier.size(210.dp))
             Text("SUDOKU", color = Color.White.copy(alpha = 0.82f + pulse * 0.18f), fontSize = 36.sp, fontWeight = FontWeight.Black)
             Text("ARENA", color = Color(0xFFFFCA28).copy(alpha = 0.72f + pulse * 0.28f), fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 7.sp)
+            Text(
+                "SINCRONIZANDO ARENA${if (pulse > 0.67f) "…" else ""}",
+                color = Color.White.copy(alpha = 0.58f + pulse * 0.24f),
+                fontSize = 12.sp,
+                letterSpacing = 2.sp,
+            )
         }
     }
 }

@@ -12,6 +12,7 @@ import com.sudokuarena.domain.RoomConfig
 import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.RoomState
 import com.sudokuarena.domain.TeamMode
+import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.MatchResultEntry
 import io.socket.client.IO
 import io.socket.client.Socket
@@ -171,7 +172,8 @@ class SocketGameClient(
             "room:configure",
             JSONObject()
                 .put("powersEnabled", config.powersEnabled)
-                .put("teamMode", config.teamMode.name),
+                .put("teamMode", config.teamMode.name)
+                .put("tileType", config.tileType.name),
         )
     }
 
@@ -271,6 +273,7 @@ private fun parseRoomState(json: JSONObject): RoomState {
         config = RoomConfig(
             powersEnabled = config.getBoolean("powersEnabled"),
             teamMode = TeamMode.valueOf(config.getString("teamMode")),
+            tileType = TileType.valueOf(config.optString("tileType", "NUMBERS")),
         ),
         phase = RoomPhase.valueOf(json.getString("phase")),
         startedAt = if (json.isNull("startedAt")) null else json.getLong("startedAt"),

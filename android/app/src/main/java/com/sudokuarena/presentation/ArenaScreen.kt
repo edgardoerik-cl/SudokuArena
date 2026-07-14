@@ -85,6 +85,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             state = state,
             onPowersChanged = viewModel::setPowersEnabled,
             onTeamModeChanged = viewModel::setTeamMode,
+            onTileTypeChanged = viewModel::setTileType,
             onStart = viewModel::startOnlineMatch,
             onExit = onExit,
         )
@@ -144,8 +145,8 @@ fun ArenaScreen(
                 }
                 Text(
                     when {
-                        state.isSoloMode -> "Solitario · ${formatDuration(state.soloElapsedMs)} · ${state.soloErrors} errores"
-                        state.connected && state.roomCode != null -> "Sala ${state.roomCode} · ${formatDuration(state.matchRemainingMs)}"
+                        state.isSoloMode -> "Solitario · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.soloElapsedMs)} · ${state.soloErrors} errores"
+                        state.connected && state.roomCode != null -> "Sala ${state.roomCode} · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.matchRemainingMs)}"
                         else -> "Conectando…"
                     },
                     color = if (state.connected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
@@ -160,6 +161,7 @@ fun ArenaScreen(
                 Spacer(Modifier.height(8.dp))
                 SudokuBoard(
                     board = state.board,
+                    isColorMode = state.isColorMode,
                     players = state.players.associateBy { it.id },
                     selected = state.selected,
                     enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
@@ -191,7 +193,7 @@ fun ArenaScreen(
                     ReactionMenu(onReaction)
                     Spacer(Modifier.height(8.dp))
                 }
-                NumberPad(enabled = state.canPlay, onNumber = onNumber)
+                TilePad(enabled = state.canPlay, isColorMode = state.isColorMode, onTile = onNumber)
             }
 
             if (state.fogSwipesRemaining > 0) {
@@ -330,6 +332,7 @@ private fun PowerPanel(state: ArenaUiState, onUseFog: (String) -> Unit) {
 @Composable
 private fun SudokuBoard(
     board: List<List<BoardCell>>,
+    isColorMode: Boolean,
     players: Map<String, Player>,
     selected: CellPosition?,
     enabled: Boolean,
@@ -378,25 +381,33 @@ private fun SudokuBoard(
 
             cell.value?.let { value ->
                 val scale = if (cell.clearing) burstScale else 1f
-                val layout = textMeasurer.measure(
-                    value.toString(),
-                    TextStyle(
-                        color = when {
-                            cell.clearing -> Color.Black.copy(alpha = 0.72f)
-                            cell.given -> Color(0xFF263238)
-                            else -> Color(0xFF1565C0)
-                        },
-                        fontSize = 22.sp * scale,
-                        fontWeight = if (cell.golden || cell.given) FontWeight.Bold else FontWeight.Normal,
-                    ),
-                )
-                drawText(
-                    textLayoutResult = layout,
-                    topLeft = Offset(
-                        topLeft.x + (cellSize - layout.size.width) / 2f,
-                        topLeft.y + (cellSize - layout.size.height) / 2f,
-                    ),
-                )
+                if (isColorMode) {
+                    val center = Offset(topLeft.x + cellSize / 2f, topLeft.y + cellSize / 2f)
+                    val radius = cellSize * 0.30f * scale
+                    drawCircle(Color.Black.copy(alpha = 0.50f), radius = radius + 2.2f, center = center)
+                    drawCircle(SudokuTilePalette.colorFor(value), radius = radius, center = center)
+                    drawCircle(Color.White.copy(alpha = 0.72f), radius = radius, center = center, style = Stroke(1.4f))
+                } else {
+                    val layout = textMeasurer.measure(
+                        value.toString(),
+                        TextStyle(
+                            color = when {
+                                cell.clearing -> Color.Black.copy(alpha = 0.72f)
+                                cell.given -> Color(0xFF263238)
+                                else -> Color(0xFF1565C0)
+                            },
+                            fontSize = 22.sp * scale,
+                            fontWeight = if (cell.golden || cell.given) FontWeight.Bold else FontWeight.Normal,
+                        ),
+                    )
+                    drawText(
+                        textLayoutResult = layout,
+                        topLeft = Offset(
+                            topLeft.x + (cellSize - layout.size.width) / 2f,
+                            topLeft.y + (cellSize - layout.size.height) / 2f,
+                        ),
+                    )
+                }
             }
         }
 
@@ -516,7 +527,7 @@ private fun FogInkOverlay(
 }
 
 @Composable
-private fun NumberPad(enabled: Boolean, onNumber: (Int) -> Unit) {
+private fun TilePad(enabled: Boolean, isColorMode: Boolean, onTile: (Int) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         (0..2).forEach { row ->
             Row(
@@ -526,10 +537,16 @@ private fun NumberPad(enabled: Boolean, onNumber: (Int) -> Unit) {
                 (1..3).forEach { column ->
                     val number = row * 3 + column
                     Button(
-                        onClick = { onNumber(number) },
+                        onClick = { onTile(number) },
                         enabled = enabled,
                         modifier = Modifier.weight(1f),
-                    ) { Text(number.toString()) }
+                    ) {
+                        if (isColorMode) {
+                            ColorTile(SudokuTilePalette.colorFor(number), Modifier.size(28.dp))
+                        } else {
+                            Text(number.toString())
+                        }
+                    }
                 }
             }
         }

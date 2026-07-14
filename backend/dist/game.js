@@ -16,7 +16,7 @@ export class ArenaGame {
     teamScores = new Map();
     revision = 0;
     activeBoardEvent = null;
-    configuration = { powersEnabled: true, teamMode: "FFA" };
+    configuration = { powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS" };
     constructor(gameId = "arena-main", solution = SOLUTION) {
         this.gameId = gameId;
         this.solution = solution;

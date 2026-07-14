@@ -15,6 +15,7 @@ import com.sudokuarena.domain.RoomConfig
 import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.RoomState
 import com.sudokuarena.domain.TeamMode
+import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
@@ -40,6 +41,7 @@ data class ReactionUi(val reactionId: String, val emojiId: String)
 
 data class ArenaUiState(
     val isSoloMode: Boolean = false,
+    val isColorMode: Boolean = false,
     val connected: Boolean = false,
     val roomCode: String? = null,
     val roomState: RoomState? = null,
@@ -75,6 +77,7 @@ data class ArenaUiState(
 
 class ArenaViewModel(
     private val isSoloMode: Boolean,
+    private val initialColorMode: Boolean,
     private val gateway: GameRealtimeGateway?,
     private val sudokuGenerator: SudokuGenerator,
     private val recordStore: PlayerRecordStore,
@@ -85,6 +88,7 @@ class ArenaViewModel(
     private val mutableState = MutableStateFlow(
         ArenaUiState(
             isSoloMode = isSoloMode,
+            isColorMode = isSoloMode && initialColorMode,
             soloBestMs = recordStore.soloBestMs(),
         ),
     )
@@ -174,6 +178,12 @@ class ArenaViewModel(
         gateway?.configureRoom(current.config.copy(teamMode = mode))
     }
 
+    fun setTileType(type: TileType) {
+        if (isSoloMode) return
+        val current = mutableState.value.roomState ?: return
+        gateway?.configureRoom(current.config.copy(tileType = type))
+    }
+
     fun startOnlineMatch() {
         if (!isSoloMode) gateway?.startRoom()
     }
@@ -214,6 +224,7 @@ class ArenaViewModel(
         }
         mutableState.value = ArenaUiState(
             isSoloMode = true,
+            isColorMode = initialColorMode,
             connected = true,
             roomCode = null,
             playerId = SOLO_PLAYER_ID,
@@ -232,7 +243,7 @@ class ArenaViewModel(
                 it.copy(
                     selected = null,
                     soloErrors = it.soloErrors + 1,
-                    message = "Número incorrecto: bloqueo de 3 segundos",
+                    message = "Ficha incorrecta: bloqueo de 3 segundos",
                 )
             }
             return
@@ -296,6 +307,7 @@ class ArenaViewModel(
                         playerId = event.playerId,
                         roomCode = event.roomCode,
                         roomState = event.roomState,
+                        isColorMode = event.roomState.config.tileType == TileType.COLORS,
                         message = null,
                     )
                 }
@@ -306,6 +318,7 @@ class ArenaViewModel(
                 it.copy(
                     roomState = event.roomState,
                     roomCode = event.roomState.roomCode,
+                    isColorMode = event.roomState.config.tileType == TileType.COLORS,
                     matchRemainingMs = event.roomState.endsAt?.let { end -> (end - serverNow()).coerceAtLeast(0) } ?: 0,
                 )
             }
@@ -415,6 +428,7 @@ class ArenaViewModel(
 
         fun factory(
             isSoloMode: Boolean,
+            initialColorMode: Boolean,
             gateway: GameRealtimeGateway?,
             sudokuGenerator: SudokuGenerator,
             recordStore: PlayerRecordStore,
@@ -425,6 +439,7 @@ class ArenaViewModel(
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ArenaViewModel(
                 isSoloMode = isSoloMode,
+                initialColorMode = initialColorMode,
                 gateway = gateway,
                 sudokuGenerator = sudokuGenerator,
                 recordStore = recordStore,
@@ -454,7 +469,7 @@ private fun emptyBoard(): List<List<BoardCell>> = List(9) { List(9) { BoardCell(
 private fun friendlyRejectionMessage(code: String, fallback: String): String = when (code) {
     "CELL_OCCUPIED" -> "Otro jugador llegó primero a esa casilla"
     "CELL_CLEARING" -> "Espera a que termine la conquista"
-    "INCORRECT_VALUE" -> "Número incorrecto: bloqueo temporal"
+    "INCORRECT_VALUE" -> "Ficha incorrecta: bloqueo temporal"
     "BLOCKED" -> "Aún estás bloqueado"
     "WAITING_FOR_PLAYERS" -> "Esperando al menos un rival"
     else -> fallback

@@ -55,7 +55,7 @@ export class ArenaGame {
   private readonly teamScores = new Map<string, number>();
   private revision = 0;
   private activeBoardEvent: ActiveBoardEvent | null = null;
-  private configuration: RoomConfig = { powersEnabled: true, teamMode: "FFA" };
+  private configuration: RoomConfig = { powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS" };
 
   constructor(
     readonly gameId = "arena-main",
