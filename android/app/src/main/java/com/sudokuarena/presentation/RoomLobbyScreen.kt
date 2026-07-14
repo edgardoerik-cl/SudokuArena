@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.BotDifficulty
+import com.sudokuarena.domain.GameType
 
 @Composable
 fun RoomLobbyScreen(
@@ -36,6 +37,7 @@ fun RoomLobbyScreen(
     onTeamModeChanged: (TeamMode) -> Unit,
     onTileTypeChanged: (TileType) -> Unit,
     onBotDifficultyChanged: (BotDifficulty) -> Unit,
+    onGameTypeChanged: (GameType) -> Unit,
     onLoadoutPower: (String) -> Unit,
     onFillWithAi: () -> Unit,
     onStart: () -> Unit,
@@ -91,6 +93,20 @@ fun RoomLobbyScreen(
 
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp)) {
+                    Text("ARENA SELECCIONADA", style = MaterialTheme.typography.labelLarge)
+                    GameType.entries.chunked(2).forEach { games ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            games.forEach { game ->
+                                OutlinedButton(
+                                    onClick = { onGameTypeChanged(game) },
+                                    enabled = isHost,
+                                    modifier = Modifier.weight(1f),
+                                ) { Text(if (room.config.gameType == game) "✓ ${shortGameTitle(game)}" else shortGameTitle(game), maxLines = 1) }
+                            }
+                            if (games.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -107,11 +123,15 @@ fun RoomLobbyScreen(
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    TileTypeSelector(
-                        selected = room.config.tileType,
-                        enabled = isHost,
-                        onSelected = onTileTypeChanged,
-                    )
+                    if (room.config.gameType == GameType.SUDOKU) {
+                        TileTypeSelector(
+                            selected = room.config.tileType,
+                            enabled = isHost,
+                            onSelected = onTileTypeChanged,
+                        )
+                    } else {
+                        Text("La matriz y sus fichas se adaptan automáticamente a esta arena.")
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text("DIFICULTAD DE IA", style = MaterialTheme.typography.labelLarge)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -159,6 +179,12 @@ fun RoomLobbyScreen(
             OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) { Text("Salir de la sala") }
         }
     }
+}
+
+private fun shortGameTitle(type: GameType): String = when (type) {
+    GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa Letras"
+    GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
+    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
 }
 
 private fun teamModeLabel(mode: TeamMode): String = when (mode) {

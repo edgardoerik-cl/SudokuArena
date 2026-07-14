@@ -8,6 +8,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -50,13 +54,17 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.sudokuarena.domain.LeaderboardRepository
+import com.sudokuarena.domain.GameType
 import kotlin.math.sin
 
 @Composable
 fun WelcomeScreen(
     initialNickname: String,
     initialXp: Int,
+    selectedGameType: GameType,
+    onGameSelected: (GameType) -> Unit,
     leaderboardRepository: LeaderboardRepository,
     onSaveNickname: (String) -> Unit,
     onSoloMode: () -> Unit,
@@ -109,17 +117,21 @@ fun WelcomeScreen(
             // Tras crear el perfil, el centro queda reservado únicamente a los modos.
             Column(
                 modifier = Modifier
-                    .align(Alignment.Center)
+                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 22.dp, vertical = 80.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(start = 18.dp, end = 18.dp, top = 185.dp, bottom = 88.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
+                GameArenaSelector(selectedGameType, onGameSelected)
                 NeonArenaButton(
                     text = "Modo Solitario",
                     onClick = onSoloMode,
+                    enabled = selectedGameType == GameType.SUDOKU,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(72.dp),
+                        .height(58.dp),
                 )
                 NeonArenaButton(
                     text = "Modo Multijugador",
@@ -127,7 +139,7 @@ fun WelcomeScreen(
                     secondary = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(72.dp),
+                        .height(58.dp),
                 )
                 NeonArenaButton(
                     text = "Reto Diario · +350 XP",
@@ -224,7 +236,7 @@ private fun AnimatedArenaBackground() {
                 val center = Offset(baseX + drift, size.height * (1f - progress))
                 val alpha = 0.05f + depth * 0.09f
                 val color = if (index % 2 == 0) ArenaColors.ElectricBlue else ArenaColors.Violet
-                if (index % 3 == 0) {
+                if (index % 4 == 0) {
                     val side = 18f + depth * 24f
                     drawRoundRect(
                         color.copy(alpha = alpha),
@@ -233,8 +245,15 @@ private fun AnimatedArenaBackground() {
                         cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f),
                         style = Stroke(2f),
                     )
-                } else {
+                } else if (index % 4 == 1) {
                     drawCircle(color.copy(alpha = alpha), radius = 5f + depth * 10f, center = center)
+                    drawLine(color.copy(alpha = alpha), center + Offset(5f, -8f), center + Offset(13f, -17f), 2f)
+                } else if (index % 4 == 2) {
+                    drawLine(color.copy(alpha = alpha), center + Offset(-10f, 0f), center + Offset(10f, 0f), 3f)
+                    drawLine(color.copy(alpha = alpha), center + Offset(0f, -10f), center + Offset(0f, 10f), 3f)
+                } else {
+                    drawCircle(color.copy(alpha = alpha), radius = 10f + depth * 5f, center = center, style = Stroke(2f))
+                    drawCircle(color.copy(alpha = alpha), radius = 2.5f, center = center)
                 }
             }
         }
@@ -267,6 +286,49 @@ private fun NeonArenaButton(
     ) {
         Text(text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
     }
+}
+
+@Composable
+private fun GameArenaSelector(selected: GameType, onSelected: (GameType) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        GameType.entries.chunked(2).forEach { rowGames ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowGames.forEach { game ->
+                    val active = selected == game
+                    Surface(
+                        color = if (active) ArenaColors.ElectricBlue.copy(alpha = .16f) else Color.White.copy(alpha = .86f),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .border(if (active) 2.dp else 1.dp, if (active) ArenaColors.ElectricBlue else Color(0xFFCBD5E1), RoundedCornerShape(16.dp))
+                            .clickable { onSelected(game) },
+                    ) {
+                        Row(
+                            Modifier.fillMaxSize().padding(horizontal = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        ) {
+                            Text(gameGlyph(game), fontSize = 20.sp)
+                            Text(gameMenuName(game), fontWeight = if (active) FontWeight.Black else FontWeight.Bold, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun gameGlyph(game: GameType): String = when (game) {
+    GameType.SUDOKU -> "9"; GameType.MINESWEEPER -> "✹"; GameType.WORD_SEARCH -> "A↗"; GameType.CROSSWORD -> "✚"
+    GameType.NONOGRAM -> "▦"; GameType.DOTS_AND_BOXES -> "□"; GameType.KAKURO -> "Σ"; GameType.MATHDOKU -> "×"
+    GameType.HITORI -> "◼"; GameType.RUMMIKUB -> "123"
+}
+
+private fun gameMenuName(game: GameType): String = when (game) {
+    GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa Letras"
+    GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
+    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
 }
 
 @Composable

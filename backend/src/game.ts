@@ -63,6 +63,7 @@ export class ArenaGame {
   private revision = 0;
   private activeBoardEvent: ActiveBoardEvent | null = null;
   private configuration: RoomConfig = {
+    gameType: "SUDOKU",
     powersEnabled: true,
     teamMode: "FFA",
     tileType: "NUMBERS",
@@ -84,6 +85,11 @@ export class ArenaGame {
 
   hasPlayer(id: string): boolean {
     return this.players.has(id);
+  }
+
+  canPlayerAct(id: string, now = Date.now()): boolean {
+    const player = this.players.get(id);
+    return player !== undefined && player.blockedUntil <= now;
   }
 
   addPlayer(id: string, rawName: string, isBot = false): PlayerState | null {
@@ -124,6 +130,46 @@ export class ArenaGame {
     player.powerLoadout = unique;
     this.revision += 1;
     return true;
+  }
+
+  applyGenericSuccess(playerId: string, basePoints: number, energyGain: number, now = Date.now()): boolean {
+    const player = this.players.get(playerId);
+    if (!player || player.blockedUntil > now) return false;
+    const previousCorrectAt = this.lastCorrectAt.get(playerId) ?? 0;
+    player.combo = now - previousCorrectAt <= COMBO_WINDOW_MS ? player.combo + 1 : 1;
+    player.maxCombo = Math.max(player.maxCombo, player.combo);
+    player.comboMultiplier = Math.min(MAX_COMBO_MULTIPLIER, 1 + Math.floor((player.combo - 1) / 3));
+    this.lastCorrectAt.set(playerId, now);
+    const bossMultiplier = player.role === "BOSS" ? 2 : 1;
+    const points = basePoints * player.comboMultiplier * bossMultiplier;
+    player.score += points;
+    player.energy = Math.min(MAX_ENERGY, player.energy + energyGain * bossMultiplier);
+    this.awardTeam(player.teamId, points);
+    this.revision += 1;
+    return true;
+  }
+
+  applyGenericPenalty(playerId: string, blockedUntil: number): boolean {
+    const player = this.players.get(playerId);
+    if (!player) return false;
+    player.blockedUntil = blockedUntil;
+    player.combo = 0;
+    player.comboMultiplier = 1;
+    this.lastCorrectAt.delete(playerId);
+    this.revision += 1;
+    return true;
+  }
+
+  consumeGenericRevealPower(playerId: string, now = Date.now()): { accepted: boolean; message: string } {
+    const player = this.players.get(playerId);
+    if (!player) return { accepted: false, message: "Jugador no registrado" };
+    if (!this.configuration.powersEnabled) return { accepted: false, message: "Los poderes están desactivados" };
+    if (!player.powerLoadout.includes("REVEAL")) return { accepted: false, message: "Ojo de Lince no está equipado" };
+    if (player.blockedUntil > now) return { accepted: false, message: "Estás temporalmente bloqueado" };
+    if (player.energy < REVEAL_POWER_COST) return { accepted: false, message: "Necesitas 50% de energía" };
+    player.energy -= REVEAL_POWER_COST;
+    this.revision += 1;
+    return { accepted: true, message: "Ojo de Lince activado" };
   }
 
   startMatch(config: RoomConfig, hostPlayerId: string): void {

@@ -34,13 +34,38 @@ data class Player(
 enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
 enum class TileType { NUMBERS, COLORS }
 enum class BotDifficulty { EASY, MEDIUM, HARD }
+enum class GameType {
+    SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
+    DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
+}
 enum class RoomPhase { LOBBY, PLAYING, SUDDEN_DEATH, FINISHED }
 
 data class RoomConfig(
+    val gameType: GameType = GameType.SUDOKU,
     val powersEnabled: Boolean = true,
     val teamMode: TeamMode = TeamMode.FFA,
     val tileType: TileType = TileType.NUMBERS,
     val botDifficulty: BotDifficulty = BotDifficulty.MEDIUM,
+)
+
+data class GenericCell(
+    val value: Any? = null,
+    val isRevealed: Boolean = false,
+    val ownerId: String? = null,
+    val isBlocked: Boolean = false,
+    val meta: Map<String, Any?> = emptyMap(),
+)
+
+data class GenericBoardState(
+    val gameId: String,
+    val gameType: GameType,
+    val revision: Long,
+    val serverTime: Long,
+    val rows: Int,
+    val columns: Int,
+    val board: List<List<GenericCell>>,
+    val completed: Boolean,
+    val meta: Map<String, Any?> = emptyMap(),
 )
 
 data class RoomState(
@@ -132,6 +157,9 @@ sealed interface RealtimeEvent {
         val playerId: String,
         val emojiId: String,
     ) : RealtimeEvent
+    data class GenericStateUpdated(val state: GenericBoardState) : RealtimeEvent
+    data class GenericMoveAccepted(val requestId: String, val points: Int, val completed: Boolean) : RealtimeEvent
+    data class GenericMoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 
@@ -147,6 +175,7 @@ interface GameRealtimeGateway {
     fun fillWithAi()
     fun requestRematch()
     fun setPowerLoadout(powers: List<String>)
+    fun makeMove(requestId: String, row: Int, col: Int, value: Any?)
     fun place(requestId: String, row: Int, column: Int, value: Int, clientRevision: Long)
     fun usePower(
         type: String,

@@ -15,6 +15,9 @@ import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.BotDifficulty
 import com.sudokuarena.domain.MatchResultEntry
+import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.GenericBoardState
+import com.sudokuarena.domain.GenericCell
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.WebSocket
@@ -90,6 +93,21 @@ class SocketGameClient(
             )
         } }
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
+        socket.on("generic:state") { args -> parseSafely(args) { RealtimeEvent.GenericStateUpdated(parseGenericState(it)) } }
+        socket.on("generic:move-accepted") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.GenericMoveAccepted(
+                requestId = payload.getString("requestId"),
+                points = payload.optInt("points", 0),
+                completed = payload.optBoolean("completed", false),
+            )
+        } }
+        socket.on("generic:move-rejected") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.GenericMoveRejected(
+                requestId = payload.optString("requestId"),
+                code = payload.optString("code", "INVALID_MOVE"),
+                message = payload.optString("message", "Movimiento no permitido"),
+            )
+        } }
         socket.on("game:sudden-death") { args -> parseSafely(args) { payload ->
             RealtimeEvent.SuddenDeath(payload.getLong("endsAt"))
         } }
@@ -196,6 +214,7 @@ class SocketGameClient(
             "room:configure",
             JSONObject()
                 .put("powersEnabled", config.powersEnabled)
+                .put("gameType", config.gameType.name)
                 .put("teamMode", config.teamMode.name)
                 .put("tileType", config.tileType.name)
                 .put("botDifficulty", config.botDifficulty.name),
@@ -216,6 +235,17 @@ class SocketGameClient(
 
     override fun setPowerLoadout(powers: List<String>) {
         socket.emit("player:loadout", JSONObject().put("powers", JSONArray(powers)))
+    }
+
+    override fun makeMove(requestId: String, row: Int, col: Int, value: Any?) {
+        socket.emit(
+            "make_move",
+            JSONObject()
+                .put("requestId", requestId)
+                .put("row", row)
+                .put("col", col)
+                .put("val", JSONObject.wrap(value)),
+        )
     }
 
     override fun place(
@@ -327,6 +357,7 @@ private fun parseRoomState(json: JSONObject): RoomState {
         roomCode = json.getString("roomCode"),
         hostPlayerId = json.getString("hostPlayerId"),
         config = RoomConfig(
+            gameType = GameType.valueOf(config.optString("gameType", "SUDOKU")),
             powersEnabled = config.getBoolean("powersEnabled"),
             teamMode = TeamMode.valueOf(config.getString("teamMode")),
             tileType = TileType.valueOf(config.optString("tileType", "NUMBERS")),
@@ -338,6 +369,42 @@ private fun parseRoomState(json: JSONObject): RoomState {
         suddenDeath = json.optBoolean("suddenDeath", false),
         rematchVotes = json.optInt("rematchVotes", 0),
     )
+}
+
+private fun parseGenericState(json: JSONObject): GenericBoardState {
+    val boardJson = json.getJSONArray("board")
+    val board = boardJson.mapObjects { rawRow ->
+        (rawRow as JSONArray).mapObjects { rawCell ->
+            val cell = rawCell as JSONObject
+            GenericCell(
+                value = cell.opt("value").takeUnless { it == JSONObject.NULL },
+                isRevealed = cell.optBoolean("isRevealed", false),
+                ownerId = cell.optString("ownerId").takeIf(String::isNotBlank),
+                isBlocked = cell.optBoolean("isBlocked", false),
+                meta = cell.optJSONObject("meta")?.toKotlinMap().orEmpty(),
+            )
+        }
+    }
+    return GenericBoardState(
+        gameId = json.getString("gameId"),
+        gameType = GameType.valueOf(json.getString("gameType")),
+        revision = json.getLong("revision"),
+        serverTime = json.getLong("serverTime"),
+        rows = json.getInt("rows"),
+        columns = json.getInt("columns"),
+        board = board,
+        completed = json.optBoolean("completed", false),
+        meta = json.optJSONObject("meta")?.toKotlinMap().orEmpty(),
+    )
+}
+
+private fun JSONObject.toKotlinMap(): Map<String, Any?> = keys().asSequence().associateWith { key ->
+    when (val value = opt(key)) {
+        JSONObject.NULL -> null
+        is JSONObject -> value.toKotlinMap()
+        is JSONArray -> List(value.length()) { index -> value.opt(index).takeUnless { it == JSONObject.NULL } }
+        else -> value
+    }
 }
 
 private fun <T> JSONArray.mapObjects(transform: (Any) -> T): List<T> =

@@ -18,6 +18,8 @@ import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.BotDifficulty
 import com.sudokuarena.domain.MatchResultEntry
+import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
@@ -73,6 +75,8 @@ data class ArenaUiState(
     val totalXp: Int = 0,
     val comboMessage: String? = null,
     val rematchRequested: Boolean = false,
+    val genericBoard: GenericBoardState? = null,
+    val explosionRemainingMs: Long = 0,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -83,6 +87,10 @@ data class ArenaUiState(
         get() = players.firstOrNull { it.id == playerId }
 
     val level: Int get() = totalXp / 500 + 1
+    val gameType: GameType get() = roomState?.config?.gameType ?: GameType.SUDOKU
+    val canMakeGenericMove: Boolean
+        get() = connected && gameType != GameType.SUDOKU && selected != null &&
+            penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null
 }
 
 class ArenaViewModel(
@@ -95,6 +103,7 @@ class ArenaViewModel(
     private val playerName: String,
     private val requestedRoomCode: String? = null,
     private val isDailyChallenge: Boolean = false,
+    private val initialGameType: GameType = GameType.SUDOKU,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(
         ArenaUiState(
@@ -122,6 +131,8 @@ class ArenaViewModel(
     private var roomRequestSent = false
     private var reconnectRoomCode = requestedRoomCode
     private var soloChallengeToken: String? = null
+    private var explosionUntil = 0L
+    private var initialGameConfigured = false
 
     init {
         if (isSoloMode) {
@@ -147,6 +158,7 @@ class ArenaViewModel(
                         soloElapsedMs = if (current.isSoloMode && !current.soloCompleted) {
                             (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
                         } else current.soloElapsedMs,
+                        explosionRemainingMs = (explosionUntil - System.currentTimeMillis()).coerceAtLeast(0),
                     )
                 }
                 delay(100)
@@ -222,6 +234,36 @@ class ArenaViewModel(
         if (isSoloMode) return
         val current = mutableState.value.roomState ?: return
         gateway?.configureRoom(current.config.copy(botDifficulty = difficulty))
+    }
+
+    fun setGameType(gameType: GameType) {
+        if (isSoloMode) return
+        val current = mutableState.value.roomState ?: return
+        gateway?.configureRoom(current.config.copy(gameType = gameType))
+    }
+
+    fun selectGeneric(row: Int, column: Int) {
+        val current = mutableState.value
+        val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
+        if (!cell.isBlocked && (cell.ownerId == null || current.gameType == GameType.RUMMIKUB) && current.penaltyRemainingMs == 0L && current.fogSwipesRemaining == 0) {
+            mutableState.update { it.copy(selected = CellPosition(row, column), message = null) }
+        }
+    }
+
+    fun makeGenericMove(value: Any?) {
+        val current = mutableState.value
+        val selected = current.selected ?: return
+        if (!current.canMakeGenericMove) return
+        val requestId = UUID.randomUUID().toString()
+        mutableState.update { it.copy(pendingRequestId = requestId, message = null) }
+        gateway?.makeMove(requestId, selected.row, selected.column, value)
+        mutableHaptics.tryEmit(HapticCue.CLICK)
+    }
+
+    fun makeWordSelection(start: CellPosition, end: CellPosition, word: String) {
+        if (mutableState.value.gameType != GameType.WORD_SEARCH) return
+        mutableState.update { it.copy(selected = start) }
+        makeGenericMove(mapOf("word" to word, "endRow" to end.row, "endCol" to end.column))
     }
 
     fun fillWithAi() {
@@ -392,6 +434,12 @@ class ArenaViewModel(
                     )
                 }
                 applySnapshot(event.snapshot)
+                if (!initialGameConfigured && requestedRoomCode == null && event.roomState.hostPlayerId == event.playerId) {
+                    initialGameConfigured = true
+                    if (event.roomState.config.gameType != initialGameType) {
+                        gateway?.configureRoom(event.roomState.config.copy(gameType = initialGameType))
+                    }
+                }
             }
             is RealtimeEvent.RoomError -> mutableState.update { it.copy(message = event.message) }
             is RealtimeEvent.RoomStateUpdated -> mutableState.update {
@@ -476,6 +524,23 @@ class ArenaViewModel(
             }
             is RealtimeEvent.BoardEventEnded -> mutableState.update { it.copy(boardEvent = null, boardEventRemainingMs = 0) }
             is RealtimeEvent.ReactionReceived -> showReaction(event)
+            is RealtimeEvent.GenericStateUpdated -> mutableState.update {
+                it.copy(genericBoard = event.state, revision = event.state.revision)
+            }
+            is RealtimeEvent.GenericMoveAccepted -> mutableState.update {
+                if (it.pendingRequestId == event.requestId) {
+                    it.copy(pendingRequestId = null, selected = null, message = "+${event.points} puntos")
+                } else it
+            }
+            is RealtimeEvent.GenericMoveRejected -> {
+                if (event.message.contains("Mina", ignoreCase = true)) {
+                    explosionUntil = System.currentTimeMillis() + 900L
+                    mutableHaptics.tryEmit(HapticCue.DANGER)
+                }
+                mutableState.update {
+                    it.copy(pendingRequestId = null, selected = null, message = event.message)
+                }
+            }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }
     }
@@ -556,6 +621,7 @@ class ArenaViewModel(
             playerName: String,
             requestedRoomCode: String? = null,
             isDailyChallenge: Boolean = false,
+            initialGameType: GameType = GameType.SUDOKU,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ArenaViewModel(
@@ -568,6 +634,7 @@ class ArenaViewModel(
                 playerName = playerName,
                 requestedRoomCode = requestedRoomCode,
                 isDailyChallenge = isDailyChallenge,
+                initialGameType = initialGameType,
             ) as T
         }
     }

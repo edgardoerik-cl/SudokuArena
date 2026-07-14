@@ -170,6 +170,35 @@ describe("matchmaking por salas", () => {
     assert.equal(state.roomState.phase, "PLAYING");
     assert.equal(state.state.players.filter((player: any) => !player.isBot).length, 1);
   });
+
+  it("sincroniza una arena genérica mediante make_move", async () => {
+    const host = await connect("Multiarena", `multi-${port}`);
+    const joinedPromise = nextEvent<any>(host, "game:joined");
+    host.emit("room:create");
+    await joinedPromise;
+    host.emit("fill_with_ai");
+    await nextMatchingEvent<any>(host, "game:state", (state) => state.players.length === 2);
+    const configured = nextMatchingEvent<any>(host, "room:state", (state) => state.config.gameType === "MINESWEEPER");
+    host.emit("room:configure", {
+      gameType: "MINESWEEPER",
+      powersEnabled: true,
+      teamMode: "FFA",
+      tileType: "NUMBERS",
+      botDifficulty: "MEDIUM"
+    });
+    await configured;
+    const genericStarted = nextMatchingEvent<any>(host, "generic:state", (state) => state.gameType === "MINESWEEPER");
+    host.emit("room:start");
+    const initial = await genericStarted;
+    assert.equal(initial.rows, 10);
+    assert.equal(initial.columns, 10);
+
+    const accepted = nextEvent<any>(host, "generic:move-accepted");
+    host.emit("make_move", { requestId: "mine-safe", row: 0, col: 0, val: "REVEAL" });
+    const result = await accepted;
+    assert.equal(result.accepted, true);
+    assert.equal(result.points, 10);
+  });
 });
 
 async function connect(name: string, clientId?: string): Promise<Socket> {

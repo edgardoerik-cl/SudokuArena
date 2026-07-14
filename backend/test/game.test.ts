@@ -198,7 +198,7 @@ describe("ArenaGame", () => {
   it("comparte el puntaje de equipo y la conquista de celda en 2 vs 2", () => {
     const game = new ArenaGame();
     for (const id of ["p1", "p2", "p3", "p4"]) game.addPlayer(id, id);
-    game.startMatch({ powersEnabled: true, teamMode: "TWO_V_TWO", tileType: "COLORS", botDifficulty: "MEDIUM" }, "p1");
+    game.startMatch({ gameType: "SUDOKU", powersEnabled: true, teamMode: "TWO_V_TWO", tileType: "COLORS", botDifficulty: "MEDIUM" }, "p1");
     game.place("p1", { requestId: "team", row: 0, column: 0, value: 5 });
     const state = game.snapshot();
 
@@ -212,7 +212,7 @@ describe("ArenaGame", () => {
     const game = new ArenaGame();
     game.addPlayer("p1", "Host");
     game.addPlayer("p2", "Rival");
-    game.startMatch({ powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    game.startMatch({ gameType: "SUDOKU", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
     game.place("p1", { requestId: "no-power", row: 0, column: 0, value: 5 });
 
     assert.equal(game.snapshot().players.find((player) => player.id === "p1")?.energy, 0);
@@ -224,7 +224,7 @@ describe("ArenaGame", () => {
   it("otorga al Jefe carga y puntos dobles en 3 vs 1", () => {
     const game = new ArenaGame();
     for (const id of ["boss", "r1", "r2", "r3"]) game.addPlayer(id, id);
-    game.startMatch({ powersEnabled: true, teamMode: "THREE_V_ONE", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "boss");
+    game.startMatch({ gameType: "SUDOKU", powersEnabled: true, teamMode: "THREE_V_ONE", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "boss");
     game.place("boss", { requestId: "boss-hit", row: 0, column: 0, value: 5 });
     const boss = game.snapshot().players.find((player) => player.id === "boss");
 
@@ -253,7 +253,7 @@ describe("ArenaGame", () => {
     for (const id of ["h1", "h2", "h3"]) game.addPlayer(id, id);
     game.addPlayer("bot-boss", "Bot_Jefe", true);
     game.startMatch(
-      { powersEnabled: true, teamMode: "THREE_V_ONE", tileType: "COLORS", botDifficulty: "HARD" },
+      { gameType: "SUDOKU", powersEnabled: true, teamMode: "THREE_V_ONE", tileType: "COLORS", botDifficulty: "HARD" },
       "bot-boss"
     );
     const state = game.snapshot();

@@ -10,6 +10,41 @@
   sala. Cada sala contiene su propio `ArenaGame`, solución, jugadores, clima y
   temporizadores; ningún evento se transmite a otras salas.
 
+La configuración online acepta `gameType`: `SUDOKU`, `MINESWEEPER`,
+`WORD_SEARCH`, `CROSSWORD`, `NONOGRAM`, `DOTS_AND_BOXES`, `KAKURO`,
+`MATHDOKU`, `HITORI` o `RUMMIKUB`. El modo Solitario permanece disponible para
+Sudoku; las otras arenas son competitivas y autoritativas en esta versión.
+
+## Motor matricial genérico
+
+Las nueve arenas adicionales usan `GenericPuzzleEngine`. La respuesta nunca
+incluye su matriz privada de soluciones; sólo publica el tablero visible:
+
+```json
+{
+  "gameId": "room-4821",
+  "gameType": "MINESWEEPER",
+  "revision": 7,
+  "rows": 10,
+  "columns": 10,
+  "board": [[{
+    "value": null,
+    "isRevealed": false,
+    "ownerId": null,
+    "isBlocked": false,
+    "meta": {}
+  }]],
+  "players": [],
+  "completed": false,
+  "meta": {}
+}
+```
+
+`meta` representa pistas, jaulas, palabras, aristas o color de una ficha sin
+cambiar el contrato base. Las jugadas de humanos, Bots y Ojo de Lince atraviesan
+el mismo validador. Buscaminas aplica cinco segundos al tocar una mina y
+Timbiriche refleja cada arista en el cuadro adyacente.
+
 ## Estado público autoritativo online
 
 Cada sala publica además este estado de lobby/partida:
@@ -18,7 +53,7 @@ Cada sala publica además este estado de lobby/partida:
 {
   "roomCode": "4821",
   "hostPlayerId": "socket-host",
-  "config": { "powersEnabled": true, "teamMode": "TWO_V_TWO", "tileType": "COLORS", "botDifficulty": "HARD" },
+  "config": { "gameType": "SUDOKU", "powersEnabled": true, "teamMode": "TWO_V_TWO", "tileType": "COLORS", "botDifficulty": "HARD" },
   "phase": "PLAYING",
   "startedAt": 1783915200000,
   "endsAt": 1783915380000,
@@ -79,7 +114,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 |---|---|---|
 | Cliente → servidor | `room:create` | sin payload |
 | Cliente → servidor | `room:join` | `{ roomCode }` |
-| Cliente → servidor | `room:configure` | `{ powersEnabled, teamMode, tileType, botDifficulty }` |
+| Cliente → servidor | `room:configure` | `{ gameType, powersEnabled, teamMode, tileType, botDifficulty }` |
 | Host → servidor | `fill_with_ai` | Completa el mínimo FFA o los cuatro slots de equipo con Bots |
 | Cliente → servidor | `room:start` | sin payload; sólo Host |
 | Cliente → servidor | `player:loadout` | `{ powers: ["FOG", "REVEAL"] }`; exactamente dos |
@@ -88,10 +123,13 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → sala | `room:state` | configuración, fase y tiempos |
 | Servidor → cliente | `room:error` | `{ code, message }` |
 | Cliente → servidor | `player:place` | `{ requestId, row, column, value, clientRevision }` |
+| Cliente → servidor | `make_move` | `{ requestId, row, col, val }`; arenas no Sudoku |
 | Cliente → servidor | `use_power` | `{ type, targetPlayerId?, row?, column?, requestId? }` |
 | Cliente → servidor | `send_reaction` | `{ emojiId }` |
 | Servidor → cliente | `game:joined` | `{ playerId, roomCode, state }` |
 | Servidor → todos | `game:state` | snapshot completo |
+| Servidor → todos | `generic:state` | matriz genérica autoritativa |
+| Servidor → cliente | `generic:move-accepted` / `generic:move-rejected` | resultado universal |
 | Servidor → cliente | `move:accepted` | `{ requestId, revision, cellPoints, goldenBonus }` |
 | Servidor → cliente | `move:rejected` | `{ requestId, code, message }` |
 | Servidor → cliente | `player:penalty` | `{ requestId, blockedUntil, reason }` |

@@ -3,7 +3,12 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `1.0.0` incorpora un menú animado 100% Compose con un nuevo emblema vivo, conquista neón por jugador,
+La versión `1.1.0` convierte la aplicación en una Multiarena con diez juegos:
+Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
+Kakuro, Mathdoku, Hitori y Rummikub. Todos comparten salas, colores de conquista,
+Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
+
+La plataforma también incorpora un menú animado 100% Compose con un nuevo emblema vivo, conquista neón por jugador,
 Escudo de Espejo, Ojo de Lince, Bots estratégicos, tema de alto contraste,
 Splash Art e icono definitivos,
 pantalla inmersiva, fichas de números o colores y perfil persistente,
@@ -39,7 +44,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-v1.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`SudokuArena-v1.1.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

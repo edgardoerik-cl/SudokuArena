@@ -12,6 +12,8 @@ import {
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
+import { GenericPuzzleEngine } from "./puzzles/engine.js";
+import { GAME_TYPES, type GameType, type GenericMove } from "./puzzles/types.js";
 import type {
   BotDifficulty,
   BoardEventType,
@@ -47,6 +49,7 @@ interface RoomRuntime {
   bots: Map<string, BotRuntime>;
   rematchVotes: Set<string>;
   suddenDeath: boolean;
+  genericEngine: GenericPuzzleEngine | null;
 }
 
 const port = Number(process.env.PORT ?? 3000);
@@ -74,7 +77,9 @@ const reactionEmojis = new Set<ReactionEmoji>(["LAUGH", "CRY", "ANGRY", "SURPRIS
 const botNames = ["Bot_Androide", "Bot_Pro", "Bot_Neón", "Bot_Lógico", "Bot_Turbo", "Bot_Arena"];
 
 const boardEventInterval = setInterval(() => {
-  for (const room of rooms.values()) if (room.phase === "PLAYING") startRandomBoardEvent(room);
+  for (const room of rooms.values()) {
+    if (room.phase === "PLAYING" && room.config.gameType === "SUDOKU") startRandomBoardEvent(room);
+  }
 }, BOARD_EVENT_INTERVAL_MS);
 
 io.on("connection", (socket) => {
@@ -120,7 +125,9 @@ io.on("connection", (socket) => {
     if (!teamMode || !tileType || !botDifficulty || typeof payload?.powersEnabled !== "boolean") {
       return emitRoomError(socket, "INVALID_CONFIG", "Configuración de sala inválida");
     }
-    room.config = { powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty };
+    const gameType = payload?.gameType === undefined ? room.config.gameType : normalizeGameType(payload.gameType);
+    if (!gameType) return emitRoomError(socket, "INVALID_GAME", "Tipo de juego no permitido");
+    room.config = { gameType, powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty };
     emitRoomState(room);
   });
 
@@ -178,6 +185,20 @@ io.on("connection", (socket) => {
     processPlacement(room, playerId, payload, socket);
   });
 
+  socket.on("make_move", (payload: GenericMove) => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH") {
+      socket.emit("generic:move-rejected", { requestId: payload?.requestId ?? "", code: "MATCH_NOT_PLAYING", message: "La partida no está en curso" });
+      return;
+    }
+    if (!room.genericEngine) {
+      socket.emit("generic:move-rejected", { requestId: payload?.requestId ?? "", code: "USE_SUDOKU_MOVE", message: "Sudoku utiliza player:place" });
+      return;
+    }
+    processGenericMove(room, playerId, payload, socket);
+  });
+
   socket.on("use_power", (payload: PowerProposal) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
@@ -187,6 +208,26 @@ io.on("connection", (socket) => {
     const powerType = payload?.type ?? "FOG";
     if (powerType !== "FOG" && powerType !== "REFLECT" && powerType !== "REVEAL") {
       socket.emit("power_rejected", { code: "INVALID_POWER", message: "Poder no permitido" });
+      return;
+    }
+    if (powerType === "REVEAL" && room.genericEngine) {
+      const row = Number(payload?.row);
+      const col = Number(payload?.column);
+      const revealMove = room.genericEngine.revealMove(row, col);
+      if (!revealMove) {
+        socket.emit("power_rejected", { code: "INVALID_CELL", message: "Selecciona una casilla disponible" });
+        return;
+      }
+      const consumed = room.game.consumeGenericRevealPower(playerId);
+      if (!consumed.accepted) {
+        socket.emit("power_rejected", { code: "GENERIC_REVEAL_REJECTED", message: consumed.message });
+        return;
+      }
+      const revealResult = room.genericEngine.makeMove(playerId, revealMove, room.game, Date.now(), { rewardEnergy: false });
+      socket.emit("power_used", { type: "REVEAL", row, column: col });
+      emitGenericState(room);
+      emitState(room);
+      if (revealResult.completed) finishMatch(room, true);
       return;
     }
     const result = powerType === "REFLECT"
@@ -250,13 +291,14 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     boardEventTimeout: null,
     matchTimeout: null,
     hostPlayerId,
-    config: { powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" },
+    config: { gameType: "SUDOKU", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" },
     phase: "LOBBY",
     startedAt: null,
     endsAt: null,
     bots: new Map(),
     rematchVotes: new Set(),
-    suddenDeath: false
+    suddenDeath: false,
+    genericEngine: null
   };
   rooms.set(code, room);
   return room;
@@ -364,6 +406,10 @@ function normalizeBotDifficulty(value: unknown): BotDifficulty | null {
   return value === "EASY" || value === "MEDIUM" || value === "HARD" ? value : null;
 }
 
+function normalizeGameType(value: unknown): GameType | null {
+  return typeof value === "string" && (GAME_TYPES as readonly string[]).includes(value) ? value as GameType : null;
+}
+
 function validatePlayerCount(room: RoomRuntime): string | null {
   const count = room.game.playerCount;
   if (room.config.teamMode === "FFA" && count < 2) return "Se necesitan al menos 2 jugadores";
@@ -380,8 +426,12 @@ function startMatch(room: RoomRuntime, rematch = false): void {
   room.endsAt = room.startedAt + matchDurationMs;
   if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
   else room.game.startMatch(room.config, resolveBossPlayerId(room));
+  room.genericEngine = room.config.gameType === "SUDOKU"
+    ? null
+    : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`);
   emitRoomState(room);
   emitState(room);
+  emitGenericState(room);
   io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
@@ -468,6 +518,30 @@ function processPlacement(room: RoomRuntime, playerId: string, payload: PlacePro
   return result;
 }
 
+function processGenericMove(room: RoomRuntime, playerId: string, payload: GenericMove, responder?: Socket): void {
+  const engine = room.genericEngine;
+  if (!engine) return;
+  const result = engine.makeMove(playerId, payload, room.game);
+  if (!result.accepted) {
+    responder?.emit("generic:move-rejected", result);
+    if (result.penaltyMs > 0) {
+      const blockedUntil = Date.now() + result.penaltyMs;
+      responder?.emit("player:penalty", { requestId: result.requestId, blockedUntil, reason: result.code });
+    }
+    emitState(room);
+    emitGenericState(room);
+    return;
+  }
+  responder?.emit("generic:move-accepted", result);
+  emitState(room);
+  emitGenericState(room);
+  if (result.completed || room.phase === "SUDDEN_DEATH") finishMatch(room, true);
+}
+
+function emitGenericState(room: RoomRuntime): void {
+  if (room.genericEngine) io.to(room.code).emit("generic:state", room.genericEngine.snapshot(room.game));
+}
+
 function hasTopScoreTie(room: RoomRuntime): boolean {
   const results = room.game.matchResults();
   if (results.length < 2) return false;
@@ -520,14 +594,28 @@ function scheduleBotAction(room: RoomRuntime, botId: string): void {
     if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH")) return;
     if (!runBotSupportPower(room, botId, runtime)) {
       runBotPower(room, botId);
-      const proposal = room.game.createBotProposal(botId, profile.accuracy);
-      if (proposal) {
+      if (room.genericEngine) {
+        const proposal = room.genericEngine.createBotMove(profile.accuracy);
+        if (proposal) {
+          const result = room.genericEngine.makeMove(botId, proposal, room.game);
+          if (result.accepted) {
+            runtime.lastProgressAt = Date.now();
+            runtime.failedActions = 0;
+          } else if (result.code !== "CELL_LOCKED") runtime.failedActions += 1;
+          emitState(room);
+          emitGenericState(room);
+          if (result.completed || room.phase === "SUDDEN_DEATH") finishMatch(room, true);
+        }
+      } else {
+        const proposal = room.game.createBotProposal(botId, profile.accuracy);
+        if (proposal) {
         const result = processPlacement(room, botId, proposal);
         if (result.accepted) {
           runtime.lastProgressAt = Date.now();
           runtime.failedActions = 0;
         } else if (result.code !== "BLOCKED") {
           runtime.failedActions += 1;
+        }
         }
       }
     }
@@ -556,6 +644,22 @@ function runBotSupportPower(room: RoomRuntime, botId: string, runtime: BotRuntim
 
   const stuck = runtime.failedActions >= 2 || now - runtime.lastProgressAt >= 7_000;
   if (bot.energy >= 50 && stuck) {
+    if (room.genericEngine) {
+      const target = room.genericEngine.createBotMove(1);
+      if (!target) return false;
+      const consumed = room.game.consumeGenericRevealPower(botId, now);
+      if (consumed.accepted) {
+        const reveal = room.genericEngine.makeMove(botId, target, room.game, now, { rewardEnergy: false });
+        if (reveal.accepted) {
+          emitState(room);
+          emitGenericState(room);
+          runtime.lastProgressAt = now;
+          runtime.failedActions = 0;
+          return true;
+        }
+      }
+      return false;
+    }
     const target = room.game.createBotProposal(botId, 1);
     if (target) {
       const reveal = room.game.useRevealPower(botId, target.row, target.column, `bot-reveal-${randomUUID()}`, now);

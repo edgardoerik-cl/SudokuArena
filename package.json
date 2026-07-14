@@ -1,8 +1,8 @@
 {
   "name": "sudoku-arena",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Sudoku Arena multiplayer prototype",
+  "description": "Sudoku Arena: multiarena de puzzles competitivos",
   "engines": {
     "node": ">=20"
   },

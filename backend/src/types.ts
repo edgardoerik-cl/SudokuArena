@@ -1,3 +1,5 @@
+import type { GameType } from "./puzzles/types.js";
+
 export interface PublicCell {
   value: number | null;
   ownerId: string | null;
@@ -15,6 +17,7 @@ export type BotPersona = "CALCULATOR" | "TRICKSTER" | "GUARDIAN";
 export type ActivePower = "FOG" | "REFLECT" | "REVEAL";
 
 export interface RoomConfig {
+  gameType: GameType;
   powersEnabled: boolean;
   teamMode: TeamMode;
   tileType: TileType;

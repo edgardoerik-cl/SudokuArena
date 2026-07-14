@@ -68,6 +68,7 @@ import com.sudokuarena.domain.BoardEventType
 import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.TeamMode
+import com.sudokuarena.domain.GameType
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -88,9 +89,26 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onTeamModeChanged = viewModel::setTeamMode,
             onTileTypeChanged = viewModel::setTileType,
             onBotDifficultyChanged = viewModel::setBotDifficulty,
+            onGameTypeChanged = viewModel::setGameType,
             onLoadoutPower = viewModel::toggleLoadoutPower,
             onFillWithAi = viewModel::fillWithAi,
             onStart = viewModel::startOnlineMatch,
+            onExit = onExit,
+        )
+        return
+    }
+
+    if (!state.isSoloMode && state.gameType != GameType.SUDOKU) {
+        GenericArenaScreen(
+            state = state,
+            onCellSelected = viewModel::selectGeneric,
+            onMove = viewModel::makeGenericMove,
+            onWordSelection = viewModel::makeWordSelection,
+            onUseFog = viewModel::useFog,
+            onUseReflect = viewModel::useReflect,
+            onUseReveal = viewModel::useReveal,
+            onFogSwipe = viewModel::cleanFogSwipe,
+            onRematch = viewModel::requestRematch,
             onExit = onExit,
         )
         return
@@ -255,7 +273,7 @@ fun ArenaScreen(
 }
 
 @Composable
-private fun ShieldAuraOverlay(modifier: Modifier = Modifier) {
+fun ShieldAuraOverlay(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "shieldAura")
     val pulse by transition.animateFloat(
         initialValue = 0.35f,
@@ -297,7 +315,7 @@ private fun BoardEventBanner(state: ArenaUiState) {
 }
 
 @Composable
-private fun Scoreboard(state: ArenaUiState) {
+fun Scoreboard(state: ArenaUiState) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -364,7 +382,7 @@ private fun FloatingReaction(reaction: ReactionUi, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun PowerPanel(
+fun PowerPanel(
     state: ArenaUiState,
     onUseFog: (String) -> Unit,
     onUseReflect: () -> Unit,
@@ -520,7 +538,7 @@ private fun SudokuBoard(
 }
 
 @Composable
-private fun PenaltyOverlay(remainingMs: Long, modifier: Modifier = Modifier) {
+fun PenaltyOverlay(remainingMs: Long, modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "penaltyBlink")
     val blink by transition.animateFloat(
         initialValue = 0.10f,
@@ -549,7 +567,7 @@ private fun PenaltyOverlay(remainingMs: Long, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ReactionMenu(onReaction: (String) -> Unit) {
+fun ReactionMenu(onReaction: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -572,7 +590,7 @@ private fun ReactionMenu(onReaction: (String) -> Unit) {
 }
 
 @Composable
-private fun FogInkOverlay(
+fun FogInkOverlay(
     swipesRemaining: Int,
     onValidSwipe: () -> Unit,
     modifier: Modifier = Modifier,

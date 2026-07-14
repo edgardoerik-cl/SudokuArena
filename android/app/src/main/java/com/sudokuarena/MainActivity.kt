@@ -29,6 +29,7 @@ import com.sudokuarena.presentation.MultiplayerEntryScreen
 import com.sudokuarena.presentation.SudokuArenaSplashScreen
 import com.sudokuarena.presentation.SoloSetupScreen
 import com.sudokuarena.presentation.SudokuArenaTheme
+import com.sudokuarena.domain.GameType
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,6 +67,7 @@ private fun SudokuArenaApp() {
     var requestedRoomCode by rememberSaveable { mutableStateOf<String?>(null) }
     var soloColorMode by rememberSaveable { mutableStateOf(false) }
     var dailyChallenge by rememberSaveable { mutableStateOf(false) }
+    var selectedGameType by rememberSaveable { mutableStateOf(GameType.SUDOKU) }
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
 
     if (screen == "SPLASH") {
@@ -77,6 +79,8 @@ private fun SudokuArenaApp() {
         WelcomeScreen(
             initialNickname = preferences.nickname(),
             initialXp = preferences.totalXp(),
+            selectedGameType = selectedGameType,
+            onGameSelected = { selectedGameType = it },
             leaderboardRepository = leaderboardRepository,
             onSaveNickname = preferences::saveNickname,
             onSoloMode = {
@@ -150,6 +154,7 @@ private fun SudokuArenaApp() {
             playerName = preferences.nickname(),
             requestedRoomCode = requestedRoomCode,
             isDailyChallenge = isSolo && dailyChallenge,
+            initialGameType = selectedGameType,
         )
     }
     val arenaViewModel: ArenaViewModel = viewModel(
