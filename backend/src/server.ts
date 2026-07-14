@@ -10,6 +10,7 @@ import {
   createRandomSolution
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
+import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import type {
   BoardEventType,
   PlaceProposal,
@@ -41,20 +42,9 @@ const matchDurationMs = Number.isFinite(requestedMatchDuration) && requestedMatc
   ? requestedMatchDuration
   : MATCH_DURATION_MS;
 const rooms = new Map<string, RoomRuntime>();
+const leaderboard = new LeaderboardStore();
 
-const httpServer = createServer((request, response) => {
-  if (request.url === "/health") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({
-      ok: true,
-      version: APP_VERSION,
-      rooms: rooms.size,
-      players: [...rooms.values()].reduce((total, room) => total + room.game.playerCount, 0)
-    }));
-    return;
-  }
-  response.writeHead(404).end();
-});
+const httpServer = createServer((request, response) => void handleHttp(request, response));
 
 const io = new Server(httpServer, {
   cors: { origin: allowedOrigin },
@@ -322,10 +312,81 @@ function finishMatch(room: RoomRuntime): void {
   room.boardEventTimeout = null;
   room.game.endBoardEvent();
   const results = room.game.matchResults();
+  const winningTeam = results[0]?.teamId;
+  for (const winner of results.filter((entry) => entry.teamId === winningTeam)) {
+    void leaderboard.recordMultiplayerWin(winner.name).catch((error) => {
+      console.error("No se pudo registrar la victoria", error);
+    });
+  }
   emitRoomState(room);
   emitState(room);
   io.to(room.code).emit("game:finished", { results, finishedAt: room.endsAt });
   room.matchTimeout = null;
+}
+
+async function handleHttp(
+  request: import("node:http").IncomingMessage,
+  response: import("node:http").ServerResponse
+): Promise<void> {
+  try {
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, corsHeaders()).end();
+      return;
+    }
+    if (request.method === "GET" && request.url === "/health") {
+      sendJson(response, 200, {
+        ok: true,
+        version: APP_VERSION,
+        rooms: rooms.size,
+        players: [...rooms.values()].reduce((total, room) => total + room.game.playerCount, 0)
+      });
+      return;
+    }
+    if (request.method === "GET" && request.url === "/api/leaderboards") {
+      sendJson(response, 200, await leaderboard.topTen());
+      return;
+    }
+    if (request.method === "POST" && request.url === "/api/leaderboards/solo") {
+      const payload = await readJsonBody(request);
+      const nickname = sanitizeNickname(payload.nickname);
+      const elapsedMs = Number(payload.elapsedMs);
+      if (!Number.isInteger(elapsedMs) || elapsedMs < 1_000 || elapsedMs > 86_400_000) {
+        sendJson(response, 400, { error: "Tiempo inválido" });
+        return;
+      }
+      await leaderboard.recordSolo(nickname, elapsedMs);
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+    sendJson(response, 404, { error: "Not found" });
+  } catch (error) {
+    sendJson(response, 400, { error: error instanceof Error ? error.message : "Solicitud inválida" });
+  }
+}
+
+async function readJsonBody(request: import("node:http").IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 4_096) throw new Error("Payload demasiado grande");
+    chunks.push(buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+}
+
+function sendJson(response: import("node:http").ServerResponse, status: number, payload: unknown): void {
+  response.writeHead(status, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+  response.end(JSON.stringify(payload));
+}
+
+function corsHeaders(): Record<string, string> {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "content-type"
+  };
 }
 
 function startRandomBoardEvent(room: RoomRuntime): void {

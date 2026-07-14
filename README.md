@@ -3,10 +3,10 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `0.5.0` incorpora identidad visual dibujada con Compose, Splash
-animado, perfil editable, lobby configurable, modos FFA/2v2/3v1 y resultados
-con confeti. Las partidas online duran tres minutos y siguen una máquina de
-estados autoritativa `LOBBY → PLAYING → FINISHED`.
+La versión `0.6.0` incorpora icono adaptativo, Splash neón, perfil persistente,
+Cuadro de Honor global, lobby configurable, modos FFA/2v2/3v1 y feedback visual
+para victoria, error y sabotaje. Las partidas online duran tres minutos y siguen
+una máquina de estados autoritativa `LOBBY → PLAYING → FINISHED`.
 
 ## Estructura
 
@@ -32,8 +32,15 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-v0.5.0-debug.apk`. No se debe subir ese archivo a Git:
+`SudokuArena-v0.6.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
+
+## Persistencia del Cuadro de Honor
+
+El servidor guarda los Top 10 en `backend/data/leaderboards.json`. En una nube
+con disco persistente conviene configurar `LEADERBOARD_FILE` apuntando a ese
+volumen; por ejemplo, en Bonto: `/data/leaderboards.json`. Sin un volumen
+persistente, el ranking se reinicia cuando el contenedor es reemplazado.
 
 El prototipo debe desplegarse con **una sola instancia**: el estado vive en la
 memoria del proceso. Para escalar horizontalmente hay que mover el comando de

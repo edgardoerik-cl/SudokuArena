@@ -1,6 +1,9 @@
 package com.sudokuarena.presentation
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,13 +13,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,85 +29,166 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.sudokuarena.domain.LeaderboardRepository
 
 @Composable
 fun WelcomeScreen(
     initialNickname: String,
+    leaderboardRepository: LeaderboardRepository,
     onSaveNickname: (String) -> Unit,
     onSoloMode: () -> Unit,
     onMultiplayerMode: () -> Unit,
 ) {
-    var nickname by remember(initialNickname) { mutableStateOf(initialNickname.ifBlank { "Jugador" }) }
-    var editing by remember(initialNickname) { mutableStateOf(initialNickname.isBlank()) }
+    var savedNickname by remember(initialNickname) { mutableStateOf(initialNickname.trim()) }
+    var firstNickname by remember { mutableStateOf("") }
+    var showProfile by remember { mutableStateOf(false) }
+    var showHonor by remember { mutableStateOf(false) }
+    val hasProfile = savedNickname.isNotBlank()
 
-    Surface {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(22.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            ArenaLogo(Modifier.size(135.dp))
-            Text("Sudoku Arena", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
-            Spacer(Modifier.height(18.dp))
-
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("PERFIL", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    if (editing) {
-                        OutlinedTextField(
-                            value = nickname,
-                            onValueChange = { nickname = it.take(20) },
-                            label = { Text("Nickname") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Button(
-                            onClick = {
-                                val clean = nickname.trim()
-                                if (clean.isNotEmpty()) {
-                                    nickname = clean
-                                    onSaveNickname(clean)
-                                    editing = false
-                                }
-                            },
-                            enabled = nickname.trim().isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text("Guardar perfil") }
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(nickname, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                            OutlinedButton(onClick = { editing = true }) { Text("Editar") }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F111A))
+            .padding(22.dp),
+    ) {
+        if (!hasProfile) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ArenaLogo(Modifier.size(150.dp))
+                Text("SUDOKU ARENA", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
+                Text("Crea tu perfil para entrar a la arena")
+                OutlinedTextField(
+                    value = firstNickname,
+                    onValueChange = { firstNickname = it.take(20) },
+                    label = { Text("Nickname") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        val clean = firstNickname.trim()
+                        if (clean.isNotEmpty()) {
+                            onSaveNickname(clean)
+                            savedNickname = clean
                         }
-                    }
-                }
+                    },
+                    enabled = firstNickname.trim().isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Crear perfil") }
+            }
+        } else {
+            // Tras crear el perfil, el centro queda reservado únicamente a los modos.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Button(
+                    onClick = onSoloMode,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(72.dp),
+                ) { Text("Modo Solitario", style = MaterialTheme.typography.titleLarge) }
+                Button(
+                    onClick = onMultiplayerMode,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(72.dp),
+                ) { Text("Modo Multijugador", style = MaterialTheme.typography.titleLarge) }
             }
 
-            Spacer(Modifier.height(24.dp))
-            Text("MODOS DE JUEGO", style = MaterialTheme.typography.labelLarge)
-            Spacer(Modifier.height(10.dp))
-            Button(
-                onClick = onSoloMode,
-                enabled = !editing,
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-            ) { Text("Partida Solitario", style = MaterialTheme.typography.titleMedium) }
-            Spacer(Modifier.height(12.dp))
-            Button(
-                onClick = onMultiplayerMode,
-                enabled = !editing,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp),
-            ) { Text("Partida Multijugador", style = MaterialTheme.typography.titleMedium) }
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                FloatingActionButton(onClick = { showProfile = true }) {
+                    ControlIcon(ControlIconType.PROFILE)
+                }
+                FloatingActionButton(onClick = { showHonor = true }) {
+                    ControlIcon(ControlIconType.TROPHY)
+                }
+            }
+        }
+    }
+
+    if (showProfile) {
+        ProfileDialog(
+            nickname = savedNickname,
+            onDismiss = { showProfile = false },
+            onSave = { updated ->
+                savedNickname = updated
+                onSaveNickname(updated)
+                showProfile = false
+            },
+        )
+    }
+    if (showHonor) {
+        LeaderboardBottomSheet(repository = leaderboardRepository, onDismiss = { showHonor = false })
+    }
+}
+
+@Composable
+private fun ProfileDialog(nickname: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var edited by remember(nickname) { mutableStateOf(nickname) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Editar perfil") },
+        text = {
+            OutlinedTextField(
+                value = edited,
+                onValueChange = { edited = it.take(20) },
+                label = { Text("Nickname") },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(edited.trim()) }, enabled = edited.trim().isNotEmpty()) { Text("Guardar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+private enum class ControlIconType { PROFILE, TROPHY }
+
+@Composable
+private fun ControlIcon(type: ControlIconType) {
+    Canvas(Modifier.size(27.dp)) {
+        val color = Color(0xFF00F0FF)
+        if (type == ControlIconType.PROFILE) {
+            drawCircle(color, radius = size.minDimension * 0.18f, center = Offset(size.width / 2f, size.height * 0.32f), style = Stroke(2.6f))
+            drawArc(
+                color = color,
+                startAngle = 200f,
+                sweepAngle = 140f,
+                useCenter = false,
+                topLeft = Offset(size.width * 0.19f, size.height * 0.50f),
+                size = androidx.compose.ui.geometry.Size(size.width * 0.62f, size.height * 0.42f),
+                style = Stroke(2.6f),
+            )
+        } else {
+            val cup = Path().apply {
+                moveTo(size.width * 0.3f, size.height * 0.18f)
+                lineTo(size.width * 0.7f, size.height * 0.18f)
+                lineTo(size.width * 0.64f, size.height * 0.55f)
+                quadraticTo(size.width * 0.5f, size.height * 0.7f, size.width * 0.36f, size.height * 0.55f)
+                close()
+            }
+            drawPath(cup, color, style = Stroke(2.5f))
+            drawLine(color, Offset(size.width * 0.5f, size.height * 0.68f), Offset(size.width * 0.5f, size.height * 0.82f), 2.5f)
+            drawLine(color, Offset(size.width * 0.32f, size.height * 0.84f), Offset(size.width * 0.68f, size.height * 0.84f), 2.5f)
         }
     }
 }

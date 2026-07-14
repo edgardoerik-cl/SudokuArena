@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Resplandor exterior del escudo -->
+    <path
+        android:fillColor="#3300F0FF"
+        android:pathData="M54,14 L84,31 L84,67 L54,94 L24,67 L24,31 Z" />
+
+    <!-- Escudo hexagonal cian -->
+    <path
+        android:fillColor="#0F111A"
+        android:pathData="M54,18 L80,33 L80,64 L54,88 L28,64 L28,33 Z"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="4" />
+
+    <!-- Rejilla blanca sutil -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M37,29 L37,71 M50,22 L50,82 M63,22 L63,82 M76,29 L76,69 M29,42 L79,42 M29,55 L79,55 M32,68 L76,68"
+        android:strokeAlpha="0.32"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.2" />
+
+    <!-- Número 9 geométrico -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M66,48 C66,37 59,31 50,31 C40,31 34,38 34,47 C34,56 41,62 50,62 C57,62 62,59 66,54 L65,72 C64,79 59,83 51,83"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:strokeWidth="6" />
+
+    <!-- Acento neón -->
+    <path
+        android:fillColor="@android:color/transparent"
+        android:pathData="M42,47 C42,42 45,39 50,39 C55,39 58,42 58,47 C58,52 55,55 50,55 C45,55 42,52 42,47"
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="2.5" />
+</vector>

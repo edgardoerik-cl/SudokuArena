@@ -16,6 +16,7 @@ import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.RoomState
 import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.MatchResultEntry
+import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
 import java.util.UUID
@@ -77,6 +78,8 @@ class ArenaViewModel(
     private val gateway: GameRealtimeGateway?,
     private val sudokuGenerator: SudokuGenerator,
     private val recordStore: PlayerRecordStore,
+    private val leaderboardRepository: LeaderboardRepository,
+    private val playerName: String,
     private val requestedRoomCode: String? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(
@@ -266,6 +269,9 @@ class ArenaViewModel(
                 selected = null,
             )
         }
+        viewModelScope.launch {
+            runCatching { leaderboardRepository.submitSoloRecord(playerName, elapsed) }
+        }
     }
 
     private fun handleEvent(event: RealtimeEvent) {
@@ -412,6 +418,8 @@ class ArenaViewModel(
             gateway: GameRealtimeGateway?,
             sudokuGenerator: SudokuGenerator,
             recordStore: PlayerRecordStore,
+            leaderboardRepository: LeaderboardRepository,
+            playerName: String,
             requestedRoomCode: String? = null,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -420,6 +428,8 @@ class ArenaViewModel(
                 gateway = gateway,
                 sudokuGenerator = sudokuGenerator,
                 recordStore = recordStore,
+                leaderboardRepository = leaderboardRepository,
+                playerName = playerName,
                 requestedRoomCode = requestedRoomCode,
             ) as T
         }

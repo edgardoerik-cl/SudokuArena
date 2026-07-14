@@ -4,7 +4,11 @@ import android.graphics.Color as AndroidColor
 import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
 import com.sudokuarena.domain.BoardCell
 import com.sudokuarena.domain.BoardEventType
@@ -62,6 +68,7 @@ import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.TeamMode
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 @Composable
 fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
@@ -107,6 +114,13 @@ fun ArenaScreen(
     onNewSoloGame: () -> Unit,
     onExit: () -> Unit,
 ) {
+    val shake = remember { Animatable(0f) }
+    LaunchedEffect(state.penaltyRemainingMs > 0) {
+        if (state.penaltyRemainingMs > 0) {
+            repeat(7) { index -> shake.animateTo(if (index % 2 == 0) 13f else -13f, tween(42)) }
+            shake.animateTo(0f, tween(55))
+        }
+    }
     Scaffold { padding ->
         Box(
             modifier = Modifier
@@ -150,6 +164,7 @@ fun ArenaScreen(
                     selected = state.selected,
                     enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
                     onCellSelected = onCellSelected,
+                    modifier = Modifier.offset { IntOffset(shake.value.roundToInt(), 0) },
                 )
                 Spacer(Modifier.height(8.dp))
                 state.conquestMessage?.let {
@@ -184,6 +199,12 @@ fun ArenaScreen(
                     swipesRemaining = state.fogSwipesRemaining,
                     onValidSwipe = onFogSwipe,
                     modifier = Modifier.zIndex(20f),
+                )
+            }
+            if (state.penaltyRemainingMs > 0) {
+                PenaltyOverlay(
+                    remainingMs = state.penaltyRemainingMs,
+                    modifier = Modifier.zIndex(15f),
                 )
             }
             if (state.soloCompleted || state.matchResults.isNotEmpty()) {
@@ -313,6 +334,7 @@ private fun SudokuBoard(
     selected: CellPosition?,
     enabled: Boolean,
     onCellSelected: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
     val hasClearingCells = board.any { row -> row.any(BoardCell::clearing) }
@@ -323,7 +345,7 @@ private fun SudokuBoard(
     )
 
     Canvas(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .background(Color.White, RoundedCornerShape(4.dp))
@@ -385,6 +407,35 @@ private fun SudokuBoard(
             drawLine(Color.Black, Offset(0f, position), Offset(size.width, position), width)
         }
         drawRect(Color.Black, style = Stroke(width = 4f))
+    }
+}
+
+@Composable
+private fun PenaltyOverlay(remainingMs: Long, modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "penaltyBlink")
+    val blink by transition.animateFloat(
+        initialValue = 0.10f,
+        targetValue = 0.34f,
+        animationSpec = infiniteRepeatable(tween(220), RepeatMode.Reverse),
+        label = "penaltyAlpha",
+    )
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) { drawRect(Color.Red.copy(alpha = blink)) }
+        Surface(
+            color = Color(0xDD7F1010),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("ERROR · SISTEMA CONGELADO", color = Color.White, fontWeight = FontWeight.Black)
+                Text("${(remainingMs + 999) / 1_000}", color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Black)
+            }
+        }
     }
 }
 

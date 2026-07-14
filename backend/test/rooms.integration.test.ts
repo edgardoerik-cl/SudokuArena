@@ -1,18 +1,27 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { io, type Socket } from "socket.io-client";
 
 const port = 32_000 + Math.floor(Math.random() * 1_000);
 const url = `http://127.0.0.1:${port}`;
+const leaderboardFile = join(tmpdir(), `sudoku-arena-room-test-${port}.json`);
 let server: ChildProcess;
 const clients: Socket[] = [];
 
 before(async () => {
   server = spawn(process.execPath, ["--import", "tsx", "src/server.ts"], {
     cwd: new URL("../", import.meta.url),
-    env: { ...process.env, PORT: String(port), MATCH_DURATION_MS: "800" },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      MATCH_DURATION_MS: "800",
+      LEADERBOARD_FILE: leaderboardFile
+    },
     stdio: "ignore"
   });
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -33,9 +42,28 @@ after(async () => {
     server.kill("SIGTERM");
     await Promise.race([once(server, "exit"), delay(2_000)]);
   }
+  await rm(leaderboardFile, { force: true });
 });
 
 describe("matchmaking por salas", () => {
+  it("publica y conserva el mejor récord solitario por HTTP", async () => {
+    const first = await fetch(`${url}/api/leaderboards/solo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 125_000 })
+    });
+    assert.equal(first.status, 200);
+
+    await fetch(`${url}/api/leaderboards/solo`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ nickname: "Speedy", elapsedMs: 110_000 })
+    });
+    const response = await fetch(`${url}/api/leaderboards`);
+    const top = await response.json() as { solo: Array<{ rank: number; nickname: string; bestTimeMs: number }> };
+    assert.deepEqual(top.solo[0], { rank: 1, nickname: "Speedy", bestTimeMs: 110_000 });
+  });
+
   it("crea códigos de cuatro dígitos y aísla eventos entre salas", async () => {
     const alice = await connect("Alice");
     const aliceJoined = nextEvent<any>(alice, "game:joined");
