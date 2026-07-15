@@ -43,13 +43,62 @@ function minesweeper(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzle
 function wordSearch(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
   const size = sizeFor(difficulty, 8, 10, 12, 14);
   const count = sizeFor(difficulty, 4, 5, 7, 9);
-  const selected = random.shuffle(SPANISH_DICTIONARY.filter((entry) => entry.word.length <= size)).slice(0, count);
+  const candidates = random.shuffle(SPANISH_DICTIONARY.filter((entry) => entry.word.length <= size));
   const letters = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ";
-  const answers = matrix<CellValue>(size, size, () => random.pick([...letters]));
-  selected.forEach((entry, row) => [...entry.word].forEach((letter, col) => { answers[row]![col] = letter; }));
+  const answers = matrix<CellValue>(size, size, () => null);
+  const directions = random.shuffle([
+    { row: 0, col: 1 }, { row: 0, col: -1 },
+    { row: 1, col: 0 }, { row: -1, col: 0 },
+    { row: 1, col: 1 }, { row: 1, col: -1 },
+    { row: -1, col: 1 }, { row: -1, col: -1 }
+  ]);
+  const placements: Array<{
+    word: string; startRow: number; startCol: number; endRow: number; endCol: number; rowStep: number; colStep: number;
+  }> = [];
+
+  for (const entry of candidates) {
+    if (placements.length >= count) break;
+    const preferred = directions[placements.length % directions.length]!;
+    const attempts = [preferred, ...random.shuffle(directions.filter((direction) => direction !== preferred))];
+    let placed = false;
+    for (const direction of attempts) {
+      for (let attempt = 0; attempt < 32 && !placed; attempt += 1) {
+        const lastOffset = entry.word.length - 1;
+        const minRow = direction.row < 0 ? lastOffset : 0;
+        const maxRow = direction.row > 0 ? size - 1 - lastOffset : size - 1;
+        const minCol = direction.col < 0 ? lastOffset : 0;
+        const maxCol = direction.col > 0 ? size - 1 - lastOffset : size - 1;
+        if (minRow > maxRow || minCol > maxCol) continue;
+        const startRow = random.int(minRow, maxRow);
+        const startCol = random.int(minCol, maxCol);
+        const fits = [...entry.word].every((letter, offset) => {
+          const current = answers[startRow + direction.row * offset]![startCol + direction.col * offset];
+          return current === null || current === letter;
+        });
+        if (!fits) continue;
+        [...entry.word].forEach((letter, offset) => {
+          answers[startRow + direction.row * offset]![startCol + direction.col * offset] = letter;
+        });
+        placements.push({
+          word: entry.word,
+          startRow,
+          startCol,
+          endRow: startRow + direction.row * lastOffset,
+          endCol: startCol + direction.col * lastOffset,
+          rowStep: direction.row,
+          colStep: direction.col
+        });
+        placed = true;
+      }
+      if (placed) break;
+    }
+  }
+  answers.forEach((row) => row.forEach((value, col) => {
+    if (value === null) row[col] = random.pick([...letters]);
+  }));
   return {
     board: answers.map((row) => row.map((value) => cell(value, true))), answers,
-    meta: { words: selected.map((entry) => entry.word), foundWords: [], difficulty }
+    meta: { words: placements.map((placement) => placement.word), placements, foundWords: [], difficulty }
   };
 }
 
@@ -149,15 +198,30 @@ function logicTiles(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleB
   const rows = sizeFor(difficulty, 4, 5, 6, 7);
   const columns = sizeFor(difficulty, 5, 6, 7, 8);
   const operations = difficulty === "EASY" ? ["SUM"] : ["SUM", "AND", "OR", "XOR"];
-  const answers = matrix<CellValue>(rows, columns, (row, col) => ((row * 3 + col * 2 + random.int(0, 4)) % 9) + 1);
-  const board = matrix(rows, columns, (row, col) => {
-    const expected = answers[row]![col] as number;
-    const operation = random.pick(operations);
-    const left = Math.max(0, expected - 1); const right = expected + 1;
-    const rule = operation === "SUM" ? `${left}+1=${expected}` : `${left} ${operation} ${right} → ${expected}`;
-    return cell(null, false, { tileColor: random.pick(["RED", "BLUE", "GREEN", "ORANGE"]), operation, rule });
-  });
+  const challenges = matrix(rows, columns, () => logicChallenge(random, operations));
+  const answers = challenges.map((row) => row.map((challenge) => challenge.answer as CellValue));
+  const board = challenges.map((row) => row.map((challenge) => cell(null, false, {
+    tileColor: random.pick(["RED", "BLUE", "GREEN", "ORANGE"]),
+    operation: challenge.operation,
+    rule: challenge.rule
+  })));
   return { board, answers, meta: { operations, instructions: "Coloca la ficha que satisface la regla algebraica o lógica de la casilla.", difficulty } };
+}
+
+function logicChallenge(random: SeededRandom, operations: readonly string[]): { answer: number; operation: string; rule: string } {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const operation = random.pick(operations);
+    const left = random.int(1, 9);
+    const right = random.int(1, 9);
+    const answer = operation === "SUM" ? left + right
+      : operation === "AND" ? (left & right)
+      : operation === "OR" ? (left | right)
+      : (left ^ right);
+    if (answer < 1 || answer > 9) continue;
+    const symbol = operation === "SUM" ? "+" : operation;
+    return { answer, operation, rule: `${left} ${symbol} ${right} = ?` };
+  }
+  return { answer: 2, operation: "SUM", rule: "1 + 1 = ?" };
 }
 
 function nurikabe(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {

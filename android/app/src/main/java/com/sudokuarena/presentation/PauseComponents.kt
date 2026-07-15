@@ -3,6 +3,8 @@ package com.sudokuarena.presentation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,15 +13,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,7 +40,62 @@ import com.sudokuarena.domain.RoomPhase
 fun PauseControl(state: ArenaUiState, onRequestPause: () -> Unit) {
     val active = if (state.isSoloMode) !state.soloCompleted else state.roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
     if (active && state.roomState?.pauseRequesterId == null) {
-        OutlinedButton(onClick = onRequestPause) { Text(if (state.isSoloMode) "Pausar" else "Pedir pausa") }
+        NeonActionButton(
+            contentDescription = if (state.isSoloMode) "Pausar partida" else "Solicitar pausa",
+            onClick = onRequestPause,
+        ) {
+            val barWidth = size.width * .17f
+            val barHeight = size.height * .52f
+            drawRoundRect(
+                color = Color(0xFF00D5FF),
+                topLeft = Offset(size.width * .27f, size.height * .24f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth * .35f),
+            )
+            drawRoundRect(
+                color = Color(0xFF7C3AED),
+                topLeft = Offset(size.width * .56f, size.height * .24f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth * .35f),
+            )
+        }
+    }
+}
+
+@Composable
+fun ExitControl(onExit: () -> Unit) {
+    NeonActionButton(contentDescription = "Salir de la partida", onClick = onExit) {
+        val cyan = Color(0xFF00D5FF)
+        drawLine(cyan, Offset(size.width * .28f, size.height * .22f), Offset(size.width * .28f, size.height * .78f), 3.5f, StrokeCap.Round)
+        drawLine(cyan, Offset(size.width * .28f, size.height * .22f), Offset(size.width * .55f, size.height * .22f), 3.5f, StrokeCap.Round)
+        drawLine(cyan, Offset(size.width * .28f, size.height * .78f), Offset(size.width * .55f, size.height * .78f), 3.5f, StrokeCap.Round)
+        drawLine(Color(0xFF7C3AED), Offset(size.width * .45f, size.height * .5f), Offset(size.width * .78f, size.height * .5f), 4f, StrokeCap.Round)
+        drawLine(Color(0xFF7C3AED), Offset(size.width * .66f, size.height * .37f), Offset(size.width * .79f, size.height * .5f), 4f, StrokeCap.Round)
+        drawLine(Color(0xFF7C3AED), Offset(size.width * .66f, size.height * .63f), Offset(size.width * .79f, size.height * .5f), 4f, StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun NeonActionButton(
+    contentDescription: String,
+    onClick: () -> Unit,
+    glyph: androidx.compose.ui.graphics.drawscope.DrawScope.() -> Unit,
+) {
+    Surface(
+        modifier = Modifier.padding(horizontal = 3.dp),
+        shape = CircleShape,
+        color = Color(0xFFF8FAFF),
+        border = BorderStroke(1.5.dp, Color(0x6600A8FF)),
+        shadowElevation = 5.dp,
+    ) {
+        IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
+            Canvas(
+                Modifier
+                    .size(28.dp)
+                    .semantics { this.contentDescription = contentDescription },
+                onDraw = glyph,
+            )
+        }
     }
 }
 

@@ -180,26 +180,32 @@ describe("matchmaking por salas", () => {
     await joinedPromise;
     host.emit("fill_with_ai");
     await nextMatchingEvent<any>(host, "game:state", (state) => state.players.length === 2);
-    const configured = nextMatchingEvent<any>(host, "room:state", (state) => state.config.gameType === "MINESWEEPER");
+    const configured = nextMatchingEvent<any>(host, "room:state", (state) => state.config.gameType === "WORD_SEARCH");
     host.emit("room:configure", {
-      gameType: "MINESWEEPER",
+      gameType: "WORD_SEARCH",
       powersEnabled: true,
       teamMode: "FFA",
       tileType: "NUMBERS",
       botDifficulty: "MEDIUM"
     });
     await configured;
-    const genericStarted = nextMatchingEvent<any>(host, "generic:state", (state) => state.gameType === "MINESWEEPER");
+    const genericStarted = nextMatchingEvent<any>(host, "generic:state", (state) => state.gameType === "WORD_SEARCH");
     host.emit("room:start");
     const initial = await genericStarted;
     assert.equal(initial.rows, 10);
     assert.equal(initial.columns, 10);
 
+    const placement = initial.meta.placements[0];
     const accepted = nextEvent<any>(host, "generic:move-accepted");
-    host.emit("make_move", { requestId: "mine-safe", row: 0, col: 0, val: "REVEAL" });
+    host.emit("make_move", {
+      requestId: "word-path",
+      row: placement.startRow,
+      col: placement.startCol,
+      val: { word: placement.word, endRow: placement.endRow, endCol: placement.endCol }
+    });
     const result = await accepted;
     assert.equal(result.accepted, true);
-    assert.equal(result.points, 10);
+    assert.equal(result.points, placement.word.length * 10);
   });
 
   it("pausa por consenso y reanuda con cuenta regresiva", async () => {

@@ -47,11 +47,21 @@ class LocalPuzzleEngine(
             }
         }
         if (gameType == GameType.WORD_SEARCH) {
-            val word = ((value as? Map<*, *>)?.get("word") ?: value).toString().uppercase()
-            val words = blueprint.meta["words"] as List<*>
-            val index = words.indexOf(word)
-            if (index < 0 || row != index || col != 0 || word in foundWords) return incorrect()
-            word.indices.forEach { x -> replace(index, x, board[index][x].copy(ownerId = OWNER)) }
+            val payload = value as? Map<*, *>
+            val word = (payload?.get("word") ?: value).toString().uppercase()
+            @Suppress("UNCHECKED_CAST")
+            val placements = blueprint.meta["placements"] as List<Map<String, Any>>
+            val placement = placements.firstOrNull {
+                it["word"] == word && it["startRow"] == row && it["startCol"] == col &&
+                    (payload?.get("endRow") == null || payload["endRow"].toString().toIntOrNull() == it["endRow"]) &&
+                    (payload?.get("endCol") == null || payload["endCol"].toString().toIntOrNull() == it["endCol"])
+            }
+            if (placement == null || word in foundWords) return incorrect()
+            word.indices.forEach { offset ->
+                val y = row + (placement.getValue("rowStep") as Int) * offset
+                val x = col + (placement.getValue("colStep") as Int) * offset
+                replace(y, x, board[y][x].copy(ownerId = OWNER))
+            }
             foundWords += word; return accept(word.length * 10)
         }
         if (gameType == GameType.DOTS_AND_BOXES) return dotsMove(row, col, value, cell)
@@ -131,14 +141,89 @@ class LocalPuzzleEngine(
     }
 
     private fun mines(): Blueprint { val size = size(8,10,12,14); val count=(size*size*when(difficulty){PuzzleDifficulty.EASY->.10;PuzzleDifficulty.MEDIUM->.14;PuzzleDifficulty.HARD->.18;PuzzleDifficulty.EXPERT->.22}).toInt(); val mines=(0 until size*size).shuffled(random).take(count).toSet(); return result(matrix(size,size){_,_->GenericCell()}, matrix(size,size){r,c->r*size+c in mines}, mapOf("mineCount" to count)) }
-    private fun words(): Blueprint { val size=size(8,10,12,14); val selected=WORDS.filter{it.length<=size}.shuffled(random).take(size(4,5,7,9)); val filler="ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"; val answers=matrix<Any?>(size,size){r,c->selected.getOrNull(r)?.getOrNull(c)?.toString()?:filler[random.nextInt(filler.length)].toString()}; return result(answers.map{row->row.map{GenericCell(value=it,isRevealed=true)}},answers,mapOf("words" to selected)) }
-    private fun crossword(): Blueprint { val size=size(9,11,13,15); val selected=WORDS.filter{it.length<=size}.shuffled(random).take(size(5,7,9,11)); val answers=List(size){r->List<Any?>(size){c->selected.getOrNull(r)?.getOrNull(c)?.toString()}}; val board=answers.mapIndexed{r,row->row.mapIndexed{c,a->if(a==null)blocked()else GenericCell(meta=mapOf("clue" to if(c==0)r+1 else 0))}}; return result(board,answers,mapOf("clues" to selected.mapIndexed{i,w->"${i+1}. Palabra de ${w.length} letras"})) }
+    private fun words(): Blueprint {
+        val boardSize = size(8, 10, 12, 14)
+        val targetCount = size(4, 5, 7, 9)
+        val grid = MutableList(boardSize) { MutableList<Any?>(boardSize) { null } }
+        val directions = listOf(0 to 1, 0 to -1, 1 to 0, -1 to 0, 1 to 1, 1 to -1, -1 to 1, -1 to -1).shuffled(random)
+        val placements = mutableListOf<Map<String, Any>>()
+        for ((word) in WORDS.filter { it.first.length <= boardSize }.shuffled(random)) {
+            if (placements.size >= targetCount) break
+            val preferred = directions[placements.size % directions.size]
+            val directionAttempts = listOf(preferred) + directions.filter { it != preferred }.shuffled(random)
+            var placed = false
+            for ((rowStep, colStep) in directionAttempts) {
+                repeat(40) {
+                    if (placed) return@repeat
+                    val last = word.lastIndex
+                    val minRow = if (rowStep < 0) last else 0
+                    val maxRow = if (rowStep > 0) boardSize - 1 - last else boardSize - 1
+                    val minCol = if (colStep < 0) last else 0
+                    val maxCol = if (colStep > 0) boardSize - 1 - last else boardSize - 1
+                    if (minRow > maxRow || minCol > maxCol) return@repeat
+                    val startRow = random.nextInt(minRow, maxRow + 1)
+                    val startCol = random.nextInt(minCol, maxCol + 1)
+                    val fits = word.indices.all { offset ->
+                        val current = grid[startRow + rowStep * offset][startCol + colStep * offset]
+                        current == null || current == word[offset].toString()
+                    }
+                    if (!fits) return@repeat
+                    word.indices.forEach { offset -> grid[startRow + rowStep * offset][startCol + colStep * offset] = word[offset].toString() }
+                    placements += mapOf(
+                        "word" to word, "startRow" to startRow, "startCol" to startCol,
+                        "endRow" to startRow + rowStep * last, "endCol" to startCol + colStep * last,
+                        "rowStep" to rowStep, "colStep" to colStep,
+                    )
+                    placed = true
+                }
+                if (placed) break
+            }
+        }
+        val filler = "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"
+        grid.forEach { row -> row.indices.forEach { col -> if (row[col] == null) row[col] = filler[random.nextInt(filler.length)].toString() } }
+        val answers = grid.map { it.toList() }
+        return result(
+            answers.map { row -> row.map { GenericCell(value = it, isRevealed = true) } },
+            answers,
+            mapOf("words" to placements.map { it.getValue("word") }, "placements" to placements),
+        )
+    }
+
+    private fun crossword(): Blueprint {
+        val boardSize = size(9, 11, 13, 15)
+        val selected = WORDS.filter { it.first.length <= boardSize }.shuffled(random).take(size(5, 7, 9, 11))
+        val answers = List(boardSize) { row -> List<Any?>(boardSize) { col -> selected.getOrNull(row)?.first?.getOrNull(col)?.toString() } }
+        val board = answers.mapIndexed { row, cells -> cells.mapIndexed { col, answer ->
+            if (answer == null) blocked() else GenericCell(meta = mapOf("clue" to if (col == 0) row + 1 else 0))
+        } }
+        return result(board, answers, mapOf("clues" to selected.mapIndexed { index, entry -> "${index + 1}H. ${entry.second}" }))
+    }
     private fun nonogram(): Blueprint { val size=size(6,8,10,12); val answers=matrix<Any?>(size,size){_,_->random.nextDouble()<.42}; return result(answers.map{row->row.map{GenericCell()}},answers,mapOf("rowClues" to answers.map{clues(it.map{v->v==true})},"columnClues" to (0 until size).map{x->clues(answers.map{it[x]==true})})) }
     private fun dots(): Blueprint { val size=size(3,5,6,7); return result(matrix(size,size){_,_->GenericCell(meta=SIDES.associateWith{false})},matrix(size,size){_,_->true},mapOf("dots" to size+1)) }
     private fun kakuro(): Blueprint { val playable=size(3,4,5,6); val digits=(1..9).shuffled(random).take(playable); val sum=digits.sum(); val answers=matrix<Any?>(playable+1,playable+1){r,c->if(r==0||c==0)null else digits[(r+c-2)%playable]}; val board=matrix(playable+1,playable+1){r,c->when{r==0&&c==0->blocked(mapOf("clueCell" to true));r==0->blocked(mapOf("clueCell" to true,"downSum" to sum));c==0->blocked(mapOf("clueCell" to true,"rightSum" to sum));else->GenericCell()}}; return result(board,answers,mapOf("instructions" to "Cada grupo suma $sum sin repetir.")) }
     private fun mathdoku(): Blueprint { val size=size(4,5,6,7); val symbols=(1..size).shuffled(random); val answers=matrix<Any?>(size,size){r,c->symbols[(r+c)%size]}; val board=matrix(size,size){r,c->val start=c-c%2;val target=(answers[r][start] as Int)+(answers[r][minOf(size-1,start+1)] as Int);GenericCell(meta=mapOf("cageId" to "$r:$start","cageLabel" to if(c==start)"$target+" else "","cageStart" to(c==start),"cageEnd" to(c==minOf(size-1,start+1))))}; return result(board,answers,mapOf("instructions" to "Usa 1 a $size y cumple las jaulas.")) }
     private fun hitori(): Blueprint { val size=size(5,6,7,8); val black=mutableSetOf<String>(); for(index in(0 until size*size).shuffled(random)){val r=index/size;val c=index%size;if(black.size>=size(4,6,9,12))break;if(listOf("${r-1}:$c","${r+1}:$c","$r:${c-1}","$r:${c+1}").none{it in black})black+="$r:$c"}; val values=matrix(size,size){r,c->((r+c)%size)+1}.map{it.toMutableList()};black.forEach{val(r,c)=it.split(':').map(String::toInt);values[r][c]=values[r][(c+1)%size]};val answers=matrix<Any?>(size,size){r,c->"$r:$c" in black};return result(values.map{row->row.map{GenericCell(value=it,isRevealed=true)}},answers,mapOf("instructions" to "Apaga duplicados sin tocar negras por sus lados.")) }
-    private fun logicTiles(): Blueprint { val rows=size(4,5,6,7);val cols=size(5,6,7,8);val answers=matrix<Any?>(rows,cols){r,c->((r*3+c*2+random.nextInt(5))%9)+1};val colors=listOf("RED","BLUE","GREEN","ORANGE");val board=matrix(rows,cols){r,c->val answer=answers[r][c]as Int;GenericCell(meta=mapOf("tileColor" to colors[r%4],"rule" to "${answer-1}+1=$answer"))};return result(board,answers,mapOf("instructions" to "Cumple la regla algebraica o lógica de cada casilla.")) }
+    private fun logicTiles(): Blueprint {
+        val rows = size(4, 5, 6, 7); val cols = size(5, 6, 7, 8)
+        val operations = if (difficulty == PuzzleDifficulty.EASY) listOf("SUM") else listOf("SUM", "AND", "OR", "XOR")
+        val challenges = matrix(rows, cols) { _, _ -> logicChallenge(operations) }
+        val answers = challenges.map { row -> row.map { it.first as Any? } }
+        val colors = listOf("RED", "BLUE", "GREEN", "ORANGE")
+        val board = challenges.mapIndexed { row, cells -> cells.map { (_, rule) ->
+            GenericCell(meta = mapOf("tileColor" to colors[row % colors.size], "rule" to rule))
+        } }
+        return result(board, answers, mapOf("instructions" to "Deduce la ficha que completa cada operación; la respuesta permanece oculta."))
+    }
+
+    private fun logicChallenge(operations: List<String>): Pair<Int, String> {
+        repeat(100) {
+            val operation = operations.random(random)
+            val left = random.nextInt(1, 10); val right = random.nextInt(1, 10)
+            val answer = when (operation) { "SUM" -> left + right; "AND" -> left and right; "OR" -> left or right; else -> left xor right }
+            if (answer in 1..9) return answer to "$left ${if (operation == "SUM") "+" else operation} $right = ?"
+        }
+        return 2 to "1 + 1 = ?"
+    }
     private fun nurikabe(): Blueprint { val size=size(6,8,10,12);val answers=matrix<Any?>(size,size){r,c->if(r%2==1)c!=(if(r%4==1)size-1 else 0)else c%3==2};val board=matrix(size,size){_,_->GenericCell()}.map{it.toMutableList()};var id=0;for(r in 0 until size){var c=0;while(c<size){if(answers[r][c]==true){c++;continue};val start=c;while(c<size&&answers[r][c]!=true)c++;id++;val clue=(start until c).random(random);board[r][clue]=blocked(mapOf("islandClue" to true,"islandSize" to c-start,"islandId" to id))}};return result(board,answers,mapOf("instructions" to "Pinta el río; evita bloques negros 2×2.")) }
     private fun bridges(): Blueprint { val grid=size(3,4,5,6);val size=grid*2-1;val answers=matrix<Any?>(size,size){_,_->false}.map{it.toMutableList()};val board=matrix(size,size){_,_->GenericCell(meta=mapOf("bridge" to true))}.map{it.toMutableList()};for(r in 0 until grid)for(c in 0 until grid){board[r*2][c*2]=blocked(mapOf("island" to true,"bridgeCount" to if(r==0||c==0)1 else 2));if(c>0)answers[r*2][c*2-1]=true;if(r>0&&c==0)answers[r*2-1][0]=true};return result(board,answers,mapOf("instructions" to "Une todas las islas con puentes.")) }
     private fun slitherlink(): Blueprint {
@@ -205,6 +290,24 @@ class LocalPuzzleEngine(
     private companion object {
         const val OWNER = "solo"
         val SIDES = listOf("top", "right", "bottom", "left")
-        val WORDS = listOf("ARENA","LOGICA","MATRIZ","PUZZLE","MENTE","CLAVE","CIFRA","ISLA","PUENTE","LAZO","COLOR","NEON","EQUIPO","RIVAL","RETO","NIVEL","SUMA","CELDA","FICHA","PISTA","RIO","MINA","BOMBA","TRAZO","JUGADA","VICTORIA","ESCUDO","NIEBLA","ENERGIA","COMBO","CAMINO","BLOQUE")
+        val WORDS = listOf(
+            "SOL" to "Estrella luminosa en el centro de nuestro sistema",
+            "ARENA" to "Recinto donde se enfrentan los competidores", "LOGICA" to "Disciplina que estudia el razonamiento válido",
+            "MATRIZ" to "Conjunto rectangular organizado en filas y columnas", "PUZZLE" to "Juego que exige resolver un problema",
+            "MENTE" to "Facultad de pensar, recordar e imaginar", "CLAVE" to "Dato indispensable para descifrar un mensaje",
+            "CIFRA" to "Símbolo utilizado para representar un número", "ISLA" to "Tierra rodeada completamente por agua",
+            "PUENTE" to "Construcción que une dos orillas", "LAZO" to "Vuelta cerrada hecha con una línea",
+            "COLOR" to "Sensación visual producida por la luz", "NEON" to "Gas noble usado en letreros luminosos",
+            "EQUIPO" to "Grupo que coopera para lograr una meta", "RIVAL" to "Persona que compite por el mismo objetivo",
+            "RETO" to "Objetivo difícil que pone a prueba una habilidad", "NIVEL" to "Grado de dificultad",
+            "SUMA" to "Operación que reúne dos o más cantidades", "CELDA" to "Espacio individual de una cuadrícula",
+            "FICHA" to "Pieza pequeña utilizada para jugar", "PISTA" to "Indicio que ayuda a descubrir una respuesta",
+            "RIO" to "Corriente natural de agua", "MINA" to "Carga explosiva oculta bajo una superficie",
+            "BOMBA" to "Artefacto diseñado para producir una explosión", "TRAZO" to "Línea realizada al dibujar",
+            "JUGADA" to "Acción ejecutada durante una partida", "VICTORIA" to "Resultado favorable de quien gana",
+            "ESCUDO" to "Objeto defensivo que protege de un ataque", "NIEBLA" to "Nube baja que dificulta la visibilidad",
+            "ENERGIA" to "Capacidad para realizar trabajo", "COMBO" to "Cadena de aciertos consecutivos",
+            "CAMINO" to "Ruta que conduce de un lugar a otro", "BLOQUE" to "Pieza compacta de material",
+        )
     }
 }

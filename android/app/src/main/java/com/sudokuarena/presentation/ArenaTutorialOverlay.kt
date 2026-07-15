@@ -2,12 +2,17 @@ package com.sudokuarena.presentation
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -31,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.sudokuarena.domain.GameType
 
 private data class TutorialStep(val icon: String, val title: String, val body: String)
@@ -78,7 +85,11 @@ fun ArenaTutorialOverlay(
                 ) { index ->
                     val step = steps[index]
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(step.icon, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
+                        if (gameType == GameType.NONOGRAM && index < 4) {
+                            NonogramLesson(index)
+                        } else {
+                            Text(step.icon, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
+                        }
                         Text(step.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                         Text(step.body, style = MaterialTheme.typography.bodyLarge)
                         Text("${index + 1} / ${steps.size}", color = Color.Gray)
@@ -114,8 +125,10 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("ABC", "Resuelve primero", "Cada letra correcta suma territorio y puntos."),
     )
     GameType.NONOGRAM -> listOf(
-        TutorialStep("▦", "Interpreta las pistas", "Cada número indica grupos consecutivos de píxeles en esa fila o columna."),
-        TutorialStep("🎨", "Revela el mosaico", "Toca los píxeles correctos hasta completar la imagen."),
+        TutorialStep("3", "1. Lee las pistas de fila", "Un 3 significa: pinta exactamente tres casillas juntas en esa fila. El grupo nunca se corta."),
+        TutorialStep("↓", "2. Cruza con las columnas", "Las pistas superiores funcionan igual, pero de arriba hacia abajo. Cruza ambas para confirmar cada píxel."),
+        TutorialStep("1 1", "3. Separa grupos y marca X", "“1 1” son dos grupos de una casilla, separados por al menos un espacio. Marca con X lo que sabes que está vacío."),
+        TutorialStep("♥", "4. Revela el dibujo", "Alterna entre pintar y marcar X. Cuando todas las pistas coinciden, aparecerá el mosaico oculto."),
     )
     GameType.DOTS_AND_BOXES -> listOf(
         TutorialStep("□", "Traza una arista", "Toca cerca del borde de un cuadro para dibujar esa línea."),
@@ -153,4 +166,75 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("A=7", "Descifra letras", "Cada letra representa un dígito diferente y una inicial nunca vale cero."),
         TutorialStep("+", "Haz verdadera la suma", "Asigna los dígitos que hacen correcta toda la ecuación."),
     )
+}
+
+@Composable
+private fun NonogramLesson(step: Int) {
+    val pulse by rememberInfiniteTransition(label = "nonogramPulse").animateFloat(
+        initialValue = .45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
+        label = "nonogramHighlight",
+    )
+    val pattern = listOf(
+        listOf(false, true, false, true, false),
+        listOf(true, true, true, true, true),
+        listOf(true, true, true, true, true),
+        listOf(false, true, true, true, false),
+        listOf(false, false, true, false, false),
+    )
+    val rowClues = listOf("1 1", "5", "5", "3", "1")
+    val columnClues = listOf("2", "4", "4", "4", "2")
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            when (step) { 0 -> "MIRA LA FILA 4"; 1 -> "MIRA LA COLUMNA 1"; 2 -> "PINTA ■  ·  VACÍA ×"; else -> "MOSAICO COMPLETO" },
+            color = ArenaColors.ElectricBlue,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Black,
+        )
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.size(42.dp))
+            columnClues.forEachIndexed { col, clue ->
+                val highlighted = step == 1 && col == 0
+                Text(
+                    clue,
+                    modifier = Modifier.size(34.dp).background(if (highlighted) Color(0x337C3AED) else Color.Transparent).padding(top = 8.dp),
+                    color = if (highlighted) Color(0xFF5B21B6).copy(alpha = pulse) else Color(0xFF263238),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp,
+                )
+            }
+        }
+        pattern.forEachIndexed { row, cells ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val rowHighlighted = step == 0 && row == 3
+                Text(
+                    rowClues[row],
+                    modifier = Modifier.size(width = 42.dp, height = 34.dp).background(if (rowHighlighted) Color(0x3300A8FF) else Color.Transparent).padding(top = 7.dp),
+                    color = if (rowHighlighted) ArenaColors.ElectricBlue.copy(alpha = pulse) else Color(0xFF263238),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                )
+                cells.forEachIndexed { col, filled ->
+                    val visible = when (step) {
+                        0 -> row == 3
+                        1 -> col == 0
+                        2 -> row == 0
+                        else -> true
+                    }
+                    val showX = visible && !filled
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .border(1.dp, Color(0xFF94A3B8))
+                            .background(if (visible && filled) Color(0xFF243B6B).copy(alpha = if (step < 3) pulse else 1f) else Color(0xFFF8FAFC)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (showX) Text("×", color = Color(0xFFE11D48), fontWeight = FontWeight.Black, fontSize = 22.sp)
+                    }
+                }
+            }
+        }
+        Text("■ = píxel pintado     × = casilla vacía", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
 }

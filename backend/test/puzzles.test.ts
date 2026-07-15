@@ -21,6 +21,35 @@ describe("motor genérico de puzzles", () => {
     assert.ok(Number(expert.meta.mineCount) > Number(easy.meta.mineCount));
   });
 
+  it("oculta palabras en ocho direcciones y conserva recorridos verificables", () => {
+    const puzzle = createPuzzleBlueprint("WORD_SEARCH", { seed: "multidirectional-words", difficulty: "EXPERT" });
+    const placements = puzzle.meta.placements as Array<{ word: string; startRow: number; startCol: number; rowStep: number; colStep: number }>;
+    assert.equal(placements.length, 9);
+    assert.ok(placements.some((placement) => placement.rowStep !== 0), "debe contener palabras verticales o diagonales");
+    assert.ok(placements.some((placement) => placement.rowStep !== 0 && placement.colStep !== 0), "debe contener diagonales");
+    assert.ok(placements.some((placement) => placement.rowStep < 0 || placement.colStep < 0), "debe contener recorridos invertidos");
+    placements.forEach((placement) => {
+      const boardWord = [...placement.word].map((_, offset) =>
+        puzzle.board[placement.startRow + placement.rowStep * offset]![placement.startCol + placement.colStep * offset]!.value
+      ).join("");
+      assert.equal(boardWord, placement.word);
+    });
+  });
+
+  it("publica pistas conceptuales y nunca filtra la respuesta de Rummikub", () => {
+    const crossword = createPuzzleBlueprint("CROSSWORD", { seed: "real-clues", difficulty: "MEDIUM" });
+    const clues = crossword.meta.clues as string[];
+    assert.ok(clues.every((clue) => !/Palabra de \d+ letras/i.test(clue)));
+    assert.ok(clues.every((clue) => clue.split(". ")[1]?.length > 12));
+
+    const rummikub = createPuzzleBlueprint("RUMMIKUB", { seed: "hidden-results", difficulty: "EXPERT" });
+    rummikub.board.forEach((row, y) => row.forEach((cell, x) => {
+      assert.equal(cell.value, null);
+      assert.match(String(cell.meta.rule), /\?$/);
+      assert.ok(!String(cell.meta.rule).endsWith(String(rummikub.answers[y]![x])));
+    }));
+  });
+
   for (const gameType of GAME_TYPES.filter((type) => type !== "SUDOKU")) {
     it(`genera y permite a un Bot resolver ${gameType}`, () => {
       const players = new ArenaGame(`players-${gameType}`);

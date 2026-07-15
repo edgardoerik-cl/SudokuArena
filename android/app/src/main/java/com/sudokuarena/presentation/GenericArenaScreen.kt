@@ -91,7 +91,7 @@ fun GenericArenaScreen(
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
                         PauseControl(state, onRequestPause)
-                        TextButton(onClick = onExit) { Text("Salir") }
+                        ExitControl(onExit)
                     }
                 }
                 Scoreboard(state)
@@ -304,9 +304,13 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
                 "RED" -> Color(0xFFE53935); "BLUE" -> Color(0xFF1E88E5); "GREEN" -> Color(0xFF00A651); else -> Color(0xFFFF8F00)
             }
             drawRoundRect(tileColor.copy(alpha = .18f), origin + Offset(2f, 2f), Size(width - 4f, height - 4f))
-            drawCenteredText(value, center, width, textMeasurer, tileColor)
+            // La solución vive únicamente en el motor autoritativo. Mientras no haya
+            // una jugada aceptada, la celda muestra una incógnita, nunca el resultado.
+            drawCenteredText(value ?: "?", center, width, textMeasurer, tileColor)
             meta["rule"]?.toString()?.takeIf(String::isNotEmpty)?.let { rule ->
-                val layout = textMeasurer.measure(rule, TextStyle(color = Color(0xFF263238), fontSize = 7.sp, fontWeight = FontWeight.Bold))
+                // También protege partidas antiguas cuyo meta aún contenía "= 7".
+                val safeRule = rule.replace(Regex("(=|→)\\s*\\d+"), "$1 ?")
+                val layout = textMeasurer.measure(safeRule, TextStyle(color = Color(0xFF263238), fontSize = 7.sp, fontWeight = FontWeight.Bold))
                 drawText(layout, topLeft = origin + Offset(2f, 1f))
             }
         }

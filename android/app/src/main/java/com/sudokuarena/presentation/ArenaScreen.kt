@@ -193,7 +193,7 @@ fun ArenaScreen(
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
                         PauseControl(state, onRequestPause)
-                        TextButton(onClick = onExit) { Text("Salir") }
+                        ExitControl(onExit)
                     }
                 }
                 Text(

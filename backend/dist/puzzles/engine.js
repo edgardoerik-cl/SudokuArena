@@ -85,13 +85,25 @@ export class GenericPuzzleEngine {
     }
     /** Produce una intención; siempre vuelve a pasar por `makeMove`. */
     createBotMove(accuracy) {
+        if (this.gameType === "WORD_SEARCH") {
+            const unresolved = this.unresolvedWordPlacements();
+            const placement = unresolved[Math.floor(Math.random() * unresolved.length)];
+            if (!placement)
+                return null;
+            const correct = Math.random() <= accuracy;
+            return {
+                requestId: `generic-bot-${randomUUID()}`,
+                row: placement.startRow,
+                col: placement.startCol,
+                val: { word: correct ? placement.word : `${placement.word}X`, endRow: placement.endRow, endCol: placement.endCol }
+            };
+        }
         const candidates = [];
         for (let row = 0; row < this.board.length; row += 1) {
             for (let col = 0; col < this.board[row].length; col += 1) {
                 const cell = this.board[row][col];
                 if ((cell.ownerId === null || this.gameType === "SLITHERLINK") && !cell.isBlocked) {
-                    if (this.gameType !== "WORD_SEARCH" || col === 0)
-                        candidates.push({ row, col });
+                    candidates.push({ row, col });
                 }
             }
         }
@@ -133,13 +145,15 @@ export class GenericPuzzleEngine {
             target = safe;
         }
         else if (this.gameType === "WORD_SEARCH") {
-            target = { row: Math.min(row, this.meta.words.length - 1), col: 0 };
-            if (this.board[target.row][0].ownerId !== null) {
-                const nextWord = this.meta.words.findIndex((_, index) => this.board[index][0].ownerId === null);
-                if (nextWord < 0)
-                    return null;
-                target = { row: nextWord, col: 0 };
-            }
+            const placement = this.unresolvedWordPlacements()[0];
+            if (!placement)
+                return null;
+            return {
+                requestId: `generic-reveal-${randomUUID()}`,
+                row: placement.startRow,
+                col: placement.startCol,
+                val: { word: placement.word, endRow: placement.endRow, endCol: placement.endCol }
+            };
         }
         else if (["NONOGRAM", "HITORI", "NURIKABE", "BRIDGES"].includes(this.gameType) && this.answers[row][col] !== true) {
             const unresolved = this.findFirstTrueCell();
@@ -169,17 +183,20 @@ export class GenericPuzzleEngine {
             return { correct: true };
         }
         if (this.gameType === "WORD_SEARCH") {
-            const wordValue = typeof move.val === "object" && move.val !== null && "word" in move.val
-                ? move.val.word
-                : move.val;
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : null;
+            const wordValue = payload?.word ?? move.val;
             const word = String(wordValue ?? "").toUpperCase();
-            const words = this.meta.words;
-            const index = words.indexOf(word);
-            if (index < 0 || move.row !== index || move.col !== 0)
+            const placement = this.meta.placements.find((candidate) => candidate.word === word && candidate.startRow === move.row && candidate.startCol === move.col &&
+                (payload?.endRow == null || Number(payload.endRow) === candidate.endRow) &&
+                (payload?.endCol == null || Number(payload.endCol) === candidate.endCol));
+            if (!placement)
                 return { correct: false };
-            for (let col = 0; col < word.length; col += 1)
-                this.board[index][col].ownerId = playerId;
             const found = this.meta.foundWords;
+            if (found.includes(word))
+                return { correct: false };
+            for (let offset = 0; offset < word.length; offset += 1) {
+                this.board[placement.startRow + placement.rowStep * offset][placement.startCol + placement.colStep * offset].ownerId = playerId;
+            }
             if (!found.includes(word))
                 found.push(word);
             return { correct: true, points: word.length * 10 };
@@ -259,8 +276,9 @@ export class GenericPuzzleEngine {
     }
     botValue(row, col, correct) {
         if (this.gameType === "WORD_SEARCH") {
-            const word = this.meta.words[row] ?? "ERROR";
-            return correct ? word : `${word}X`;
+            const placement = this.meta.placements.find((item) => item.startRow === row && item.startCol === col);
+            const word = placement?.word ?? "ERROR";
+            return { word: correct ? word : `${word}X`, endRow: placement?.endRow ?? row, endCol: placement?.endCol ?? col };
         }
         if (this.gameType === "DOTS_AND_BOXES") {
             const cell = this.board[row][col];
@@ -343,6 +361,10 @@ export class GenericPuzzleEngine {
             }));
         }
         return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] === null || cell.ownerId !== null));
+    }
+    unresolvedWordPlacements() {
+        const found = new Set(this.meta.foundWords);
+        return this.meta.placements.filter((placement) => !found.has(placement.word));
     }
     validateEnvelope(move) {
         if (!move || typeof move.requestId !== "string" || move.requestId.length < 1 || move.requestId.length > 100)
