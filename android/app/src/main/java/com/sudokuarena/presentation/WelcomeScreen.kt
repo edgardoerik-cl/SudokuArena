@@ -329,6 +329,7 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.NONOGRAM -> "▦"; GameType.DOTS_AND_BOXES -> "□"; GameType.KAKURO -> "Σ"; GameType.MATHDOKU -> "×"
     GameType.HITORI -> "◼"; GameType.RUMMIKUB -> "123"
     GameType.NURIKABE -> "≈"; GameType.BRIDGES -> "●═●"; GameType.SLITHERLINK -> "□"; GameType.CRYPTARITHM -> "A=7"
+    GameType.CROSS_LETTERS -> "AÑ"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
@@ -336,6 +337,7 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
     GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
     GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Slitherlink"; GameType.CRYPTARITHM -> "Criptogramas"
+    GameType.CROSS_LETTERS -> "Letras Cruzadas"
 }
 
 @Composable

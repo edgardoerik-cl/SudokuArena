@@ -17,6 +17,7 @@ export function createPuzzleBlueprint(gameType, options = {}) {
         case "BRIDGES": return bridges(random, difficulty);
         case "SLITHERLINK": return slitherlink(random, difficulty);
         case "CRYPTARITHM": return cryptarithm(random, difficulty);
+        case "CROSS_LETTERS": return crossLetters(random, difficulty);
         case "SUDOKU": return latinPuzzle(random, 9);
     }
 }
@@ -150,7 +151,15 @@ function kakuro(random, difficulty) {
     const board = matrix(playable + 1, playable + 1, (row, col) => row === 0 || col === 0
         ? blockedCell({ clueCell: true, downSum: row === 0 && col > 0 ? rowSum : 0, rightSum: col === 0 && row > 0 ? rowSum : 0 })
         : cell(null, false, { runLength: playable }));
-    return { board, answers, meta: { instructions: `Cada grupo suma ${rowSum} sin repetir.`, difficulty } };
+    const anchorCount = difficulty === "EASY" ? 4 : difficulty === "MEDIUM" ? 3 : difficulty === "HARD" ? 2 : 1;
+    const playableCells = random.shuffle(Array.from({ length: playable * playable }, (_, index) => ({
+        row: Math.floor(index / playable) + 1,
+        col: index % playable + 1
+    })));
+    for (const { row, col } of playableCells.slice(0, anchorCount)) {
+        board[row][col] = { ...cell(answers[row][col], true, { runLength: playable, given: true }), isBlocked: true };
+    }
+    return { board, answers, meta: { instructions: `Cada grupo suma ${rowSum} sin repetir. Los números dorados son pistas iniciales.`, initialClues: anchorCount, difficulty } };
 }
 function mathdoku(random, difficulty) {
     const size = sizeFor(difficulty, 4, 5, 6, 7);
@@ -262,6 +271,21 @@ function bridges(random, difficulty) {
         if (Number.isInteger(midRow) && Number.isInteger(midCol))
             answers[midRow][midCol] = true;
     });
+    const islandKeys = new Set(islands.map(([row, col]) => `${row}:${col}`));
+    for (const [row, col] of islands) {
+        const validTargets = [];
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (const [rowStep, colStep] of directions) {
+            const targetRow = row + rowStep * 2;
+            const targetCol = col + colStep * 2;
+            const midRow = row + rowStep;
+            const midCol = col + colStep;
+            if (islandKeys.has(`${targetRow}:${targetCol}`) && answers[midRow]?.[midCol] === true)
+                validTargets.push(`${targetRow}:${targetCol}`);
+        }
+        board[row][col].meta.validTargets = validTargets;
+        board[row][col].meta.bridgeCount = validTargets.length;
+    }
     return { board, answers, meta: { instructions: "Une islas alineadas; los puentes no se cruzan.", difficulty } };
 }
 function slitherlink(random, difficulty) {
@@ -302,8 +326,54 @@ function cryptarithm(random, difficulty) {
     const encode = (value) => [...String(value)].map((digit) => map.get(Number(digit))).join("");
     const equation = `${encode(a)} + ${encode(b)} = ${encode(result)}`;
     const answers = [letters.map((_, index) => digits[index])];
-    const board = [letters.map((letter) => cell(letter, true, { cryptLetter: letter }))];
-    return { board, answers, meta: { equation, letters, instructions: "Cada letra representa un dígito distinto; ninguna cifra inicial es cero.", difficulty } };
+    const revealCount = difficulty === "EASY" ? 3 : 2;
+    const revealedIndexes = new Set(random.shuffle(letters.map((_, index) => index)).slice(0, revealCount));
+    const revealedValues = {};
+    const board = [letters.map((letter, index) => {
+            if (!revealedIndexes.has(index))
+                return cell(letter, true, { cryptLetter: letter });
+            revealedValues[letter] = digits[index];
+            return { ...cell(digits[index], true, { cryptLetter: letter, given: true }), isBlocked: true };
+        })];
+    return {
+        board,
+        answers,
+        meta: {
+            equation,
+            letters,
+            revealedValues,
+            instructions: `Cada letra representa un dígito distinto. Pistas iniciales: ${Object.entries(revealedValues).map(([letter, value]) => `${letter}=${value}`).join(" · ")}.`,
+            difficulty
+        }
+    };
+}
+export const SCRABBLE_SCORES = {
+    A: 1, B: 3, C: 3, D: 2, E: 1, F: 4, G: 2, H: 4, I: 1, J: 8,
+    L: 1, M: 3, N: 1, "Ñ": 8, O: 1, P: 3, Q: 5, R: 1, S: 1, T: 1,
+    U: 1, V: 4, X: 8, Y: 4, Z: 10
+};
+function crossLetters(random, difficulty) {
+    const size = 15;
+    const tripleWord = new Set(["0:0", "0:7", "0:14", "7:0", "7:14", "14:0", "14:7", "14:14"]);
+    const doubleWord = new Set(["1:1", "2:2", "3:3", "4:4", "7:7", "10:10", "11:11", "12:12", "13:13", "1:13", "2:12", "3:11", "4:10", "10:4", "11:3", "12:2", "13:1"]);
+    const tripleLetter = new Set(["1:5", "1:9", "5:1", "5:5", "5:9", "5:13", "9:1", "9:5", "9:9", "9:13", "13:5", "13:9"]);
+    const doubleLetter = new Set(["0:3", "0:11", "2:6", "2:8", "3:0", "3:7", "3:14", "6:2", "6:6", "6:8", "6:12", "7:3", "7:11", "8:2", "8:6", "8:8", "8:12", "11:0", "11:7", "11:14", "12:6", "12:8", "14:3", "14:11"]);
+    const board = matrix(size, size, (row, col) => {
+        const key = `${row}:${col}`;
+        const bonus = tripleWord.has(key) ? "TW" : doubleWord.has(key) ? "DW" : tripleLetter.has(key) ? "TL" : doubleLetter.has(key) ? "DL" : "NONE";
+        return cell(null, false, { bonus, center: row === 7 && col === 7 });
+    });
+    return {
+        board,
+        answers: matrix(size, size, () => null),
+        meta: {
+            letterScores: SCRABBLE_SCORES,
+            turnSeconds: difficulty === "EXPERT" ? 35 : difficulty === "HARD" ? 45 : 60,
+            instructions: "Forma palabras españolas conectadas. DL/TL multiplican letras y DW/TW la palabra.",
+            difficulty,
+            seedHint: random.int(0, 999_999)
+        }
+    };
 }
 function latinPuzzle(random, size) {
     const digits = random.shuffle(Array.from({ length: size }, (_, index) => index + 1));

@@ -1,5 +1,5 @@
 export const BOARD_SIZE = 9;
-export const APP_VERSION = "3.1.0";
+export const APP_VERSION = "3.2.0";
 export const MAX_PLAYERS = 4;
 export const CELL_POINTS = 10;
 export const SECTION_POINTS = 100;

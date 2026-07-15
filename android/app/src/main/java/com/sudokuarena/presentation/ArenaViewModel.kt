@@ -82,6 +82,9 @@ data class ArenaUiState(
     val activeGameType: GameType = GameType.SUDOKU,
     val isLocallyPaused: Boolean = false,
     val resumeCountdownMs: Long = 0,
+    val letterRack: List<String> = emptyList(),
+    val activeLetterPlayerId: String? = null,
+    val letterTurnEndsAt: Long = 0,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -95,6 +98,7 @@ data class ArenaUiState(
     val gameType: GameType get() = roomState?.config?.gameType ?: activeGameType
     val canMakeGenericMove: Boolean
         get() = connected && gameType != GameType.SUDOKU && selected != null &&
+            (gameType != GameType.CROSS_LETTERS || isSoloMode || activeLetterPlayerId == playerId) &&
             penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null &&
             !soloCompleted && !isLocallyPaused && roomState?.phase != RoomPhase.PAUSED
 }
@@ -284,7 +288,7 @@ class ArenaViewModel(
         val current = mutableState.value
         if (current.penaltyRemainingMs > 0 || current.fogSwipesRemaining > 0 || current.soloCompleted || current.isLocallyPaused || current.roomState?.phase == RoomPhase.PAUSED) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (cell.isBlocked || cell.ownerId != null) return
+        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.SLITHERLINK, GameType.WORD_SEARCH))) return
         submitGenericMove(CellPosition(row, column), value)
     }
 
@@ -432,6 +436,8 @@ class ArenaViewModel(
             totalXp = recordStore.totalXp(),
             activeGameType = initialGameType,
             genericBoard = localPuzzleEngine?.snapshot(),
+            letterRack = localPuzzleEngine?.letterRack().orEmpty(),
+            activeLetterPlayerId = SOLO_PLAYER_ID,
         )
     }
 
@@ -627,6 +633,9 @@ class ArenaViewModel(
                 mutableState.update {
                     it.copy(pendingRequestId = null, selected = null, message = event.message)
                 }
+            }
+            is RealtimeEvent.LetterRackUpdated -> mutableState.update {
+                it.copy(letterRack = event.letters, activeLetterPlayerId = event.activePlayerId, letterTurnEndsAt = event.turnEndsAt)
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }

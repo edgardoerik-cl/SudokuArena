@@ -1,6 +1,11 @@
 package com.sudokuarena.presentation
 
 import android.graphics.Color as AndroidColor
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.blur
@@ -90,7 +95,7 @@ fun GenericArenaScreen(
                     }
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
-                        PauseControl(state, onRequestPause)
+                        PauseControl(state, onRequestPause, onPauseResponse)
                         ExitControl(onExit)
                     }
                 }
@@ -111,7 +116,7 @@ fun GenericArenaScreen(
                         onDirectMove = onMoveAt,
                     )
                     PuzzleHints(generic)
-                    GenericMoveControls(state.gameType, state.canMakeGenericMove, onMove)
+                    GenericMoveControls(state, state.canMakeGenericMove, onMove)
                     if (!state.isSoloMode) ReactionMenu(onReaction)
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
                 }
@@ -126,7 +131,7 @@ fun GenericArenaScreen(
             if (state.soloCompleted || state.matchResults.isNotEmpty()) {
                 MatchResultsOverlay(state, onNewSoloGame = onNewSoloGame, onRematch = onRematch, onExit = onExit, modifier = Modifier.zIndex(30f))
             }
-            PauseLayer(state, onPauseResponse, onResume, Modifier.zIndex(50f))
+            PauseLayer(state, onResume, Modifier.zIndex(50f))
             if (state.showTutorial) {
                 ArenaTutorialOverlay(state.isSoloMode, state.gameType, onTutorialComplete, Modifier.zIndex(60f))
             }
@@ -145,10 +150,20 @@ fun GenericPuzzleGrid(
     onDirectMove: (Int, Int, Any?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (state.gameType == GameType.NONOGRAM) {
+        NonogramPuzzleGrid(state, players, enabled, onDirectMove, modifier)
+        return
+    }
     val textMeasurer = rememberTextMeasurer()
     var dragStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var dragEnd by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var selectedDot by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
+    var selectedBridgeIsland by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
+    val illegalWater = remember(state.board, state.gameType) { if (state.gameType == GameType.NURIKABE) illegalWaterCells(state) else emptySet() }
+    val warningAlpha by rememberInfiniteTransition(label = "nurikabeWarning").animateFloat(
+        initialValue = .35f, targetValue = .9f,
+        animationSpec = infiniteRepeatable(tween(380), RepeatMode.Reverse), label = "water2x2",
+    )
     val gestureModifier = if (state.gameType == GameType.WORD_SEARCH) {
         Modifier.pointerInput(state.board, enabled) {
             fun position(offset: Offset): CellPosition = CellPosition(
@@ -202,6 +217,44 @@ fun GenericPuzzleGrid(
                     }
                 }
             }
+    } else if (state.gameType == GameType.BRIDGES) {
+        Modifier.pointerInput(state.board, enabled, selectedBridgeIsland) {
+            detectTapGestures { offset ->
+                if (!enabled) return@detectTapGestures
+                val row = floor(offset.y / (size.height / state.rows)).toInt().coerceIn(0, state.rows - 1)
+                val col = floor(offset.x / (size.width / state.columns)).toInt().coerceIn(0, state.columns - 1)
+                if (state.board[row][col].meta["island"] != true) return@detectTapGestures
+                val tapped = CellPosition(row, col)
+                val first = selectedBridgeIsland
+                if (first == null || first == tapped) selectedBridgeIsland = tapped.takeUnless { first == tapped }
+                else if ("${tapped.row}:${tapped.column}" in bridgeTargets(state, first)) {
+                    onDirectMove((first.row + tapped.row) / 2, (first.column + tapped.column) / 2, "BRIDGE")
+                    selectedBridgeIsland = null
+                } else selectedBridgeIsland = tapped
+            }
+        }
+    } else if (state.gameType == GameType.SLITHERLINK) {
+        Modifier.pointerInput(state.board, enabled) {
+            var lastEdge: String? = null
+            fun drawAt(offset: Offset) {
+                if (!enabled) return
+                val width = size.width / state.columns; val height = size.height / state.rows
+                val row = floor(offset.y / height).toInt().coerceIn(0, state.rows - 1)
+                val col = floor(offset.x / width).toInt().coerceIn(0, state.columns - 1)
+                val localX = offset.x - col * width; val localY = offset.y - row * height
+                val side = listOf("left" to localX, "right" to width - localX, "top" to localY, "bottom" to height - localY).minBy { it.second }.first
+                val edge = "$row:$col:$side"
+                if (edge != lastEdge && state.board[row][col].meta[side] != true) {
+                    lastEdge = edge
+                    onDirectMove(row, col, side)
+                }
+            }
+            detectDragGestures(
+                onDragStart = { lastEdge = null; drawAt(it) },
+                onDrag = { change, _ -> drawAt(change.position) },
+                onDragEnd = { lastEdge = null },
+            )
+        }
     } else {
         Modifier.pointerInput(state.board, enabled) {
             detectTapGestures { offset ->
@@ -212,9 +265,15 @@ fun GenericPuzzleGrid(
                     GameType.MINESWEEPER -> onDirectMove(row, col, "REVEAL")
                     GameType.NONOGRAM -> onDirectMove(row, col, "FILL")
                     GameType.HITORI -> onDirectMove(row, col, "BLOCK")
-                    GameType.NURIKABE -> onDirectMove(row, col, "RIVER")
-                    GameType.BRIDGES -> onDirectMove(row, col, "BRIDGE")
-                    GameType.DOTS_AND_BOXES, GameType.SLITHERLINK -> {
+                    GameType.NURIKABE -> {
+                        val next = when (state.board[row][col].value?.toString()) {
+                            "RIVER" -> "ISLAND"
+                            "ISLAND" -> "CLEAR"
+                            else -> "RIVER"
+                        }
+                        onDirectMove(row, col, next)
+                    }
+                    GameType.DOTS_AND_BOXES -> {
                         val localX = offset.x - col * (size.width / state.columns)
                         val localY = offset.y - row * (size.height / state.rows)
                         val width = size.width / state.columns
@@ -240,18 +299,103 @@ fun GenericPuzzleGrid(
             cells.forEachIndexed { col, cell ->
                 val origin = Offset(col * cellWidth, row * cellHeight)
                 val ownerColor = cell.ownerId?.let { players[it]?.colorHex }?.let(::parseGenericColor)
+                val bridgeValid = state.gameType == GameType.BRIDGES && selectedBridgeIsland != null && "${row}:${col}" in bridgeTargets(state, selectedBridgeIsland!!)
                 val fill = when {
+                    CellPosition(row, col) in illegalWater -> Color(0xFFFF1744).copy(alpha = warningAlpha)
+                    state.gameType == GameType.NURIKABE && cell.value == "RIVER" -> Color(0xFF2196F3).copy(alpha = .78f)
+                    state.gameType == GameType.NURIKABE && cell.value == "ISLAND" -> Color(0xFF66BB6A).copy(alpha = .72f)
+                    bridgeValid -> Color(0xFF00C853).copy(alpha = .32f)
+                    state.gameType == GameType.BRIDGES && selectedBridgeIsland == CellPosition(row, col) -> Color(0xFF00A8FF).copy(alpha = .28f)
+                    cell.meta["given"] == true -> Color(0xFFFFD54F).copy(alpha = .62f)
                     selected == CellPosition(row, col) -> Color(0xFFFFF59D)
                     ownerColor != null -> ownerColor.copy(alpha = 0.25f)
                     cell.isBlocked -> Color(0xFF263238)
                     else -> Color.Transparent
                 }
                 drawRect(fill, origin, Size(cellWidth, cellHeight))
-                renderGenericCell(state.gameType, cell.value, cell.meta, cell.isBlocked, origin, cellWidth, cellHeight, textMeasurer)
+                val renderMeta = cell.meta + mapOf(
+                    "_row" to row,
+                    "_col" to col,
+                    "completed" to (state.gameType == GameType.BRIDGES && cell.meta["island"] == true && bridgeSatisfied(state, row, col)),
+                )
+                renderGenericCell(state.gameType, cell.value, renderMeta, cell.isBlocked, origin, cellWidth, cellHeight, textMeasurer)
                 drawRect(Color(0xFFB0BEC5), origin, Size(cellWidth, cellHeight), style = Stroke(1.2f))
                 if (ownerColor != null) drawRect(ownerColor, origin, Size(cellWidth, cellHeight), style = Stroke(2.4f))
             }
         }
+    }
+}
+
+@Composable
+private fun NonogramPuzzleGrid(
+    state: GenericBoardState,
+    players: Map<String, Player>,
+    enabled: Boolean,
+    onDirectMove: (Int, Int, Any?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val rowClues = nestedIntClues(state.meta["rowClues"], state.rows)
+    val columnClues = nestedIntClues(state.meta["columnClues"], state.columns)
+    val leftUnits = (rowClues.maxOfOrNull(List<Int>::size) ?: 1).coerceAtLeast(1) * .72f + .35f
+    val topUnits = (columnClues.maxOfOrNull(List<Int>::size) ?: 1).coerceAtLeast(1) * .72f + .35f
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .aspectRatio((state.columns + leftUnits) / (state.rows + topUnits))
+            .background(Color(0xFFF8FAFF), RoundedCornerShape(10.dp))
+            .pointerInput(state.board, enabled, leftUnits, topUnits) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        if (!enabled) return@detectTapGestures
+                        val cell = min(size.width / (state.columns + leftUnits), size.height / (state.rows + topUnits))
+                        val col = floor((offset.x - leftUnits * cell) / cell).toInt()
+                        val row = floor((offset.y - topUnits * cell) / cell).toInt()
+                        if (row in 0 until state.rows && col in 0 until state.columns) onDirectMove(row, col, "FILL")
+                    },
+                    onLongPress = { offset ->
+                        if (!enabled) return@detectTapGestures
+                        val cell = min(size.width / (state.columns + leftUnits), size.height / (state.rows + topUnits))
+                        val col = floor((offset.x - leftUnits * cell) / cell).toInt()
+                        val row = floor((offset.y - topUnits * cell) / cell).toInt()
+                        if (row in 0 until state.rows && col in 0 until state.columns) onDirectMove(row, col, "EMPTY")
+                    },
+                )
+            },
+    ) {
+        val cellSize = min(size.width / (state.columns + leftUnits), size.height / (state.rows + topUnits))
+        val gridX = leftUnits * cellSize
+        val gridY = topUnits * cellSize
+        rowClues.forEachIndexed { row, clues ->
+            clues.forEachIndexed { index, clue ->
+                val center = Offset(gridX - (clues.size - index - .5f) * cellSize * .72f, gridY + (row + .5f) * cellSize)
+                drawCenteredText(clue, center, cellSize, textMeasurer, Color(0xFF102A56))
+            }
+        }
+        columnClues.forEachIndexed { col, clues ->
+            clues.forEachIndexed { index, clue ->
+                val center = Offset(gridX + (col + .5f) * cellSize, gridY - (clues.size - index - .5f) * cellSize * .72f)
+                drawCenteredText(clue, center, cellSize, textMeasurer, Color(0xFF102A56))
+            }
+        }
+        state.board.forEachIndexed { row, cells -> cells.forEachIndexed { col, cell ->
+            val origin = Offset(gridX + col * cellSize, gridY + row * cellSize)
+            val ownerColor = cell.ownerId?.let { players[it]?.colorHex }?.let(::parseGenericColor)
+            if (cell.value == true) drawRect((ownerColor ?: Color(0xFF243B6B)).copy(alpha = .88f), origin + Offset(2f, 2f), Size(cellSize - 4f, cellSize - 4f))
+            if (cell.value == false) {
+                drawLine(Color(0xFF78909C), origin + Offset(cellSize * .25f, cellSize * .25f), origin + Offset(cellSize * .75f, cellSize * .75f), 2.5f)
+                drawLine(Color(0xFF78909C), origin + Offset(cellSize * .75f, cellSize * .25f), origin + Offset(cellSize * .25f, cellSize * .75f), 2.5f)
+            }
+            drawRect(Color(0xFF90A4AE), origin, Size(cellSize, cellSize), style = Stroke(if ((row + 1) % 5 == 0 || (col + 1) % 5 == 0) 2.2f else 1f))
+        } }
+        drawRect(Color(0xFF102A56), Offset(gridX, gridY), Size(state.columns * cellSize, state.rows * cellSize), style = Stroke(2.5f))
+    }
+}
+
+private fun nestedIntClues(raw: Any?, expected: Int): List<List<Int>> {
+    val outer = raw as? List<*> ?: return List(expected) { listOf(0) }
+    return List(expected) { index ->
+        (outer.getOrNull(index) as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }?.ifEmpty { listOf(0) } ?: listOf(0)
     }
 }
 
@@ -275,6 +419,10 @@ private fun PuzzleHints(state: GenericBoardState) {
         GameType.BRIDGES -> Text("Toca los segmentos entre islas para construir la red.")
         GameType.SLITHERLINK -> Text("Toca cerca de un borde para añadirlo al lazo.")
         GameType.CRYPTARITHM -> Text(state.meta["equation"]?.toString().orEmpty(), fontWeight = FontWeight.Black)
+        GameType.CROSS_LETTERS -> {
+            val active = state.meta["activePlayerId"]?.toString()
+            Text("Turno: ${active?.take(8) ?: "preparando…"} · selecciona la casilla inicial", fontWeight = FontWeight.Bold)
+        }
         else -> Unit
     }
 }
@@ -316,14 +464,20 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
         }
         GameType.NURIKABE -> if (meta["islandClue"] == true) {
             drawCenteredText(meta["islandSize"], center, width, textMeasurer, Color.White)
-        } else if (value == true) drawRect(Color(0xFF102A43), origin + Offset(1f, 1f), Size(width - 2f, height - 2f))
+        }
         GameType.BRIDGES -> if (meta["island"] == true) {
-            drawCircle(Color(0xFFFFF4C2), min(width, height) * .34f, center)
-            drawCircle(Color(0xFF7A4E00), min(width, height) * .34f, center, style = Stroke(2f))
-            drawCenteredText(meta["bridgeCount"], center, width, textMeasurer, Color(0xFF4A3200))
-        } else if (value == true) drawLine(Color(0xFF7A4E00), Offset(origin.x, center.y), Offset(origin.x + width, center.y), 5f)
+            val complete = meta["completed"] == true
+            drawCircle(if (complete) Color(0xFFFFD54F) else Color(0xFFFFF4C2), min(width, height) * .34f, center)
+            drawCircle(if (complete) Color(0xFFFF8F00) else Color(0xFF7A4E00), min(width, height) * .34f, center, style = Stroke(if (complete) 4f else 2f))
+            drawCenteredText(meta["bridgeCount"], center, width, textMeasurer, if (complete) Color(0xFF5D3A00) else Color(0xFF4A3200))
+        } else if (value == true) {
+            if (((meta["_row"] as? Number)?.toInt() ?: 0) % 2 == 1) drawLine(Color(0xFF7A4E00), Offset(center.x, origin.y), Offset(center.x, origin.y + height), 5f)
+            else drawLine(Color(0xFF7A4E00), Offset(origin.x, center.y), Offset(origin.x + width, center.y), 5f)
+        }
         GameType.SLITHERLINK -> {
-            if (((meta["clue"] as? Number)?.toInt() ?: -1) >= 0) drawCenteredText(meta["clue"], center, width, textMeasurer, Color(0xFF102A56))
+            val clue = (meta["clue"] as? Number)?.toInt() ?: -1
+            val edgeCount = listOf("top", "right", "bottom", "left").count { meta[it] == true }
+            if (clue >= 0) drawCenteredText(clue, center, width, textMeasurer, if (edgeCount == clue) Color(0xFF00A651) else Color(0xFF102A56))
             if (meta["top"] == true) drawLine(Color(0xFF7C3AED), origin, origin + Offset(width, 0f), 4f)
             if (meta["right"] == true) drawLine(Color(0xFF7C3AED), origin + Offset(width, 0f), origin + Offset(width, height), 4f)
             if (meta["bottom"] == true) drawLine(Color(0xFF7C3AED), origin + Offset(0f, height), origin + Offset(width, height), 4f)
@@ -332,6 +486,14 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
         GameType.CRYPTARITHM -> {
             val letter = meta["cryptLetter"]?.toString().orEmpty()
             drawCenteredText(if (value?.toString() == letter) letter else "$letter=$value", center, width, textMeasurer, Color(0xFF102A56))
+        }
+        GameType.CROSS_LETTERS -> {
+            val bonus = meta["bonus"]?.toString().orEmpty()
+            val bonusColor = when (bonus) { "TW" -> Color(0xFFE53935); "DW" -> Color(0xFFFF8A80); "TL" -> Color(0xFF1565C0); "DL" -> Color(0xFF81D4FA); else -> Color.Transparent }
+            if (bonusColor != Color.Transparent && value == null) drawRect(bonusColor.copy(alpha = .38f), origin + Offset(1f, 1f), Size(width - 2f, height - 2f))
+            if (value == null && bonus != "NONE") drawCenteredText(bonus, center, width * .8f, textMeasurer, Color(0xFF102A56))
+            else drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
+            if (meta["center"] == true && value == null) drawCircle(Color(0xFFFFC107), min(width, height) * .11f, center)
         }
         GameType.HITORI -> {
             drawCenteredText(value, center, width, textMeasurer, if (isBlocked) Color.White else Color(0xFF102A56))
@@ -375,7 +537,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCenteredText(
 }
 
 @Composable
-private fun GenericMoveControls(gameType: GameType, enabled: Boolean, onMove: (Any?) -> Unit) {
+private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (Any?) -> Unit) {
+    val gameType = state.gameType
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
         GameType.MINESWEEPER, GameType.NONOGRAM, GameType.HITORI, GameType.DOTS_AND_BOXES,
@@ -385,6 +548,34 @@ private fun GenericMoveControls(gameType: GameType, enabled: Boolean, onMove: (A
             OutlinedTextField(text, { text = it.uppercase().take(1) }, label = { Text("Letra") }, modifier = Modifier.weight(1f))
             Spacer(Modifier.height(4.dp))
             Button({ onMove(text); text = "" }, enabled = enabled && text.isNotBlank()) { Text("Colocar") }
+        }
+        GameType.CROSS_LETTERS -> {
+            var vertical by remember { mutableStateOf(false) }
+            val normalized = text.uppercase().filter { it in "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ" }
+            val available = state.letterRack.groupingBy { it }.eachCount().toMutableMap()
+            val usesRack = normalized.all { letter ->
+                val count = available[letter.toString()] ?: 0
+                if (count <= 0) false else { available[letter.toString()] = count - 1; true }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    state.letterRack.forEach { letter ->
+                        Surface(shape = RoundedCornerShape(7.dp), color = Color(0xFFFFF4C2), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7A4E00))) {
+                            Text(letter, Modifier.padding(horizontal = 9.dp, vertical = 7.dp), fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+                OutlinedTextField(normalized, { text = it.take(15) }, label = { Text("Palabra del atril") }, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton({ vertical = false }, modifier = Modifier.weight(1f)) { Text(if (!vertical) "✓ Horizontal" else "Horizontal") }
+                    OutlinedButton({ vertical = true }, modifier = Modifier.weight(1f)) { Text(if (vertical) "✓ Vertical" else "Vertical") }
+                    Button(
+                        onClick = { onMove(mapOf("word" to normalized, "direction" to if (vertical) "V" else "H")); text = "" },
+                        enabled = enabled && normalized.length >= 2 && usesRack,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Jugar") }
+                }
+            }
         }
         else -> {
             val values = when (gameType) {
@@ -428,12 +619,36 @@ private fun wordAlong(state: GenericBoardState, start: CellPosition, end: CellPo
 
 private fun parseGenericColor(hex: String): Color = runCatching { Color(AndroidColor.parseColor(hex)) }.getOrDefault(Color.Gray)
 
+private fun bridgeTargets(state: GenericBoardState, island: CellPosition): Set<String> =
+    (state.board.getOrNull(island.row)?.getOrNull(island.column)?.meta?.get("validTargets") as? List<*>)
+        ?.mapNotNull { it?.toString() }
+        ?.toSet()
+        .orEmpty()
+
+private fun bridgeSatisfied(state: GenericBoardState, row: Int, col: Int): Boolean {
+    val required = (state.board[row][col].meta["bridgeCount"] as? Number)?.toInt() ?: return false
+    if (required == 0) return true
+    val built = listOf(row - 1 to col, row + 1 to col, row to col - 1, row to col + 1)
+        .count { (y, x) -> state.board.getOrNull(y)?.getOrNull(x)?.value == true }
+    return built >= required
+}
+
+private fun illegalWaterCells(state: GenericBoardState): Set<CellPosition> {
+    val illegal = mutableSetOf<CellPosition>()
+    for (row in 0 until state.rows - 1) for (col in 0 until state.columns - 1) {
+        val block = listOf(CellPosition(row, col), CellPosition(row + 1, col), CellPosition(row, col + 1), CellPosition(row + 1, col + 1))
+        if (block.all { state.board[it.row][it.column].value == "RIVER" }) illegal += block
+    }
+    return illegal
+}
+
 fun gameTitle(type: GameType): String = when (type) {
     GameType.SUDOKU -> "Multi Arena · Sudoku"; GameType.MINESWEEPER -> "Multi Arena · Buscaminas"; GameType.WORD_SEARCH -> "Multi Arena · Sopa de Letras"
     GameType.CROSSWORD -> "Multi Arena · Crucigramas"; GameType.NONOGRAM -> "Multi Arena · Nonogram"; GameType.DOTS_AND_BOXES -> "Multi Arena · Timbiriche"
     GameType.KAKURO -> "Multi Arena · Kakuro"; GameType.MATHDOKU -> "Multi Arena · Mathdoku"; GameType.HITORI -> "Multi Arena · Hitori"; GameType.RUMMIKUB -> "Multi Arena · Rummikub"
     GameType.NURIKABE -> "Multi Arena · Nurikabe"; GameType.BRIDGES -> "Multi Arena · Bridges"
     GameType.SLITHERLINK -> "Multi Arena · Slitherlink"; GameType.CRYPTARITHM -> "Multi Arena · Criptogramas"
+    GameType.CROSS_LETTERS -> "Multi Arena · Letras Cruzadas"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

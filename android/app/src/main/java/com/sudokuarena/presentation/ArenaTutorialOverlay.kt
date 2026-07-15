@@ -166,6 +166,11 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("A=7", "Descifra letras", "Cada letra representa un dígito diferente y una inicial nunca vale cero."),
         TutorialStep("+", "Haz verdadera la suma", "Asigna los dígitos que hacen correcta toda la ecuación."),
     )
+    GameType.CROSS_LETTERS -> listOf(
+        TutorialStep("AÑ", "Usa tu atril", "En tu turno forma una palabra española con las siete letras disponibles."),
+        TutorialStep("DL·TW", "Aprovecha premios", "Las casillas DL/TL multiplican una letra; DW/TW multiplican toda la palabra."),
+        TutorialStep("★", "Conecta palabras", "La primera palabra cruza la estrella central y las siguientes deben enlazarse al tablero."),
+    )
 }
 
 @Composable

@@ -4,6 +4,18 @@ import { ArenaGame } from "../src/game.js";
 import { SOLUTION, createRandomSolution } from "../src/constants.js";
 
 describe("ArenaGame", () => {
+  it("inicia Sudoku online con pistas bloqueadas según dificultad", () => {
+    const game = new ArenaGame("online-clues");
+    game.addPlayer("p1", "Ada");
+    game.startMatch({ gameType: "SUDOKU", powersEnabled: true, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM", puzzleDifficulty: "HARD" }, "p1");
+    const givens = game.snapshot().board.flat().filter((cell) => cell.given);
+    assert.equal(givens.length, 26);
+    assert.ok(givens.every((cell) => cell.value !== null && cell.ownerId === null));
+    const target = game.snapshot().board.flatMap((row, rowIndex) => row.map((cell, column) => ({ cell, row: rowIndex, column }))).find((entry) => entry.cell.given)!;
+    const result = game.place("p1", { requestId: "given-cell", row: target.row, column: target.column, value: target.cell.value! });
+    assert.equal(result.accepted, false);
+    if (!result.accepted) assert.equal(result.code, "CELL_OCCUPIED");
+  });
   it("genera soluciones aleatorias válidas para salas independientes", () => {
     const solution = createRandomSolution();
     const expected = "123456789";

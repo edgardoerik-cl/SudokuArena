@@ -600,8 +600,19 @@ function processGenericMove(room, playerId, payload, responder) {
         finishMatch(room, true);
 }
 function emitGenericState(room) {
-    if (room.genericEngine)
-        io.to(room.code).emit("generic:state", room.genericEngine.snapshot(room.game));
+    if (!room.genericEngine)
+        return;
+    const snapshot = room.genericEngine.snapshot(room.game);
+    io.to(room.code).emit("generic:state", snapshot);
+    if (room.config.gameType === "CROSS_LETTERS") {
+        for (const player of room.game.snapshot().players) {
+            io.to(player.id).emit("letters:rack", {
+                letters: room.genericEngine.rackFor(player.id),
+                activePlayerId: snapshot.meta.activePlayerId,
+                turnEndsAt: snapshot.meta.turnEndsAt
+            });
+        }
+    }
 }
 function hasTopScoreTie(room) {
     const results = room.game.matchResults();
@@ -654,7 +665,10 @@ function scheduleBotAction(room, botId) {
         if (!runBotSupportPower(room, botId, runtime)) {
             runBotPower(room, botId);
             if (room.genericEngine) {
-                const proposal = room.genericEngine.createBotMove(profile.accuracy);
+                // También hace avanzar el reloj de turno de Letras Cruzadas antes de que
+                // el Bot decida si le corresponde actuar.
+                room.genericEngine.snapshot(room.game);
+                const proposal = room.genericEngine.createBotMove(profile.accuracy, botId);
                 if (proposal) {
                     const result = room.genericEngine.makeMove(botId, proposal, room.game);
                     if (result.accepted) {

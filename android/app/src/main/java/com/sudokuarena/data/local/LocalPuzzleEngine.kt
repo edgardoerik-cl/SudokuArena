@@ -15,7 +15,7 @@ data class LocalPuzzleMoveResult(
     val message: String = "",
 )
 
-/** Motor solución-primero para las trece arenas no-Sudoku sin conexión. */
+/** Motor solución-primero para las arenas no-Sudoku sin conexión. */
 class LocalPuzzleEngine(
     val gameType: GameType,
     private val difficulty: PuzzleDifficulty = PuzzleDifficulty.MEDIUM,
@@ -33,9 +33,28 @@ class LocalPuzzleEngine(
         columns = board.firstOrNull()?.size ?: 0, board = board, completed = isComplete(), meta = blueprint.meta,
     )
 
+    fun letterRack(): List<String> = (blueprint.meta["rack"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
+
     fun move(row: Int, col: Int, value: Any?): LocalPuzzleMoveResult {
         val cell = board.getOrNull(row)?.getOrNull(col) ?: return reject("Movimiento fuera del tablero")
-        if (cell.isBlocked || (cell.ownerId != null && gameType != GameType.SLITHERLINK)) return reject("Casilla no disponible")
+        if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.SLITHERLINK, GameType.NURIKABE, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
+
+        if (gameType == GameType.CROSS_LETTERS) {
+            val payload = value as? Map<*, *> ?: return incorrect()
+            val word = payload["word"]?.toString()?.uppercase().orEmpty()
+            val direction = payload["direction"]?.toString()?.uppercase().orEmpty()
+            if (word != "ARENA" || direction != "H" || row != 7 || col != 5) return incorrect()
+            word.forEachIndexed { index, letter -> replace(7, 5 + index, board[7][5 + index].copy(value = letter.toString(), isRevealed = true, ownerId = OWNER)) }
+            return accept(50)
+        }
+        if (gameType == GameType.NURIKABE) {
+            val action = value?.toString()?.uppercase().orEmpty()
+            if (action !in setOf("RIVER", "ISLAND", "CLEAR") || cell.meta["islandClue"] == true) return reject("Casilla no disponible")
+            val next = if (action == "CLEAR") cell.copy(value = null, ownerId = null, isRevealed = false)
+            else cell.copy(value = action, ownerId = OWNER, isRevealed = true)
+            replace(row, col, next)
+            return accept(if ((action == "RIVER") == (blueprint.answers[row][col] == true)) 10 else 0)
+        }
 
         if (gameType == GameType.MINESWEEPER) {
             val mine = blueprint.answers[row][col] == true
@@ -126,8 +145,10 @@ class LocalPuzzleEngine(
         GameType.MINESWEEPER -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == true || board[y][x].ownerId != null } }
         GameType.WORD_SEARCH -> foundWords.size == (blueprint.meta["words"] as List<*>).size
         GameType.DOTS_AND_BOXES -> board.flatten().all { it.ownerId != null }
-        GameType.NONOGRAM, GameType.HITORI, GameType.NURIKABE, GameType.BRIDGES -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] != true || board[y][x].ownerId != null } }
+        GameType.NURIKABE -> board.indices.all { y -> board[y].indices.all { x -> board[y][x].meta["islandClue"] == true || board[y][x].value == if (blueprint.answers[y][x] == true) "RIVER" else "ISLAND" } }
+        GameType.NONOGRAM, GameType.HITORI, GameType.BRIDGES -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] != true || board[y][x].ownerId != null } }
         GameType.SLITHERLINK -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x].toString().split('|').filter(String::isNotBlank).all { board[y][x].meta[it] == true } } }
+        GameType.CROSS_LETTERS -> board[7].slice(5..9).all { it.value != null }
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -137,7 +158,7 @@ class LocalPuzzleEngine(
         GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.NONOGRAM -> nonogram()
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
         GameType.RUMMIKUB -> logicTiles(); GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges(); GameType.SLITHERLINK -> slitherlink()
-        GameType.CRYPTARITHM -> cryptarithm(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
+        GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }
 
     private fun mines(): Blueprint { val size = size(8,10,12,14); val count=(size*size*when(difficulty){PuzzleDifficulty.EASY->.10;PuzzleDifficulty.MEDIUM->.14;PuzzleDifficulty.HARD->.18;PuzzleDifficulty.EXPERT->.22}).toInt(); val mines=(0 until size*size).shuffled(random).take(count).toSet(); return result(matrix(size,size){_,_->GenericCell()}, matrix(size,size){r,c->r*size+c in mines}, mapOf("mineCount" to count)) }
@@ -200,7 +221,21 @@ class LocalPuzzleEngine(
     }
     private fun nonogram(): Blueprint { val size=size(6,8,10,12); val answers=matrix<Any?>(size,size){_,_->random.nextDouble()<.42}; return result(answers.map{row->row.map{GenericCell()}},answers,mapOf("rowClues" to answers.map{clues(it.map{v->v==true})},"columnClues" to (0 until size).map{x->clues(answers.map{it[x]==true})})) }
     private fun dots(): Blueprint { val size=size(3,5,6,7); return result(matrix(size,size){_,_->GenericCell(meta=SIDES.associateWith{false})},matrix(size,size){_,_->true},mapOf("dots" to size+1)) }
-    private fun kakuro(): Blueprint { val playable=size(3,4,5,6); val digits=(1..9).shuffled(random).take(playable); val sum=digits.sum(); val answers=matrix<Any?>(playable+1,playable+1){r,c->if(r==0||c==0)null else digits[(r+c-2)%playable]}; val board=matrix(playable+1,playable+1){r,c->when{r==0&&c==0->blocked(mapOf("clueCell" to true));r==0->blocked(mapOf("clueCell" to true,"downSum" to sum));c==0->blocked(mapOf("clueCell" to true,"rightSum" to sum));else->GenericCell()}}; return result(board,answers,mapOf("instructions" to "Cada grupo suma $sum sin repetir.")) }
+    private fun kakuro(): Blueprint {
+        val playable = size(3, 4, 5, 6); val digits = (1..9).shuffled(random).take(playable); val sum = digits.sum()
+        val answers = matrix<Any?>(playable + 1, playable + 1) { row, col -> if (row == 0 || col == 0) null else digits[(row + col - 2) % playable] }
+        val board = matrix(playable + 1, playable + 1) { row, col -> when {
+            row == 0 && col == 0 -> blocked(mapOf("clueCell" to true))
+            row == 0 -> blocked(mapOf("clueCell" to true, "downSum" to sum))
+            col == 0 -> blocked(mapOf("clueCell" to true, "rightSum" to sum))
+            else -> GenericCell()
+        } }.map { it.toMutableList() }
+        val anchors = if (difficulty == PuzzleDifficulty.EASY) 4 else if (difficulty == PuzzleDifficulty.MEDIUM) 3 else if (difficulty == PuzzleDifficulty.HARD) 2 else 1
+        (1..playable).flatMap { row -> (1..playable).map { col -> row to col } }.shuffled(random).take(anchors).forEach { (row, col) ->
+            board[row][col] = GenericCell(value = answers[row][col], isRevealed = true, isBlocked = true, meta = mapOf("given" to true))
+        }
+        return result(board, answers, mapOf("instructions" to "Cada grupo suma $sum sin repetir. Los números dorados son pistas."))
+    }
     private fun mathdoku(): Blueprint { val size=size(4,5,6,7); val symbols=(1..size).shuffled(random); val answers=matrix<Any?>(size,size){r,c->symbols[(r+c)%size]}; val board=matrix(size,size){r,c->val start=c-c%2;val target=(answers[r][start] as Int)+(answers[r][minOf(size-1,start+1)] as Int);GenericCell(meta=mapOf("cageId" to "$r:$start","cageLabel" to if(c==start)"$target+" else "","cageStart" to(c==start),"cageEnd" to(c==minOf(size-1,start+1))))}; return result(board,answers,mapOf("instructions" to "Usa 1 a $size y cumple las jaulas.")) }
     private fun hitori(): Blueprint { val size=size(5,6,7,8); val black=mutableSetOf<String>(); for(index in(0 until size*size).shuffled(random)){val r=index/size;val c=index%size;if(black.size>=size(4,6,9,12))break;if(listOf("${r-1}:$c","${r+1}:$c","$r:${c-1}","$r:${c+1}").none{it in black})black+="$r:$c"}; val values=matrix(size,size){r,c->((r+c)%size)+1}.map{it.toMutableList()};black.forEach{val(r,c)=it.split(':').map(String::toInt);values[r][c]=values[r][(c+1)%size]};val answers=matrix<Any?>(size,size){r,c->"$r:$c" in black};return result(values.map{row->row.map{GenericCell(value=it,isRevealed=true)}},answers,mapOf("instructions" to "Apaga duplicados sin tocar negras por sus lados.")) }
     private fun logicTiles(): Blueprint {
@@ -225,7 +260,26 @@ class LocalPuzzleEngine(
         return 2 to "1 + 1 = ?"
     }
     private fun nurikabe(): Blueprint { val size=size(6,8,10,12);val answers=matrix<Any?>(size,size){r,c->if(r%2==1)c!=(if(r%4==1)size-1 else 0)else c%3==2};val board=matrix(size,size){_,_->GenericCell()}.map{it.toMutableList()};var id=0;for(r in 0 until size){var c=0;while(c<size){if(answers[r][c]==true){c++;continue};val start=c;while(c<size&&answers[r][c]!=true)c++;id++;val clue=(start until c).random(random);board[r][clue]=blocked(mapOf("islandClue" to true,"islandSize" to c-start,"islandId" to id))}};return result(board,answers,mapOf("instructions" to "Pinta el río; evita bloques negros 2×2.")) }
-    private fun bridges(): Blueprint { val grid=size(3,4,5,6);val size=grid*2-1;val answers=matrix<Any?>(size,size){_,_->false}.map{it.toMutableList()};val board=matrix(size,size){_,_->GenericCell(meta=mapOf("bridge" to true))}.map{it.toMutableList()};for(r in 0 until grid)for(c in 0 until grid){board[r*2][c*2]=blocked(mapOf("island" to true,"bridgeCount" to if(r==0||c==0)1 else 2));if(c>0)answers[r*2][c*2-1]=true;if(r>0&&c==0)answers[r*2-1][0]=true};return result(board,answers,mapOf("instructions" to "Une todas las islas con puentes.")) }
+    private fun bridges(): Blueprint {
+        val grid = size(3, 4, 5, 6); val boardSize = grid * 2 - 1
+        val answers = matrix<Any?>(boardSize, boardSize) { _, _ -> false }.map { it.toMutableList() }
+        val board = matrix(boardSize, boardSize) { _, _ -> GenericCell(meta = mapOf("bridge" to true)) }.map { it.toMutableList() }
+        for (row in 0 until grid) for (col in 0 until grid) {
+            if (col > 0) answers[row * 2][col * 2 - 1] = true
+            if (row > 0 && col == 0) answers[row * 2 - 1][0] = true
+        }
+        for (row in 0 until grid) for (col in 0 until grid) {
+            val y = row * 2; val x = col * 2
+            val targets = buildList {
+                if (x > 0 && answers[y][x - 1] == true) add("$y:${x - 2}")
+                if (x + 1 < boardSize && answers[y][x + 1] == true) add("$y:${x + 2}")
+                if (y > 0 && answers[y - 1][x] == true) add("${y - 2}:$x")
+                if (y + 1 < boardSize && answers[y + 1][x] == true) add("${y + 2}:$x")
+            }
+            board[y][x] = blocked(mapOf("island" to true, "bridgeCount" to targets.size, "validTargets" to targets))
+        }
+        return result(board, answers, mapOf("instructions" to "Toca una isla y luego un vecino resaltado."))
+    }
     private fun slitherlink(): Blueprint {
         val size = size(5, 7, 9, 11)
         val maxInset = minOf(2, size / 4)
@@ -263,12 +317,14 @@ class LocalPuzzleEngine(
             .joinToString("")
 
         val answers: List<List<Any?>> = listOf(digits.map { it })
+        val revealed = letters.indices.shuffled(random).take(if (difficulty == PuzzleDifficulty.EASY) 3 else 2).toSet()
         val board = listOf(
-            letters.map {
+            letters.mapIndexed { index, letter ->
                 GenericCell(
-                    value = it.toString(),
+                    value = if (index in revealed) digits[index] else letter.toString(),
                     isRevealed = true,
-                    meta = mapOf("cryptLetter" to it.toString()),
+                    isBlocked = index in revealed,
+                    meta = mapOf("cryptLetter" to letter.toString(), "given" to (index in revealed)),
                 )
             },
         )
@@ -277,9 +333,22 @@ class LocalPuzzleEngine(
             answers,
             mapOf(
                 "equation" to "${encode(first)} + ${encode(second)} = ${encode(total)}",
-                "instructions" to "Cada letra representa un dígito diferente.",
+                "instructions" to "Cada letra representa un dígito diferente. Las equivalencias doradas son pistas iniciales.",
             ),
         )
+    }
+
+    private fun crossLetters(): Blueprint {
+        val board = matrix(15, 15) { row, col ->
+            val bonus = when {
+                row == 7 && col == 7 -> "DW"
+                (row + col) % 11 == 0 -> "DL"
+                else -> "NONE"
+            }
+            GenericCell(meta = mapOf("bonus" to bonus, "center" to (row == 7 && col == 7)))
+        }
+        val answers = matrix<Any?>(15, 15) { row, col -> if (row == 7 && col in 5..9) "ARENA"[col - 5].toString() else null }
+        return result(board, answers, mapOf("rack" to listOf("A", "R", "E", "N", "A", "L", "S"), "instructions" to "Forma ARENA horizontalmente pasando por la estrella central."))
     }
 
     private fun blocked(meta: Map<String, Any?> = emptyMap()) = GenericCell(isRevealed = true, isBlocked = true, meta = meta)

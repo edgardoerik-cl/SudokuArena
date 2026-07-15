@@ -192,7 +192,7 @@ fun ArenaScreen(
                     Text("Multi Arena · Sudoku", style = MaterialTheme.typography.headlineSmall)
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
-                        PauseControl(state, onRequestPause)
+                        PauseControl(state, onRequestPause, onPauseResponse)
                         ExitControl(onExit)
                     }
                 }
@@ -292,7 +292,7 @@ fun ArenaScreen(
                     modifier = Modifier.zIndex(40f),
                 )
             }
-            PauseLayer(state, onPauseResponse, onResume, Modifier.zIndex(50f))
+            PauseLayer(state, onResume, Modifier.zIndex(50f))
         }
     }
 }

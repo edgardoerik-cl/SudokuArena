@@ -6,6 +6,7 @@ export interface PublicCell {
   clearing: boolean;
   golden: boolean;
   ownerTeamId: string | null;
+  given: boolean;
 }
 
 export type TeamMode = "DUEL" | "FFA" | "TWO_V_ONE" | "TWO_V_TWO" | "THREE_V_ONE";

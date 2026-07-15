@@ -8,7 +8,8 @@ export class ArenaGame {
         ownerId: null,
         clearTokens: new Set(),
         golden: false,
-        ownerTeamId: null
+        ownerTeamId: null,
+        given: false
     })));
     players = new Map();
     pendingSections = new Set();
@@ -144,6 +145,7 @@ export class ArenaGame {
             this.lastCorrectAt.delete(player.id);
             this.teamScores.set(player.teamId, 0);
         }
+        this.seedInitialSudokuClues(config.puzzleDifficulty);
         this.revision += 1;
     }
     /** Reinicia la arena conservando jugadores, colores y slots para una revancha. */
@@ -154,6 +156,7 @@ export class ArenaGame {
                 cell.ownerId = null;
                 cell.ownerTeamId = null;
                 cell.golden = false;
+                cell.given = false;
                 cell.clearTokens.clear();
             }
         }
@@ -426,6 +429,8 @@ export class ArenaGame {
             changed = true;
             // Una casilla con otro token sigue bloqueada, pero la primera sección que
             // vence ya la vacía. Así no puede escribirse hasta terminar ambos timers.
+            if (cell.given)
+                continue;
             cell.value = null;
             cell.ownerId = null;
             cell.ownerTeamId = null;
@@ -457,7 +462,9 @@ export class ArenaGame {
             this.pendingSections.add(key);
         for (const section of sections) {
             for (const coordinate of this.sectionCoordinates(section)) {
-                unique.set(`${coordinate.row}:${coordinate.column}`, coordinate);
+                if (!this.board[coordinate.row][coordinate.column].given) {
+                    unique.set(`${coordinate.row}:${coordinate.column}`, coordinate);
+                }
             }
         }
         const coordinates = [...unique.values()];
@@ -498,6 +505,21 @@ export class ArenaGame {
                 player.teamScore = total;
         }
     }
+    seedInitialSudokuClues(difficulty) {
+        const clueCount = difficulty === "EASY" ? 40 : difficulty === "MEDIUM" ? 32 : difficulty === "HARD" ? 26 : 22;
+        const cells = Array.from({ length: BOARD_SIZE * BOARD_SIZE }, (_, index) => ({
+            row: Math.floor(index / BOARD_SIZE),
+            column: index % BOARD_SIZE
+        }));
+        shuffle(cells);
+        for (const { row, column } of cells.slice(0, clueCount)) {
+            const target = this.board[row][column];
+            target.value = this.solution[row][column];
+            target.ownerId = null;
+            target.ownerTeamId = null;
+            target.given = true;
+        }
+    }
 }
 function toPublicCell(cell) {
     return {
@@ -505,7 +527,8 @@ function toPublicCell(cell) {
         ownerId: cell.ownerId,
         clearing: cell.clearTokens.size > 0,
         golden: cell.golden,
-        ownerTeamId: cell.ownerTeamId
+        ownerTeamId: cell.ownerTeamId,
+        given: cell.given
     };
 }
 function isValidProposal(proposal) {

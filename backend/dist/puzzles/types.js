@@ -12,6 +12,7 @@ export const GAME_TYPES = [
     "NURIKABE",
     "BRIDGES",
     "SLITHERLINK",
-    "CRYPTARITHM"
+    "CRYPTARITHM",
+    "CROSS_LETTERS"
 ];
 //# sourceMappingURL=types.js.map

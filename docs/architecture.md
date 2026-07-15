@@ -135,6 +135,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → cliente | `game:joined` | `{ playerId, roomCode, state }` |
 | Servidor → todos | `game:state` | snapshot completo |
 | Servidor → todos | `generic:state` | matriz genérica autoritativa |
+| Servidor → jugador | `letters:rack` | atril privado, jugador activo y fin del turno de Letras Cruzadas |
 | Servidor → cliente | `generic:move-accepted` / `generic:move-rejected` | resultado universal |
 | Servidor → cliente | `move:accepted` | `{ requestId, revision, cellPoints, goldenBonus }` |
 | Servidor → cliente | `move:rejected` | `{ requestId, code, message }` |
@@ -212,7 +213,7 @@ consumen un token de desafío de un solo uso emitido al iniciar la partida.
   en local o `GameRealtimeGateway` online, sin depender de APIs Android.
 - `WelcomeScreen`: guarda nickname y bifurca entre Solitario, Crear Sala y
   Unirse a Sala.
-- `SplashScreen`/`ArenaLogo`: identidad Multi Arena para los catorce puzzles.
+- `SplashScreen`/`ArenaLogo`: identidad Multi Arena para los quince puzzles.
 - `RoomLobbyScreen`: configuración sincronizada y editable sólo por el Host.
 - `MatchResultsOverlay`: confeti Canvas y tarjetas escalonadas de clasificación.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.

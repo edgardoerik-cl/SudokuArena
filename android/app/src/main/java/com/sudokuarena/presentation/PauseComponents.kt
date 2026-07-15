@@ -1,8 +1,10 @@
 package com.sudokuarena.presentation
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -18,17 +20,24 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -37,27 +46,53 @@ import androidx.compose.ui.unit.sp
 import com.sudokuarena.domain.RoomPhase
 
 @Composable
-fun PauseControl(state: ArenaUiState, onRequestPause: () -> Unit) {
+fun PauseControl(
+    state: ArenaUiState,
+    onRequestPause: () -> Unit,
+    onRespond: (Boolean) -> Unit,
+) {
     val active = if (state.isSoloMode) !state.soloCompleted else state.roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
-    if (active && state.roomState?.pauseRequesterId == null) {
+    if (!active) return
+    val room = state.roomState
+    val pending = !state.isSoloMode && room?.pauseRequesterId != null
+    val pendingForMe = pending && room?.pauseRequesterId != state.playerId
+    var menuOpen by remember(pending) { mutableStateOf(false) }
+    val pulse by rememberInfiniteTransition(label = "pauseBadge").animateFloat(
+        initialValue = .82f,
+        targetValue = 1.18f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        label = "pausePulse",
+    )
+    Box {
         NeonActionButton(
-            contentDescription = if (state.isSoloMode) "Pausar partida" else "Solicitar pausa",
-            onClick = onRequestPause,
+            contentDescription = if (pending) "Revisar solicitud de pausa" else if (state.isSoloMode) "Pausar partida" else "Solicitar pausa",
+            onClick = { if (pending) menuOpen = true else onRequestPause() },
         ) {
             val barWidth = size.width * .17f
             val barHeight = size.height * .52f
-            drawRoundRect(
-                color = Color(0xFF00D5FF),
-                topLeft = Offset(size.width * .27f, size.height * .24f),
-                size = Size(barWidth, barHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth * .35f),
+            drawRoundRect(Color(0xFF00D5FF), Offset(size.width * .27f, size.height * .24f), Size(barWidth, barHeight), androidx.compose.ui.geometry.CornerRadius(barWidth * .35f))
+            drawRoundRect(Color(0xFF7C3AED), Offset(size.width * .56f, size.height * .24f), Size(barWidth, barHeight), androidx.compose.ui.geometry.CornerRadius(barWidth * .35f))
+        }
+        if (pending) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .graphicsLayer { scaleX = pulse; scaleY = pulse }
+                    .size(12.dp)
+                    .background(Color(0xFFE53935), CircleShape),
             )
-            drawRoundRect(
-                color = Color(0xFF7C3AED),
-                topLeft = Offset(size.width * .56f, size.height * .24f),
-                size = Size(barWidth, barHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth * .35f),
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            val requester = state.players.firstOrNull { it.id == room?.pauseRequesterId }?.name ?: "Un jugador"
+            DropdownMenuItem(
+                text = { Text(if (pendingForMe) "$requester solicita una pausa" else "Esperando respuestas…", fontWeight = FontWeight.Bold) },
+                onClick = {},
+                enabled = false,
             )
+            if (pendingForMe) {
+                DropdownMenuItem(text = { Text("Aceptar", color = Color(0xFF00875A)) }, onClick = { menuOpen = false; onRespond(true) })
+                DropdownMenuItem(text = { Text("Rechazar", color = Color(0xFFC62828)) }, onClick = { menuOpen = false; onRespond(false) })
+            }
         }
     }
 }
@@ -102,41 +137,13 @@ private fun NeonActionButton(
 @Composable
 fun PauseLayer(
     state: ArenaUiState,
-    onRespond: (Boolean) -> Unit,
     onResume: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val room = state.roomState
-    val pending = !state.isSoloMode && room?.pauseRequesterId != null && room.phase != RoomPhase.PAUSED
-    val pendingForMe = pending && room?.pauseRequesterId != state.playerId
     val paused = state.isLocallyPaused || room?.phase == RoomPhase.PAUSED
     val countdown = ((state.resumeCountdownMs + 999) / 1_000).toInt()
-    if (!pending && !paused) return
-
-    if (pending) {
-        Box(modifier.fillMaxSize().padding(top = 10.dp), contentAlignment = Alignment.TopCenter) {
-            AnimatedVisibility(visible = true, enter = fadeIn(), exit = fadeOut()) {
-                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth(.94f)) {
-                    Row(
-                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        val requester = state.players.firstOrNull { it.id == room?.pauseRequesterId }?.name ?: "Un jugador"
-                        Column(Modifier.weight(1f)) {
-                            Text("⏸ Solicitud de pausa", fontWeight = FontWeight.Black)
-                            Text(if (pendingForMe) "$requester quiere pausar la partida." else "Esperando la respuesta de los demás…", fontSize = 13.sp)
-                        }
-                        if (pendingForMe) {
-                            OutlinedButton({ onRespond(false) }) { Text("Rechazar") }
-                            Button({ onRespond(true) }) { Text("Aceptar") }
-                        }
-                    }
-                }
-            }
-        }
-        return
-    }
+    if (!paused) return
 
     Box(modifier.fillMaxSize().background(Color(0xB8F3F6FC)), contentAlignment = Alignment.Center) {
         Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().padding(24.dp)) {

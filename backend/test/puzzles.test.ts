@@ -50,7 +50,7 @@ describe("motor genérico de puzzles", () => {
     }));
   });
 
-  for (const gameType of GAME_TYPES.filter((type) => type !== "SUDOKU")) {
+  for (const gameType of GAME_TYPES.filter((type) => type !== "SUDOKU" && type !== "CROSS_LETTERS")) {
     it(`genera y permite a un Bot resolver ${gameType}`, () => {
       const players = new ArenaGame(`players-${gameType}`);
       players.addPlayer("bot", "Bot_Matriz", true);
@@ -69,6 +69,35 @@ describe("motor genérico de puzzles", () => {
       assert.equal(engine.snapshot(players).completed, true, `${gameType} debe poder completarse`);
     });
   }
+
+  it("Letras Cruzadas entrega atril privado y valida una palabra española por turnos", () => {
+    const players = new ArenaGame("letters-players");
+    players.addPlayer("bot", "Bot_Letras", true);
+    players.startMatch({ gameType: "CROSS_LETTERS", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "HARD", puzzleDifficulty: "MEDIUM" }, "bot");
+    const engine = new GenericPuzzleEngine("CROSS_LETTERS", "letters-test");
+    const initial = engine.snapshot(players, 1_000);
+    assert.equal(initial.rows, 15);
+    assert.equal(engine.rackFor("bot").length, 7);
+    assert.equal(initial.meta.activePlayerId, "bot");
+    const move = engine.createBotMove(1, "bot");
+    assert.ok(move);
+    const result = engine.makeMove("bot", move!, players, 2_000);
+    assert.equal(result.accepted, true);
+    assert.ok(result.points > 0);
+    assert.ok(engine.snapshot(players).board.flat().some((cell) => typeof cell.value === "string"));
+  });
+
+  it("inyecta pistas iniciales bloqueadas en Kakuro y Criptogramas", () => {
+    const kakuro = createPuzzleBlueprint("KAKURO", { seed: "anchors", difficulty: "MEDIUM" });
+    const kakuroGivens = kakuro.board.flat().filter((cell) => cell.meta.given === true);
+    assert.equal(kakuroGivens.length, 3);
+    assert.ok(kakuroGivens.every((cell) => cell.isBlocked && cell.value !== null));
+
+    const crypt = createPuzzleBlueprint("CRYPTARITHM", { seed: "deduction", difficulty: "HARD" });
+    const cryptGivens = crypt.board.flat().filter((cell) => cell.meta.given === true);
+    assert.equal(cryptGivens.length, 2);
+    assert.ok(cryptGivens.every((cell) => cell.isBlocked && typeof cell.value === "number"));
+  });
 
   it("Buscaminas aplica cinco segundos al pisar una mina", () => {
     const players = new ArenaGame("mine-players");

@@ -14,7 +14,8 @@ export const GAME_TYPES = [
   "NURIKABE",
   "BRIDGES",
   "SLITHERLINK",
-  "CRYPTARITHM"
+  "CRYPTARITHM",
+  "CROSS_LETTERS"
 ] as const;
 
 export type GameType = (typeof GAME_TYPES)[number];

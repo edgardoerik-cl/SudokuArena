@@ -39,7 +39,7 @@ enum class PuzzleDifficulty { EASY, MEDIUM, HARD, EXPERT }
 enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
-    NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM,
+    NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM, CROSS_LETTERS,
 }
 enum class RoomPhase { LOBBY, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
@@ -168,6 +168,7 @@ sealed interface RealtimeEvent {
     data class GenericStateUpdated(val state: GenericBoardState) : RealtimeEvent
     data class GenericMoveAccepted(val requestId: String, val points: Int, val completed: Boolean) : RealtimeEvent
     data class GenericMoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
+    data class LetterRackUpdated(val letters: List<String>, val activePlayerId: String?, val turnEndsAt: Long) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 

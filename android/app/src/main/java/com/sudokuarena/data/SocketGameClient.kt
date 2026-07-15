@@ -96,6 +96,13 @@ class SocketGameClient(
         } }
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
         socket.on("generic:state") { args -> parseSafely(args) { RealtimeEvent.GenericStateUpdated(parseGenericState(it)) } }
+        socket.on("letters:rack") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.LetterRackUpdated(
+                letters = payload.optJSONArray("letters")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
+                activePlayerId = payload.optString("activePlayerId").takeIf(String::isNotBlank),
+                turnEndsAt = payload.optLong("turnEndsAt", 0L),
+            )
+        } }
         socket.on("generic:move-accepted") { args -> parseSafely(args) { payload ->
             RealtimeEvent.GenericMoveAccepted(
                 requestId = payload.getString("requestId"),
@@ -318,7 +325,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
                 ownerId = if (cell.isNull("ownerId")) null else cell.getString("ownerId"),
                 clearing = cell.getBoolean("clearing"),
                 golden = cell.optBoolean("golden", false),
-                given = false,
+                given = cell.optBoolean("given", false),
                 ownerTeamId = if (cell.isNull("ownerTeamId")) null else cell.optString("ownerTeamId"),
             )
         }
@@ -415,13 +422,13 @@ private fun parseGenericState(json: JSONObject): GenericBoardState {
     )
 }
 
-private fun JSONObject.toKotlinMap(): Map<String, Any?> = keys().asSequence().associateWith { key ->
-    when (val value = opt(key)) {
-        JSONObject.NULL -> null
-        is JSONObject -> value.toKotlinMap()
-        is JSONArray -> List(value.length()) { index -> value.opt(index).takeUnless { it == JSONObject.NULL } }
-        else -> value
-    }
+private fun JSONObject.toKotlinMap(): Map<String, Any?> = keys().asSequence().associateWith { key -> jsonValueToKotlin(opt(key)) }
+
+private fun jsonValueToKotlin(value: Any?): Any? = when (value) {
+    null, JSONObject.NULL -> null
+    is JSONObject -> value.toKotlinMap()
+    is JSONArray -> List(value.length()) { index -> jsonValueToKotlin(value.opt(index)) }
+    else -> value
 }
 
 private fun <T> JSONArray.mapObjects(transform: (Any) -> T): List<T> =
