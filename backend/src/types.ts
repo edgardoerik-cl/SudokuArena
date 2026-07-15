@@ -1,4 +1,4 @@
-import type { GameType } from "./puzzles/types.js";
+import type { GameType, PuzzleDifficulty } from "./puzzles/types.js";
 
 export interface PublicCell {
   value: number | null;
@@ -22,6 +22,7 @@ export interface RoomConfig {
   teamMode: TeamMode;
   tileType: TileType;
   botDifficulty: BotDifficulty;
+  puzzleDifficulty: PuzzleDifficulty;
 }
 
 export interface RoomState {

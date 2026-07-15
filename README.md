@@ -3,10 +3,16 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `2.0.0` convierte la aplicación en una Multiarena con diez juegos:
+La versión `3.0.0` convierte la aplicación en una Multiarena con catorce juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
-Kakuro, Mathdoku, Hitori y Rummikub. Todos comparten salas, colores de conquista,
+Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink y
+Criptogramas. Todos comparten salas, colores de conquista,
 Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
+
+Los tableros se generan desde una semilla distinta y admiten dificultad
+`EASY`, `MEDIUM`, `HARD` o `EXPERT`. En solitario la generación ocurre en el
+teléfono; en multijugador la realiza el servidor para que todos compartan una
+única solución autoritativa.
 
 La plataforma también incorpora un menú animado 100% Compose con un nuevo emblema vivo, conquista neón por jugador,
 Escudo de Espejo, Ojo de Lince, Bots estratégicos, tema de alto contraste,
@@ -45,7 +51,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v2.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v3.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

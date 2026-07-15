@@ -78,13 +78,16 @@ io.on("connection", (socket) => {
         const botDifficulty = payload?.botDifficulty === undefined
             ? room.config.botDifficulty
             : normalizeBotDifficulty(payload.botDifficulty);
-        if (!teamMode || !tileType || !botDifficulty || typeof payload?.powersEnabled !== "boolean") {
+        const puzzleDifficulty = payload?.puzzleDifficulty === undefined
+            ? room.config.puzzleDifficulty
+            : normalizePuzzleDifficulty(payload.puzzleDifficulty);
+        if (!teamMode || !tileType || !botDifficulty || !puzzleDifficulty || typeof payload?.powersEnabled !== "boolean") {
             return emitRoomError(socket, "INVALID_CONFIG", "Configuración de sala inválida");
         }
         const gameType = payload?.gameType === undefined ? room.config.gameType : normalizeGameType(payload.gameType);
         if (!gameType)
             return emitRoomError(socket, "INVALID_GAME", "Tipo de juego no permitido");
-        room.config = { gameType, powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty };
+        room.config = { gameType, powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty, puzzleDifficulty };
         emitRoomState(room);
     });
     socket.on("fill_with_ai", () => {
@@ -300,7 +303,7 @@ function createRoom(hostPlayerId) {
         boardEventTimeout: null,
         matchTimeout: null,
         hostPlayerId,
-        config: { gameType: "SUDOKU", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" },
+        config: { gameType: "SUDOKU", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM", puzzleDifficulty: "MEDIUM" },
         phase: "LOBBY",
         startedAt: null,
         endsAt: null,
@@ -442,6 +445,9 @@ function normalizeBotDifficulty(value) {
 function normalizeGameType(value) {
     return typeof value === "string" && GAME_TYPES.includes(value) ? value : null;
 }
+function normalizePuzzleDifficulty(value) {
+    return value === "EASY" || value === "MEDIUM" || value === "HARD" || value === "EXPERT" ? value : null;
+}
 function validatePlayerCount(room) {
     const count = room.game.playerCount;
     if (room.config.teamMode === "DUEL" && count !== 2)
@@ -470,7 +476,10 @@ function startMatch(room, rematch = false) {
         room.game.startMatch(room.config, resolveBossPlayerId(room));
     room.genericEngine = room.config.gameType === "SUDOKU"
         ? null
-        : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`);
+        : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
+            seed: `${room.code}-${room.startedAt}`,
+            difficulty: room.config.puzzleDifficulty
+        });
     emitRoomState(room);
     emitState(room);
     emitGenericState(room);

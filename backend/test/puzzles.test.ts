@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ArenaGame } from "../src/game.js";
+import { createPuzzleBlueprint } from "../src/puzzles/blueprints.js";
 import { GenericPuzzleEngine } from "../src/puzzles/engine.js";
 import { GAME_TYPES } from "../src/puzzles/types.js";
 
 describe("motor genérico de puzzles", () => {
+  it("reproduce una semilla y cambia el tablero con otra", () => {
+    const first = createPuzzleBlueprint("MINESWEEPER", { seed: "arena-42", difficulty: "HARD" });
+    const replay = createPuzzleBlueprint("MINESWEEPER", { seed: "arena-42", difficulty: "HARD" });
+    const different = createPuzzleBlueprint("MINESWEEPER", { seed: "arena-43", difficulty: "HARD" });
+    assert.deepEqual(first.answers, replay.answers);
+    assert.notDeepEqual(first.answers, different.answers);
+  });
+
+  it("la dificultad incrementa tamaño y densidad en Buscaminas", () => {
+    const easy = createPuzzleBlueprint("MINESWEEPER", { seed: "difficulty", difficulty: "EASY" });
+    const expert = createPuzzleBlueprint("MINESWEEPER", { seed: "difficulty", difficulty: "EXPERT" });
+    assert.ok(expert.board.length > easy.board.length);
+    assert.ok(Number(expert.meta.mineCount) > Number(easy.meta.mineCount));
+  });
+
   for (const gameType of GAME_TYPES.filter((type) => type !== "SUDOKU")) {
     it(`genera y permite a un Bot resolver ${gameType}`, () => {
       const players = new ArenaGame(`players-${gameType}`);

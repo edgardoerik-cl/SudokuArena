@@ -24,19 +24,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.PuzzleDifficulty
 
 /** Mapeo visual estable: el índice 0 representa el valor Sudoku 1 y así hasta 9. */
 object SudokuTilePalette {
     val colors = listOf(
         Color(0xFFFF3B30), // rojo
-        Color(0xFF2979FF), // azul
-        Color(0xFF00C853), // verde
-        Color(0xFFFFD600), // amarillo
-        Color(0xFFAA00FF), // morado
-        Color(0xFFFF6D00), // naranja
-        Color(0xFF00E5FF), // celeste
-        Color(0xFFFF4081), // rosa
-        Color(0xFFFFFFFF), // blanco
+        Color(0xFF003F88), // azul marino
+        Color(0xFF00A86B), // verde esmeralda
+        Color(0xFFFFD400), // amarillo brillante
+        Color(0xFF5B2C83), // morado oscuro
+        Color(0xFFFF6B00), // naranja vibrante
+        Color(0xFFD100D1), // magenta
+        Color(0xFFFFFFFF), // blanco puro
+        Color(0xFF30343B), // gris carbón
     )
 
     fun colorFor(value: Int): Color = colors.getOrElse(value - 1) { Color.Gray }
@@ -46,7 +47,9 @@ object SudokuTilePalette {
 fun SoloSetupScreen(
     gameType: GameType,
     isColorMode: Boolean,
+    difficulty: PuzzleDifficulty,
     onColorModeChanged: (Boolean) -> Unit,
+    onDifficultyChanged: (PuzzleDifficulty) -> Unit,
     onStart: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -60,6 +63,18 @@ fun SoloSetupScreen(
         ) {
             Text("${gameTitle(gameType).uppercase()} · SOLITARIO", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("La partida se ejecuta localmente y puede pausarse.", modifier = Modifier.padding(vertical = 14.dp))
+            Text("DIFICULTAD", style = MaterialTheme.typography.labelLarge)
+            PuzzleDifficulty.entries.forEach { level ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(selected = difficulty == level, onClick = { onDifficultyChanged(level) })
+                    Text(when (level) {
+                        PuzzleDifficulty.EASY -> "Fácil"
+                        PuzzleDifficulty.MEDIUM -> "Medio"
+                        PuzzleDifficulty.HARD -> "Difícil"
+                        PuzzleDifficulty.EXPERT -> "Experto"
+                    })
+                }
+            }
             if (gameType == GameType.SUDOKU) {
                 Card(Modifier.fillMaxWidth()) {
                     TileTypeSelector(

@@ -10,10 +10,15 @@ export const GAME_TYPES = [
   "KAKURO",
   "MATHDOKU",
   "HITORI",
-  "RUMMIKUB"
+  "RUMMIKUB",
+  "NURIKABE",
+  "BRIDGES",
+  "SLITHERLINK",
+  "CRYPTARITHM"
 ] as const;
 
 export type GameType = (typeof GAME_TYPES)[number];
+export type PuzzleDifficulty = "EASY" | "MEDIUM" | "HARD" | "EXPERT";
 export type CellValue = string | number | boolean | null;
 export type CellMeta = Record<string, string | number | boolean | null | string[] | number[]>;
 
@@ -59,4 +64,9 @@ export interface PuzzleBlueprint {
   board: GenericCell[][];
   answers: CellValue[][];
   meta: Record<string, unknown>;
+}
+
+export interface PuzzleGenerationOptions {
+  seed?: string;
+  difficulty?: PuzzleDifficulty;
 }

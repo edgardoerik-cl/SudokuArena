@@ -212,7 +212,7 @@ consumen un token de desafío de un solo uso emitido al iniciar la partida.
   en local o `GameRealtimeGateway` online, sin depender de APIs Android.
 - `WelcomeScreen`: guarda nickname y bifurca entre Solitario, Crear Sala y
   Unirse a Sala.
-- `SplashScreen`/`ArenaLogo`: nueva identidad Multi Arena para los diez puzzles.
+- `SplashScreen`/`ArenaLogo`: identidad Multi Arena para los catorce puzzles.
 - `RoomLobbyScreen`: configuración sincronizada y editable sólo por el Host.
 - `MatchResultsOverlay`: confeti Canvas y tarjetas escalonadas de clasificación.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.

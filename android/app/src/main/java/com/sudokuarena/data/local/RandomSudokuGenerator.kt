@@ -2,6 +2,7 @@ package com.sudokuarena.data.local
 
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
+import com.sudokuarena.domain.PuzzleDifficulty
 import kotlin.random.Random
 
 /**
@@ -13,7 +14,7 @@ class RandomSudokuGenerator(
     private val random: Random = Random.Default,
     private val emptyCells: Int = 45,
 ) : SudokuGenerator {
-    override fun generate(seed: Long?): SudokuPuzzle {
+    override fun generate(seed: Long?, difficulty: PuzzleDifficulty): SudokuPuzzle {
         val source = seed?.let(::Random) ?: random
         val digits = (1..9).shuffled(source)
         val rows = (0..2).shuffled(source).flatMap { band ->
@@ -27,7 +28,13 @@ class RandomSudokuGenerator(
                 digits[(sourceRow * 3 + sourceRow / 3 + sourceColumn) % 9]
             }
         }
-        val hidden = (0 until 81).shuffled(source).take(emptyCells.coerceIn(1, 64)).toSet()
+        val targetEmpty = when (difficulty) {
+            PuzzleDifficulty.EASY -> 34
+            PuzzleDifficulty.MEDIUM -> emptyCells
+            PuzzleDifficulty.HARD -> 54
+            PuzzleDifficulty.EXPERT -> 60
+        }
+        val hidden = (0 until 81).shuffled(source).take(targetEmpty.coerceIn(1, 64)).toSet()
         val initialBoard = List(9) { row ->
             List<Int?>(9) { column ->
                 solution[row][column].takeUnless { row * 9 + column in hidden }

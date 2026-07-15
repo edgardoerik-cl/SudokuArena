@@ -52,6 +52,7 @@ import com.sudokuarena.domain.Player
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 @Composable
 fun GenericArenaScreen(
@@ -69,6 +70,7 @@ fun GenericArenaScreen(
     onPauseResponse: (Boolean) -> Unit,
     onResume: () -> Unit,
     onTutorialComplete: () -> Unit,
+    onOpenTutorial: () -> Unit,
     onReaction: (String) -> Unit,
     onNewSoloGame: () -> Unit,
     onExit: () -> Unit,
@@ -86,7 +88,11 @@ fun GenericArenaScreen(
                         Text(gameTitle(state.gameType), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                         Text(if (state.isSoloMode) "Solitario · ${formatGenericTime(state.soloElapsedMs)} · ${state.soloErrors} errores" else "Sala ${state.roomCode.orEmpty()} · ${formatGenericTime(state.matchRemainingMs)}")
                     }
-                    Row { PauseControl(state, onRequestPause); TextButton(onClick = onExit) { Text("Salir") } }
+                    Row {
+                        TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
+                        PauseControl(state, onRequestPause)
+                        TextButton(onClick = onExit) { Text("Salir") }
+                    }
                 }
                 Scoreboard(state)
                 if (state.roomState?.config?.powersEnabled == true) {
@@ -142,6 +148,7 @@ fun GenericPuzzleGrid(
     val textMeasurer = rememberTextMeasurer()
     var dragStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var dragEnd by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
+    var selectedDot by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     val gestureModifier = if (state.gameType == GameType.WORD_SEARCH) {
         Modifier.pointerInput(state.board, enabled) {
             fun position(offset: Offset): CellPosition = CellPosition(
@@ -163,6 +170,38 @@ fun GenericPuzzleGrid(
                 },
             )
         }
+    } else if (state.gameType == GameType.DOTS_AND_BOXES) {
+        Modifier
+            .pointerInput(state.board, enabled) {
+                fun dot(offset: Offset) = CellPosition(
+                    (offset.y / (size.height / state.rows)).roundToInt().coerceIn(0, state.rows),
+                    (offset.x / (size.width / state.columns)).roundToInt().coerceIn(0, state.columns),
+                )
+                var start: CellPosition? = null
+                var end: CellPosition? = null
+                detectDragGestures(
+                    onDragStart = { if (enabled) { start = dot(it); end = start } },
+                    onDrag = { change, _ -> if (enabled) end = dot(change.position) },
+                    onDragEnd = {
+                        start?.let { a -> end?.let { b -> dotsEdge(a, b, state.rows, state.columns)?.let { onDirectMove(it.row, it.col, it.side) } } }
+                        start = null; end = null
+                    },
+                )
+            }
+            .pointerInput(state.board, enabled, selectedDot) {
+                detectTapGestures { offset ->
+                    if (!enabled) return@detectTapGestures
+                    val dot = CellPosition(
+                        (offset.y / (size.height / state.rows)).roundToInt().coerceIn(0, state.rows),
+                        (offset.x / (size.width / state.columns)).roundToInt().coerceIn(0, state.columns),
+                    )
+                    val first = selectedDot
+                    if (first == null) selectedDot = dot else {
+                        dotsEdge(first, dot, state.rows, state.columns)?.let { onDirectMove(it.row, it.col, it.side) }
+                        selectedDot = null
+                    }
+                }
+            }
     } else {
         Modifier.pointerInput(state.board, enabled) {
             detectTapGestures { offset ->
@@ -173,7 +212,9 @@ fun GenericPuzzleGrid(
                     GameType.MINESWEEPER -> onDirectMove(row, col, "REVEAL")
                     GameType.NONOGRAM -> onDirectMove(row, col, "FILL")
                     GameType.HITORI -> onDirectMove(row, col, "BLOCK")
-                    GameType.DOTS_AND_BOXES -> {
+                    GameType.NURIKABE -> onDirectMove(row, col, "RIVER")
+                    GameType.BRIDGES -> onDirectMove(row, col, "BRIDGE")
+                    GameType.DOTS_AND_BOXES, GameType.SLITHERLINK -> {
                         val localX = offset.x - col * (size.width / state.columns)
                         val localY = offset.y - row * (size.height / state.rows)
                         val width = size.width / state.columns
@@ -230,6 +271,10 @@ private fun PuzzleHints(state: GenericBoardState) {
         GameType.MINESWEEPER -> Text("✦ Toca directamente una casilla para revelarla · ${state.meta["mineCount"] ?: "?"} minas")
         GameType.DOTS_AND_BOXES -> Text("Toca cerca del borde que quieres trazar.")
         GameType.HITORI -> Text("Toca el número duplicado que quieras apagar.")
+        GameType.NURIKABE -> Text("Toca las casillas de río; conserva blancas las islas numeradas.")
+        GameType.BRIDGES -> Text("Toca los segmentos entre islas para construir la red.")
+        GameType.SLITHERLINK -> Text("Toca cerca de un borde para añadirlo al lazo.")
+        GameType.CRYPTARITHM -> Text(state.meta["equation"]?.toString().orEmpty(), fontWeight = FontWeight.Black)
         else -> Unit
     }
 }
@@ -260,6 +305,29 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
             }
             drawRoundRect(tileColor.copy(alpha = .18f), origin + Offset(2f, 2f), Size(width - 4f, height - 4f))
             drawCenteredText(value, center, width, textMeasurer, tileColor)
+            meta["rule"]?.toString()?.takeIf(String::isNotEmpty)?.let { rule ->
+                val layout = textMeasurer.measure(rule, TextStyle(color = Color(0xFF263238), fontSize = 7.sp, fontWeight = FontWeight.Bold))
+                drawText(layout, topLeft = origin + Offset(2f, 1f))
+            }
+        }
+        GameType.NURIKABE -> if (meta["islandClue"] == true) {
+            drawCenteredText(meta["islandSize"], center, width, textMeasurer, Color.White)
+        } else if (value == true) drawRect(Color(0xFF102A43), origin + Offset(1f, 1f), Size(width - 2f, height - 2f))
+        GameType.BRIDGES -> if (meta["island"] == true) {
+            drawCircle(Color(0xFFFFF4C2), min(width, height) * .34f, center)
+            drawCircle(Color(0xFF7A4E00), min(width, height) * .34f, center, style = Stroke(2f))
+            drawCenteredText(meta["bridgeCount"], center, width, textMeasurer, Color(0xFF4A3200))
+        } else if (value == true) drawLine(Color(0xFF7A4E00), Offset(origin.x, center.y), Offset(origin.x + width, center.y), 5f)
+        GameType.SLITHERLINK -> {
+            if (((meta["clue"] as? Number)?.toInt() ?: -1) >= 0) drawCenteredText(meta["clue"], center, width, textMeasurer, Color(0xFF102A56))
+            if (meta["top"] == true) drawLine(Color(0xFF7C3AED), origin, origin + Offset(width, 0f), 4f)
+            if (meta["right"] == true) drawLine(Color(0xFF7C3AED), origin + Offset(width, 0f), origin + Offset(width, height), 4f)
+            if (meta["bottom"] == true) drawLine(Color(0xFF7C3AED), origin + Offset(0f, height), origin + Offset(width, height), 4f)
+            if (meta["left"] == true) drawLine(Color(0xFF7C3AED), origin, origin + Offset(0f, height), 4f)
+        }
+        GameType.CRYPTARITHM -> {
+            val letter = meta["cryptLetter"]?.toString().orEmpty()
+            drawCenteredText(if (value?.toString() == letter) letter else "$letter=$value", center, width, textMeasurer, Color(0xFF102A56))
         }
         GameType.HITORI -> {
             drawCenteredText(value, center, width, textMeasurer, if (isBlocked) Color.White else Color(0xFF102A56))
@@ -306,7 +374,8 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCenteredText(
 private fun GenericMoveControls(gameType: GameType, enabled: Boolean, onMove: (Any?) -> Unit) {
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
-        GameType.MINESWEEPER, GameType.NONOGRAM, GameType.HITORI, GameType.DOTS_AND_BOXES -> Unit
+        GameType.MINESWEEPER, GameType.NONOGRAM, GameType.HITORI, GameType.DOTS_AND_BOXES,
+        GameType.NURIKABE, GameType.BRIDGES, GameType.SLITHERLINK -> Unit
         GameType.WORD_SEARCH -> Text("Arrastra desde la primera hasta la última letra de una palabra.")
         GameType.CROSSWORD -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(text, { text = it.uppercase().take(1) }, label = { Text("Letra") }, modifier = Modifier.weight(1f))
@@ -314,12 +383,16 @@ private fun GenericMoveControls(gameType: GameType, enabled: Boolean, onMove: (A
             Button({ onMove(text); text = "" }, enabled = enabled && text.isNotBlank()) { Text("Colocar") }
         }
         else -> {
-            val maximum = when (gameType) { GameType.RUMMIKUB -> 13; GameType.MATHDOKU -> 6; else -> 9 }
+            val values = when (gameType) {
+                GameType.CRYPTARITHM -> 0..9
+                GameType.MATHDOKU -> 1..7
+                else -> 1..9
+            }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                (1..maximum).chunked(if (maximum > 9) 7 else 5).forEach { numbers ->
+                values.chunked(5).forEach { numbers ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         numbers.forEach { number -> Button({ onMove(number) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text(number.toString()) } }
-                        repeat((if (maximum > 9) 7 else 5) - numbers.size) { Spacer(Modifier.weight(1f)) }
+                        repeat(5 - numbers.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
             }
@@ -355,9 +428,28 @@ fun gameTitle(type: GameType): String = when (type) {
     GameType.SUDOKU -> "Multi Arena · Sudoku"; GameType.MINESWEEPER -> "Multi Arena · Buscaminas"; GameType.WORD_SEARCH -> "Multi Arena · Sopa de Letras"
     GameType.CROSSWORD -> "Multi Arena · Crucigramas"; GameType.NONOGRAM -> "Multi Arena · Nonogram"; GameType.DOTS_AND_BOXES -> "Multi Arena · Timbiriche"
     GameType.KAKURO -> "Multi Arena · Kakuro"; GameType.MATHDOKU -> "Multi Arena · Mathdoku"; GameType.HITORI -> "Multi Arena · Hitori"; GameType.RUMMIKUB -> "Multi Arena · Rummikub"
+    GameType.NURIKABE -> "Multi Arena · Nurikabe"; GameType.BRIDGES -> "Multi Arena · Bridges"
+    GameType.SLITHERLINK -> "Multi Arena · Slitherlink"; GameType.CRYPTARITHM -> "Multi Arena · Criptogramas"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {
     val seconds = (milliseconds / 1_000).coerceAtLeast(0)
     return "%02d:%02d".format(seconds / 60, seconds % 60)
+}
+
+private data class EdgeMove(val row: Int, val col: Int, val side: String)
+
+private fun dotsEdge(start: CellPosition, end: CellPosition, rows: Int, columns: Int): EdgeMove? {
+    val rowDelta = end.row - start.row
+    val colDelta = end.column - start.column
+    if (kotlin.math.abs(rowDelta) + kotlin.math.abs(colDelta) != 1) return null
+    return if (rowDelta == 0) {
+        val left = min(start.column, end.column)
+        if (start.row < rows) EdgeMove(start.row, left.coerceAtMost(columns - 1), "top")
+        else EdgeMove(rows - 1, left.coerceAtMost(columns - 1), "bottom")
+    } else {
+        val top = min(start.row, end.row)
+        if (start.column < columns) EdgeMove(top.coerceAtMost(rows - 1), start.column, "left")
+        else EdgeMove(top.coerceAtMost(rows - 1), columns - 1, "right")
+    }
 }

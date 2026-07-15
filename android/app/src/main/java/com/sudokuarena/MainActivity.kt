@@ -30,6 +30,7 @@ import com.sudokuarena.presentation.MultiArenaSplashScreen
 import com.sudokuarena.presentation.SoloSetupScreen
 import com.sudokuarena.presentation.MultiArenaTheme
 import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.PuzzleDifficulty
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,6 +69,7 @@ private fun MultiArenaApp() {
     var soloColorMode by rememberSaveable { mutableStateOf(false) }
     var dailyChallenge by rememberSaveable { mutableStateOf(false) }
     var selectedGameType by rememberSaveable { mutableStateOf(GameType.SUDOKU) }
+    var soloDifficulty by rememberSaveable { mutableStateOf(PuzzleDifficulty.MEDIUM) }
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
 
     if (screen == "SPLASH") {
@@ -107,7 +109,9 @@ private fun MultiArenaApp() {
         SoloSetupScreen(
             gameType = selectedGameType,
             isColorMode = soloColorMode,
+            difficulty = soloDifficulty,
             onColorModeChanged = { soloColorMode = it },
+            onDifficultyChanged = { soloDifficulty = it },
             onStart = {
                 mode = "SOLO"
                 sessionId += 1
@@ -159,6 +163,7 @@ private fun MultiArenaApp() {
             requestedRoomCode = requestedRoomCode,
             isDailyChallenge = isSolo && dailyChallenge,
             initialGameType = selectedGameType,
+            initialPuzzleDifficulty = soloDifficulty,
         )
     }
     val arenaViewModel: ArenaViewModel = viewModel(

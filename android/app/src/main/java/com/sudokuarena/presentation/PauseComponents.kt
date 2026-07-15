@@ -1,5 +1,8 @@
 package com.sudokuarena.presentation
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,10 +41,36 @@ fun PauseLayer(
     modifier: Modifier = Modifier,
 ) {
     val room = state.roomState
-    val pendingForMe = !state.isSoloMode && room?.pauseRequesterId != null && room.phase != RoomPhase.PAUSED && room.pauseRequesterId != state.playerId
+    val pending = !state.isSoloMode && room?.pauseRequesterId != null && room.phase != RoomPhase.PAUSED
+    val pendingForMe = pending && room?.pauseRequesterId != state.playerId
     val paused = state.isLocallyPaused || room?.phase == RoomPhase.PAUSED
     val countdown = ((state.resumeCountdownMs + 999) / 1_000).toInt()
-    if (!pendingForMe && !paused) return
+    if (!pending && !paused) return
+
+    if (pending) {
+        Box(modifier.fillMaxSize().padding(top = 10.dp), contentAlignment = Alignment.TopCenter) {
+            AnimatedVisibility(visible = true, enter = fadeIn(), exit = fadeOut()) {
+                Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth(.94f)) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        val requester = state.players.firstOrNull { it.id == room?.pauseRequesterId }?.name ?: "Un jugador"
+                        Column(Modifier.weight(1f)) {
+                            Text("⏸ Solicitud de pausa", fontWeight = FontWeight.Black)
+                            Text(if (pendingForMe) "$requester quiere pausar la partida." else "Esperando la respuesta de los demás…", fontSize = 13.sp)
+                        }
+                        if (pendingForMe) {
+                            OutlinedButton({ onRespond(false) }) { Text("Rechazar") }
+                            Button({ onRespond(true) }) { Text("Aceptar") }
+                        }
+                    }
+                }
+            }
+        }
+        return
+    }
 
     Box(modifier.fillMaxSize().background(Color(0xB8F3F6FC)), contentAlignment = Alignment.Center) {
         Card(shape = RoundedCornerShape(24.dp), modifier = Modifier.fillMaxWidth().padding(24.dp)) {
@@ -51,15 +80,6 @@ fun PauseLayer(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 when {
-                    pendingForMe -> {
-                        Text("⏸ SOLICITUD DE PAUSA", fontWeight = FontWeight.Black, fontSize = 22.sp)
-                        val requester = state.players.firstOrNull { it.id == room?.pauseRequesterId }?.name ?: "Un jugador"
-                        Text("$requester solicita detener temporalmente la partida.")
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton({ onRespond(false) }, Modifier.weight(1f)) { Text("Rechazar") }
-                            Button({ onRespond(true) }, Modifier.weight(1f)) { Text("Aceptar") }
-                        }
-                    }
                     countdown > 0 -> {
                         Text("PREPÁRATE", fontWeight = FontWeight.Black, fontSize = 24.sp)
                         Text(countdown.toString(), fontWeight = FontWeight.Black, fontSize = 72.sp, color = ArenaColors.ElectricBlue)

@@ -90,6 +90,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onTeamModeChanged = viewModel::setTeamMode,
             onTileTypeChanged = viewModel::setTileType,
             onBotDifficultyChanged = viewModel::setBotDifficulty,
+            onPuzzleDifficultyChanged = viewModel::setPuzzleDifficulty,
             onGameTypeChanged = viewModel::setGameType,
             onLoadoutPower = viewModel::toggleLoadoutPower,
             onFillWithAi = viewModel::fillWithAi,
@@ -115,6 +116,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onPauseResponse = viewModel::respondPause,
             onResume = viewModel::resumePausedGame,
             onTutorialComplete = viewModel::completeTutorial,
+            onOpenTutorial = viewModel::openTutorial,
             onReaction = viewModel::sendReaction,
             onNewSoloGame = viewModel::newSoloGame,
             onExit = onExit,
@@ -133,6 +135,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         onFogSwipe = viewModel::cleanFogSwipe,
         onNewSoloGame = viewModel::newSoloGame,
         onTutorialComplete = viewModel::completeTutorial,
+        onOpenTutorial = viewModel::openTutorial,
         onRematch = viewModel::requestRematch,
         onRequestPause = viewModel::requestPause,
         onPauseResponse = viewModel::respondPause,
@@ -153,6 +156,7 @@ fun ArenaScreen(
     onFogSwipe: () -> Unit,
     onNewSoloGame: () -> Unit,
     onTutorialComplete: () -> Unit,
+    onOpenTutorial: () -> Unit,
     onRematch: () -> Unit,
     onRequestPause: () -> Unit,
     onPauseResponse: (Boolean) -> Unit,
@@ -186,7 +190,11 @@ fun ArenaScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("Multi Arena · Sudoku", style = MaterialTheme.typography.headlineSmall)
-                    Row { PauseControl(state, onRequestPause); TextButton(onClick = onExit) { Text("Salir") } }
+                    Row {
+                        TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
+                        PauseControl(state, onRequestPause)
+                        TextButton(onClick = onExit) { Text("Salir") }
+                    }
                 }
                 Text(
                     when {

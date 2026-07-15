@@ -19,6 +19,7 @@ import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.BotDifficulty
 import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.PuzzleDifficulty
 import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
@@ -109,6 +110,7 @@ class ArenaViewModel(
     private val requestedRoomCode: String? = null,
     private val isDailyChallenge: Boolean = false,
     private val initialGameType: GameType = GameType.SUDOKU,
+    private val initialPuzzleDifficulty: PuzzleDifficulty = PuzzleDifficulty.MEDIUM,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(
         ArenaUiState(
@@ -210,6 +212,10 @@ class ArenaViewModel(
         mutableState.update { it.copy(showTutorial = false) }
     }
 
+    fun openTutorial() {
+        mutableState.update { it.copy(showTutorial = true) }
+    }
+
     fun requestRematch() {
         if (isSoloMode) return
         gateway?.requestRematch()
@@ -245,6 +251,12 @@ class ArenaViewModel(
         if (isSoloMode) return
         val current = mutableState.value.roomState ?: return
         gateway?.configureRoom(current.config.copy(botDifficulty = difficulty))
+    }
+
+    fun setPuzzleDifficulty(difficulty: PuzzleDifficulty) {
+        val current = mutableState.value.roomState ?: return
+        if (current.hostPlayerId != mutableState.value.playerId) return
+        gateway?.configureRoom(current.config.copy(puzzleDifficulty = difficulty))
     }
 
     fun setGameType(gameType: GameType) {
@@ -394,8 +406,8 @@ class ArenaViewModel(
         viewModelScope.launch {
             soloChallengeToken = runCatching { leaderboardRepository.beginSoloChallenge() }.getOrNull()
         }
-        soloPuzzle = if (initialGameType == GameType.SUDOKU) sudokuGenerator.generate(if (isDailyChallenge) LocalDate.now().toEpochDay() else null) else null
-        localPuzzleEngine = if (initialGameType == GameType.SUDOKU) null else LocalPuzzleEngine(initialGameType)
+        soloPuzzle = if (initialGameType == GameType.SUDOKU) sudokuGenerator.generate(if (isDailyChallenge) LocalDate.now().toEpochDay() else null, initialPuzzleDifficulty) else null
+        localPuzzleEngine = if (initialGameType == GameType.SUDOKU) null else LocalPuzzleEngine(initialGameType, initialPuzzleDifficulty)
         soloStartedAt = System.currentTimeMillis()
         soloPausedAt = 0L
         soloPausedAccumulatedMs = 0L
@@ -697,6 +709,7 @@ class ArenaViewModel(
             requestedRoomCode: String? = null,
             isDailyChallenge: Boolean = false,
             initialGameType: GameType = GameType.SUDOKU,
+            initialPuzzleDifficulty: PuzzleDifficulty = PuzzleDifficulty.MEDIUM,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = ArenaViewModel(
@@ -710,6 +723,7 @@ class ArenaViewModel(
                 requestedRoomCode = requestedRoomCode,
                 isDailyChallenge = isDailyChallenge,
                 initialGameType = initialGameType,
+                initialPuzzleDifficulty = initialPuzzleDifficulty,
             ) as T
         }
     }

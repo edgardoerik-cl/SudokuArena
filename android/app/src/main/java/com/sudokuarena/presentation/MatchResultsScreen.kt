@@ -207,4 +207,8 @@ private fun gameName(gameType: GameType): String = when (gameType) {
     GameType.MATHDOKU -> "Mathdoku"
     GameType.HITORI -> "Hitori"
     GameType.RUMMIKUB -> "Rummikub"
+    GameType.NURIKABE -> "Nurikabe"
+    GameType.BRIDGES -> "Bridges"
+    GameType.SLITHERLINK -> "Slitherlink"
+    GameType.CRYPTARITHM -> "Criptogramas"
 }

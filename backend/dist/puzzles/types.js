@@ -8,6 +8,10 @@ export const GAME_TYPES = [
     "KAKURO",
     "MATHDOKU",
     "HITORI",
-    "RUMMIKUB"
+    "RUMMIKUB",
+    "NURIKABE",
+    "BRIDGES",
+    "SLITHERLINK",
+    "CRYPTARITHM"
 ];
 //# sourceMappingURL=types.js.map

@@ -6,7 +6,7 @@ data class SudokuPuzzle(
 )
 
 interface SudokuGenerator {
-    fun generate(seed: Long? = null): SudokuPuzzle
+    fun generate(seed: Long? = null, difficulty: PuzzleDifficulty = PuzzleDifficulty.MEDIUM): SudokuPuzzle
 }
 
 interface PlayerRecordStore {

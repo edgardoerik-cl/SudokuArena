@@ -134,7 +134,23 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⛓", "Mantén conectado", "Las casillas apagadas no deben tocarse por sus lados."),
     )
     GameType.RUMMIKUB -> listOf(
-        TutorialStep("123", "Completa escaleras", "Selecciona un hueco y coloca la ficha numérica que continúa su color."),
-        TutorialStep("🃏", "Domina el tablero", "Las fichas correctas quedan marcadas con tu identidad."),
+        TutorialStep("A∧B", "Lee la regla", "Cada casilla muestra una condición algebraica o lógica AND, OR o XOR."),
+        TutorialStep("123", "Elige la ficha", "Coloca el valor que hace verdadera la regla de la casilla."),
+    )
+    GameType.NURIKABE -> listOf(
+        TutorialStep("●≈", "Separa islas", "Los números indican el tamaño exacto de cada isla blanca."),
+        TutorialStep("■", "Construye el río", "Pinta un río negro conectado sin crear bloques de 2×2."),
+    )
+    GameType.BRIDGES -> listOf(
+        TutorialStep("●═●", "Conecta islas", "Traza puentes horizontales o verticales entre islas alineadas."),
+        TutorialStep("#", "Respeta el número", "Cada isla recibe la cantidad indicada y toda la red queda conectada."),
+    )
+    GameType.SLITHERLINK -> listOf(
+        TutorialStep("□", "Forma un lazo", "Traza una sola línea cerrada, sin cruces ni ramificaciones."),
+        TutorialStep("0–3", "Sigue las pistas", "El número indica cuántos lados de la celda pertenecen al lazo."),
+    )
+    GameType.CRYPTARITHM -> listOf(
+        TutorialStep("A=7", "Descifra letras", "Cada letra representa un dígito diferente y una inicial nunca vale cero."),
+        TutorialStep("+", "Haz verdadera la suma", "Asigna los dígitos que hacen correcta toda la ecuación."),
     )
 }

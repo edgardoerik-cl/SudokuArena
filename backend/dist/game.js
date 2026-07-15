@@ -22,7 +22,8 @@ export class ArenaGame {
         powersEnabled: true,
         teamMode: "FFA",
         tileType: "NUMBERS",
-        botDifficulty: "MEDIUM"
+        botDifficulty: "MEDIUM",
+        puzzleDifficulty: "MEDIUM"
     };
     constructor(gameId = "arena-main", solution = SOLUTION) {
         this.gameId = gameId;

@@ -9,6 +9,7 @@ import type {
   GenericMove,
   GenericMoveResult
 } from "./types.js";
+import type { PuzzleGenerationOptions } from "./types.js";
 
 const GENERIC_HIT_POINTS = 10;
 const GENERIC_ENERGY = 25;
@@ -25,8 +26,8 @@ export class GenericPuzzleEngine {
   private completed = false;
   private readonly processed = new Map<string, Set<string>>();
 
-  constructor(readonly gameType: GameType, readonly gameId: string) {
-    const blueprint = createPuzzleBlueprint(gameType);
+  constructor(readonly gameType: GameType, readonly gameId: string, options: PuzzleGenerationOptions = {}) {
+    const blueprint = createPuzzleBlueprint(gameType, options);
     this.board = blueprint.board;
     this.answers = blueprint.answers;
     this.meta = blueprint.meta;
@@ -66,7 +67,7 @@ export class GenericPuzzleEngine {
     requests.add(move.requestId);
 
     const cell = this.board[move.row]![move.col]!;
-    if (cell.isBlocked || cell.ownerId !== null) {
+    if (cell.isBlocked || (cell.ownerId !== null && this.gameType !== "SLITHERLINK")) {
       return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
     }
 
@@ -106,7 +107,7 @@ export class GenericPuzzleEngine {
     for (let row = 0; row < this.board.length; row += 1) {
       for (let col = 0; col < this.board[row]!.length; col += 1) {
         const cell = this.board[row]![col]!;
-        if (cell.ownerId === null && !cell.isBlocked) {
+        if ((cell.ownerId === null || this.gameType === "SLITHERLINK") && !cell.isBlocked) {
           if (this.gameType !== "WORD_SEARCH" || col === 0) candidates.push({ row, col });
         }
       }
@@ -116,8 +117,11 @@ export class GenericPuzzleEngine {
     let suitable = this.gameType === "MINESWEEPER"
       ? candidates.filter(({ row, col }) => (this.answers[row]![col] === true) !== correct)
       : candidates;
-    if ((this.gameType === "NONOGRAM" || this.gameType === "HITORI") && correct) {
+    if (["NONOGRAM", "HITORI", "NURIKABE", "BRIDGES"].includes(this.gameType) && correct) {
       suitable = candidates.filter(({ row, col }) => this.answers[row]![col] === true);
+    }
+    if (this.gameType === "SLITHERLINK") {
+      suitable = candidates.filter(({ row, col }) => this.missingSlitherEdges(row, col).length > 0);
     }
     if (this.gameType === "DOTS_AND_BOXES" && correct) {
       const edgeCount = ({ row, col }: { row: number; col: number }) =>
@@ -150,7 +154,7 @@ export class GenericPuzzleEngine {
         if (nextWord < 0) return null;
         target = { row: nextWord, col: 0 };
       }
-    } else if ((this.gameType === "NONOGRAM" || this.gameType === "HITORI") && this.answers[row]![col] !== true) {
+    } else if (["NONOGRAM", "HITORI", "NURIKABE", "BRIDGES"].includes(this.gameType) && this.answers[row]![col] !== true) {
       const unresolved = this.findFirstTrueCell();
       if (!unresolved) return null;
       target = unresolved;
@@ -208,6 +212,30 @@ export class GenericPuzzleEngine {
       return { correct: true, points: (closed ? 50 : 0) + (neighbourClosed ? 50 : 0) || 5 };
     }
 
+    if (this.gameType === "SLITHERLINK") {
+      let row = move.row; let col = move.col;
+      let side = String(move.val ?? "").toLowerCase();
+      let target = cell;
+      let expected = String(this.answers[row]![col] ?? "").split("|").filter(Boolean);
+      if (!expected.includes(side)) {
+        const neighbour = neighbourFor(row, col, side, this.board.length, this.board[0]!.length);
+        if (!neighbour) return { correct: false };
+        const opposite = oppositeSide(side);
+        const neighbourExpected = String(this.answers[neighbour.row]![neighbour.col] ?? "").split("|").filter(Boolean);
+        if (!neighbourExpected.includes(opposite)) return { correct: false };
+        row = neighbour.row; col = neighbour.col; side = opposite;
+        target = this.board[row]![col]!; expected = neighbourExpected;
+      }
+      if (target.meta[side] === true) return { correct: false };
+      target.meta[side] = true;
+      this.mirrorDotsEdge(row, col, side);
+      if (expected.every((edge) => target.meta[edge] === true)) {
+        target.ownerId = playerId;
+        target.isRevealed = true;
+      }
+      return { correct: true, points: 8 };
+    }
+
     if (this.gameType === "RUMMIKUB") {
       const payload = typeof move.val === "object" && move.val !== null ? move.val as Record<string, unknown> : { tile: move.val };
       const tile = Number(payload.tile);
@@ -243,6 +271,7 @@ export class GenericPuzzleEngine {
       const free = ["top", "right", "bottom", "left"].filter((side) => cell.meta[side] !== true);
       return free[0] ?? "top";
     }
+    if (this.gameType === "SLITHERLINK") return this.missingSlitherEdges(row, col)[0] ?? "top";
     if (this.gameType === "MINESWEEPER") {
       const mine = this.answers[row]![col] === true;
       if (correct && mine) {
@@ -302,8 +331,14 @@ export class GenericPuzzleEngine {
     }
     if (this.gameType === "WORD_SEARCH") return (this.meta.foundWords as string[]).length === (this.meta.words as string[]).length;
     if (this.gameType === "DOTS_AND_BOXES") return this.board.every((row) => row.every((cell) => cell.ownerId !== null));
-    if (this.gameType === "NONOGRAM" || this.gameType === "HITORI") {
+    if (["NONOGRAM", "HITORI", "NURIKABE", "BRIDGES"].includes(this.gameType)) {
       return this.board.every((row, y) => row.every((cell, x) => this.answers[y]![x] !== true || cell.ownerId !== null));
+    }
+    if (this.gameType === "SLITHERLINK") {
+      return this.board.every((row, y) => row.every((cell, x) => {
+        const expected = String(this.answers[y]![x] ?? "").split("|").filter(Boolean);
+        return expected.every((edge) => cell.meta[edge] === true);
+      }));
     }
     return this.board.every((row, y) => row.every((cell, x) => this.answers[y]![x] === null || cell.ownerId !== null));
   }
@@ -313,6 +348,11 @@ export class GenericPuzzleEngine {
     if (!Number.isInteger(move.row) || !Number.isInteger(move.col)) return "Coordenadas inválidas";
     if (!this.board[move.row]?.[move.col]) return "Movimiento fuera del tablero";
     return null;
+  }
+
+  private missingSlitherEdges(row: number, col: number): string[] {
+    const expected = String(this.answers[row]![col] ?? "").split("|").filter(Boolean);
+    return expected.filter((edge) => this.board[row]![col]!.meta[edge] !== true);
   }
 
   private reject(requestId: string, code: NonNullable<GenericMoveResult["code"]>, message: string): GenericMoveResult {
@@ -327,4 +367,17 @@ function normalizeValue(value: unknown, expected: CellValue): CellValue {
   }
   if (typeof expected === "boolean") return value === true || value === "true" || value === "BLOCK" || value === "FILL";
   return typeof value === "string" ? value.toUpperCase() : null;
+}
+
+function oppositeSide(side: string): string {
+  return ({ top: "bottom", right: "left", bottom: "top", left: "right" } as Record<string, string>)[side] ?? "";
+}
+
+function neighbourFor(row: number, col: number, side: string, rows: number, columns: number): { row: number; col: number } | null {
+  const target = side === "top" ? { row: row - 1, col }
+    : side === "right" ? { row, col: col + 1 }
+      : side === "bottom" ? { row: row + 1, col }
+        : side === "left" ? { row, col: col - 1 }
+          : null;
+  return target && target.row >= 0 && target.row < rows && target.col >= 0 && target.col < columns ? target : null;
 }

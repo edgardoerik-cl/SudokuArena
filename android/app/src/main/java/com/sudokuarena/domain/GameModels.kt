@@ -35,9 +35,11 @@ data class Player(
 enum class TeamMode { DUEL, FFA, TWO_V_ONE, TWO_V_TWO, THREE_V_ONE }
 enum class TileType { NUMBERS, COLORS }
 enum class BotDifficulty { EASY, MEDIUM, HARD }
+enum class PuzzleDifficulty { EASY, MEDIUM, HARD, EXPERT }
 enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
+    NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM,
 }
 enum class RoomPhase { LOBBY, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
@@ -47,6 +49,7 @@ data class RoomConfig(
     val teamMode: TeamMode = TeamMode.FFA,
     val tileType: TileType = TileType.NUMBERS,
     val botDifficulty: BotDifficulty = BotDifficulty.MEDIUM,
+    val puzzleDifficulty: PuzzleDifficulty = PuzzleDifficulty.MEDIUM,
 )
 
 data class GenericCell(

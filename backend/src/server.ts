@@ -13,7 +13,7 @@ import {
 import { ArenaGame } from "./game.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import { GenericPuzzleEngine } from "./puzzles/engine.js";
-import { GAME_TYPES, type GameType, type GenericMove } from "./puzzles/types.js";
+import { GAME_TYPES, type GameType, type GenericMove, type PuzzleDifficulty } from "./puzzles/types.js";
 import type {
   BotDifficulty,
   BoardEventType,
@@ -132,12 +132,15 @@ io.on("connection", (socket) => {
     const botDifficulty = payload?.botDifficulty === undefined
       ? room.config.botDifficulty
       : normalizeBotDifficulty(payload.botDifficulty);
-    if (!teamMode || !tileType || !botDifficulty || typeof payload?.powersEnabled !== "boolean") {
+    const puzzleDifficulty = payload?.puzzleDifficulty === undefined
+      ? room.config.puzzleDifficulty
+      : normalizePuzzleDifficulty(payload.puzzleDifficulty);
+    if (!teamMode || !tileType || !botDifficulty || !puzzleDifficulty || typeof payload?.powersEnabled !== "boolean") {
       return emitRoomError(socket, "INVALID_CONFIG", "Configuración de sala inválida");
     }
     const gameType = payload?.gameType === undefined ? room.config.gameType : normalizeGameType(payload.gameType);
     if (!gameType) return emitRoomError(socket, "INVALID_GAME", "Tipo de juego no permitido");
-    room.config = { gameType, powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty };
+    room.config = { gameType, powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty, puzzleDifficulty };
     emitRoomState(room);
   });
 
@@ -339,7 +342,7 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     boardEventTimeout: null,
     matchTimeout: null,
     hostPlayerId,
-    config: { gameType: "SUDOKU", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" },
+    config: { gameType: "SUDOKU", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM", puzzleDifficulty: "MEDIUM" },
     phase: "LOBBY",
     startedAt: null,
     endsAt: null,
@@ -493,6 +496,10 @@ function normalizeGameType(value: unknown): GameType | null {
   return typeof value === "string" && (GAME_TYPES as readonly string[]).includes(value) ? value as GameType : null;
 }
 
+function normalizePuzzleDifficulty(value: unknown): PuzzleDifficulty | null {
+  return value === "EASY" || value === "MEDIUM" || value === "HARD" || value === "EXPERT" ? value : null;
+}
+
 function validatePlayerCount(room: RoomRuntime): string | null {
   const count = room.game.playerCount;
   if (room.config.teamMode === "DUEL" && count !== 2) return "El modo 1 vs 1 requiere exactamente 2 jugadores";
@@ -515,7 +522,10 @@ function startMatch(room: RoomRuntime, rematch = false): void {
   else room.game.startMatch(room.config, resolveBossPlayerId(room));
   room.genericEngine = room.config.gameType === "SUDOKU"
     ? null
-    : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`);
+    : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
+        seed: `${room.code}-${room.startedAt}`,
+        difficulty: room.config.puzzleDifficulty
+      });
   emitRoomState(room);
   emitState(room);
   emitGenericState(room);

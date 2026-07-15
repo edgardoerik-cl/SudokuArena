@@ -16,6 +16,7 @@ import com.sudokuarena.domain.TileType
 import com.sudokuarena.domain.BotDifficulty
 import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.PuzzleDifficulty
 import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.GenericCell
 import io.socket.client.IO
@@ -218,7 +219,8 @@ class SocketGameClient(
                 .put("gameType", config.gameType.name)
                 .put("teamMode", config.teamMode.name)
                 .put("tileType", config.tileType.name)
-                .put("botDifficulty", config.botDifficulty.name),
+                .put("botDifficulty", config.botDifficulty.name)
+                .put("puzzleDifficulty", config.puzzleDifficulty.name),
         )
     }
 
@@ -372,6 +374,7 @@ private fun parseRoomState(json: JSONObject): RoomState {
             teamMode = TeamMode.valueOf(config.getString("teamMode")),
             tileType = TileType.valueOf(config.optString("tileType", "NUMBERS")),
             botDifficulty = BotDifficulty.valueOf(config.optString("botDifficulty", "MEDIUM")),
+            puzzleDifficulty = PuzzleDifficulty.valueOf(config.optString("puzzleDifficulty", "MEDIUM")),
         ),
         phase = RoomPhase.valueOf(json.getString("phase")),
         startedAt = if (json.isNull("startedAt")) null else json.getLong("startedAt"),
