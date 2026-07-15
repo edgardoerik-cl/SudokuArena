@@ -38,6 +38,6 @@ private val HighContrastScheme = lightColorScheme(
 )
 
 @Composable
-fun SudokuArenaTheme(content: @Composable () -> Unit) {
+fun MultiArenaTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = HighContrastScheme, content = content)
 }

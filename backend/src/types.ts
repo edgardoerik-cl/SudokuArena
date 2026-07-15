@@ -8,11 +8,11 @@ export interface PublicCell {
   ownerTeamId: string | null;
 }
 
-export type TeamMode = "FFA" | "TWO_V_TWO" | "THREE_V_ONE";
+export type TeamMode = "DUEL" | "FFA" | "TWO_V_ONE" | "TWO_V_TWO" | "THREE_V_ONE";
 export type TileType = "NUMBERS" | "COLORS";
 export type BotDifficulty = "EASY" | "MEDIUM" | "HARD";
 export type PlayerRole = "PLAYER" | "TEAMMATE" | "BOSS" | "RAIDER";
-export type RoomPhase = "LOBBY" | "PLAYING" | "SUDDEN_DEATH" | "FINISHED";
+export type RoomPhase = "LOBBY" | "PLAYING" | "PAUSED" | "SUDDEN_DEATH" | "FINISHED";
 export type BotPersona = "CALCULATOR" | "TRICKSTER" | "GUARDIAN";
 export type ActivePower = "FOG" | "REFLECT" | "REVEAL";
 
@@ -33,6 +33,10 @@ export interface RoomState {
   endsAt: number | null;
   suddenDeath: boolean;
   rematchVotes: number;
+  pauseRequesterId: string | null;
+  pauseVotes: number;
+  pauseRequired: number;
+  resumeCountdownEndsAt: number | null;
 }
 
 export interface PlayerState {
@@ -53,6 +57,7 @@ export interface PlayerState {
   comboMultiplier: number;
   botPersona: BotPersona | null;
   powerLoadout: ActivePower[];
+  avatarId: string;
 }
 
 export type BoardEventType = "MIRROR_HOUR" | "GOLDEN_CELLS";

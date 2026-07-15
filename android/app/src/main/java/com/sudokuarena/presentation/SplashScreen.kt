@@ -43,7 +43,7 @@ import kotlinx.coroutines.launch
 import com.sudokuarena.R
 
 @Composable
-fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
+fun MultiArenaSplashScreen(onFinished: () -> Unit) {
     val alpha = remember { Animatable(0f) }
     val scale = remember { Animatable(1.08f) }
     val pulseTransition = rememberInfiniteTransition(label = "neonPulse")
@@ -67,7 +67,7 @@ fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Image(
-            painter = painterResource(R.drawable.sudoku_arena_splash_art),
+            painter = painterResource(R.drawable.multi_arena_splash_art),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -88,7 +88,7 @@ fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
                 ),
         )
         Text(
-            "CONECTANDO CON LA ARENA${if (pulse > 0.67f) "…" else ""}",
+            "CONECTANDO MULTI ARENA${if (pulse > 0.67f) "…" else ""}",
             color = Color.White.copy(alpha = 0.72f + pulse * 0.28f),
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -102,7 +102,7 @@ fun SudokuArenaSplashScreen(onFinished: () -> Unit) {
     }
 }
 
-/** Emblema vivo: escudo hexagonal, nueve central y órbitas de energía. */
+/** Emblema vivo de las diez arenas conectadas. */
 @Composable
 fun ArenaLogo(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "arenaEmblem")
@@ -127,6 +127,14 @@ fun ArenaLogo(modifier: Modifier = Modifier) {
             rotate(orbit) {
                 drawArc(cyan, 8f, 102f, false, style = Stroke(5f), topLeft = Offset(center.x - radius * 1.18f, center.y - radius * 1.18f), size = Size(radius * 2.36f, radius * 2.36f))
                 drawArc(violet, 188f, 108f, false, style = Stroke(5f), topLeft = Offset(center.x - radius * 1.18f, center.y - radius * 1.18f), size = Size(radius * 2.36f, radius * 2.36f))
+                repeat(10) { index ->
+                    val angle = index * 6.283185f / 10f
+                    drawCircle(
+                        if (index % 2 == 0) cyan else violet,
+                        radius = 5f + pulse * 2f,
+                        center = center + Offset(kotlin.math.cos(angle), kotlin.math.sin(angle)) * radius * 1.18f,
+                    )
+                }
             }
             val shield = Path().apply {
                 moveTo(center.x, center.y - radius)
@@ -147,9 +155,9 @@ fun ArenaLogo(modifier: Modifier = Modifier) {
             }
         }
         Text(
-            "9",
+            "M",
             color = Color(0xFF102A56),
-            fontSize = 52.sp,
+            fontSize = 46.sp,
             fontWeight = FontWeight.Black,
             modifier = Modifier.graphicsLayer {
                 scaleX = 1f + pulse * 0.045f

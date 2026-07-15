@@ -5,4 +5,4 @@
     android:dither="true"
     android:filter="true"
     android:gravity="fill"
-    android:src="@drawable/sudoku_arena_icon" />
+    android:src="@drawable/multi_arena_icon" />

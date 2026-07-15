@@ -4,6 +4,9 @@ import com.sudokuarena.domain.GlobalLeaderboards
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.MultiplayerLeaderboardEntry
 import com.sudokuarena.domain.SoloLeaderboardEntry
+import com.sudokuarena.domain.GameType
+import com.sudokuarena.domain.GameLeaderboardEntry
+import com.sudokuarena.domain.GameLeaderboards
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
@@ -41,13 +44,33 @@ class HttpLeaderboardRepository(serverUrl: String) : LeaderboardRepository {
         request("POST", "/api/solo/challenge", "{}").getString("token")
     }
 
-    override suspend fun submitSoloRecord(nickname: String, elapsedMs: Long, challengeToken: String) = withContext(Dispatchers.IO) {
+    override suspend fun loadGameTopTen(gameType: GameType): GameLeaderboards = withContext(Dispatchers.IO) {
+        val json = request("GET", "/api/leaderboards/game?gameType=${gameType.name}")
+        fun parse(key: String): List<GameLeaderboardEntry> {
+            val values = json.getJSONArray(key)
+            return List(values.length()) { index ->
+                val entry = values.getJSONObject(index)
+                GameLeaderboardEntry(
+                    rank = entry.getInt("rank"),
+                    nickname = entry.getString("nickname"),
+                    bestTimeMs = if (entry.has("bestTimeMs")) entry.getLong("bestTimeMs") else null,
+                    bestScore = if (entry.has("bestScore")) entry.getInt("bestScore") else null,
+                    wins = entry.optInt("wins", 0),
+                )
+            }
+        }
+        GameLeaderboards(gameType, parse("time"), parse("score"))
+    }
+
+    override suspend fun submitSoloRecord(nickname: String, gameType: GameType, elapsedMs: Long, score: Int, challengeToken: String) = withContext(Dispatchers.IO) {
         request(
             method = "POST",
             path = "/api/leaderboards/solo",
             body = JSONObject()
                 .put("nickname", nickname)
                 .put("elapsedMs", elapsedMs)
+                .put("gameType", gameType.name)
+                .put("score", score)
                 .put("challengeToken", challengeToken)
                 .toString(),
         )

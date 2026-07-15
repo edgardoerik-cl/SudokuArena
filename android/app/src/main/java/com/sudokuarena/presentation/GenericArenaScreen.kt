@@ -3,6 +3,7 @@ package com.sudokuarena.presentation
 import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -57,28 +58,35 @@ fun GenericArenaScreen(
     state: ArenaUiState,
     onCellSelected: (Int, Int) -> Unit,
     onMove: (Any?) -> Unit,
+    onMoveAt: (Int, Int, Any?) -> Unit,
     onWordSelection: (CellPosition, CellPosition, String) -> Unit,
     onUseFog: (String) -> Unit,
     onUseReflect: () -> Unit,
     onUseReveal: () -> Unit,
     onFogSwipe: () -> Unit,
     onRematch: () -> Unit,
+    onRequestPause: () -> Unit,
+    onPauseResponse: (Boolean) -> Unit,
+    onResume: () -> Unit,
+    onTutorialComplete: () -> Unit,
+    onReaction: (String) -> Unit,
+    onNewSoloGame: () -> Unit,
     onExit: () -> Unit,
 ) {
     val generic = state.genericBoard
     Scaffold { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                Modifier.fillMaxSize().blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp).verticalScroll(rememberScrollState()).padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(gameTitle(state.gameType), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                        Text("Sala ${state.roomCode.orEmpty()} · ${formatGenericTime(state.matchRemainingMs)}")
+                        Text(if (state.isSoloMode) "Solitario · ${formatGenericTime(state.soloElapsedMs)} · ${state.soloErrors} errores" else "Sala ${state.roomCode.orEmpty()} · ${formatGenericTime(state.matchRemainingMs)}")
                     }
-                    TextButton(onClick = onExit) { Text("Salir") }
+                    Row { PauseControl(state, onRequestPause); TextButton(onClick = onExit) { Text("Salir") } }
                 }
                 Scoreboard(state)
                 if (state.roomState?.config?.powersEnabled == true) {
@@ -94,8 +102,11 @@ fun GenericArenaScreen(
                         enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
                         onCellSelected = onCellSelected,
                         onWordSelection = onWordSelection,
+                        onDirectMove = onMoveAt,
                     )
+                    PuzzleHints(generic)
                     GenericMoveControls(state.gameType, state.canMakeGenericMove, onMove)
+                    if (!state.isSoloMode) ReactionMenu(onReaction)
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
                 }
             }
@@ -106,8 +117,12 @@ fun GenericArenaScreen(
             }
             if (state.penaltyRemainingMs > 0) PenaltyOverlay(state.penaltyRemainingMs, Modifier.zIndex(15f))
             if (state.explosionRemainingMs > 0) MineExplosionOverlay(Modifier.zIndex(18f))
-            if (state.matchResults.isNotEmpty()) {
-                MatchResultsOverlay(state, onNewSoloGame = {}, onRematch = onRematch, onExit = onExit, modifier = Modifier.zIndex(30f))
+            if (state.soloCompleted || state.matchResults.isNotEmpty()) {
+                MatchResultsOverlay(state, onNewSoloGame = onNewSoloGame, onRematch = onRematch, onExit = onExit, modifier = Modifier.zIndex(30f))
+            }
+            PauseLayer(state, onPauseResponse, onResume, Modifier.zIndex(50f))
+            if (state.showTutorial) {
+                ArenaTutorialOverlay(state.isSoloMode, state.gameType, onTutorialComplete, Modifier.zIndex(60f))
             }
         }
     }
@@ -121,6 +136,7 @@ fun GenericPuzzleGrid(
     enabled: Boolean,
     onCellSelected: (Int, Int) -> Unit,
     onWordSelection: (CellPosition, CellPosition, String) -> Unit,
+    onDirectMove: (Int, Int, Any?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
@@ -153,7 +169,20 @@ fun GenericPuzzleGrid(
                 if (!enabled) return@detectTapGestures
                 val row = floor(offset.y / (size.height / state.rows)).toInt().coerceIn(0, state.rows - 1)
                 val col = floor(offset.x / (size.width / state.columns)).toInt().coerceIn(0, state.columns - 1)
-                onCellSelected(row, col)
+                when (state.gameType) {
+                    GameType.MINESWEEPER -> onDirectMove(row, col, "REVEAL")
+                    GameType.NONOGRAM -> onDirectMove(row, col, "FILL")
+                    GameType.HITORI -> onDirectMove(row, col, "BLOCK")
+                    GameType.DOTS_AND_BOXES -> {
+                        val localX = offset.x - col * (size.width / state.columns)
+                        val localY = offset.y - row * (size.height / state.rows)
+                        val width = size.width / state.columns
+                        val height = size.height / state.rows
+                        val side = listOf("left" to localX, "right" to width - localX, "top" to localY, "bottom" to height - localY).minBy { it.second }.first
+                        onDirectMove(row, col, side)
+                    }
+                    else -> onCellSelected(row, col)
+                }
             }
         }
     }
@@ -182,6 +211,26 @@ fun GenericPuzzleGrid(
                 if (ownerColor != null) drawRect(ownerColor, origin, Size(cellWidth, cellHeight), style = Stroke(2.4f))
             }
         }
+    }
+}
+
+@Composable
+private fun PuzzleHints(state: GenericBoardState) {
+    val instructions = state.meta["instructions"]?.toString()
+    if (!instructions.isNullOrBlank()) Text(instructions, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+    when (state.gameType) {
+        GameType.WORD_SEARCH -> Text("Palabras: ${(state.meta["words"] as? List<*>)?.joinToString(" · ").orEmpty()}")
+        GameType.CROSSWORD -> Column(Modifier.fillMaxWidth()) {
+            (state.meta["clues"] as? List<*>)?.forEachIndexed { index, clue -> Text("${index + 1}. $clue", fontSize = 12.sp) }
+        }
+        GameType.NONOGRAM -> {
+            Text("Filas: ${(state.meta["rowClues"] as? List<*>)?.joinToString(" | ").orEmpty()}", fontSize = 11.sp)
+            Text("Columnas: ${(state.meta["columnClues"] as? List<*>)?.joinToString(" | ").orEmpty()}", fontSize = 11.sp)
+        }
+        GameType.MINESWEEPER -> Text("✦ Toca directamente una casilla para revelarla · ${state.meta["mineCount"] ?: "?"} minas")
+        GameType.DOTS_AND_BOXES -> Text("Toca cerca del borde que quieres trazar.")
+        GameType.HITORI -> Text("Toca el número duplicado que quieras apagar.")
+        else -> Unit
     }
 }
 
@@ -215,6 +264,32 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
         GameType.HITORI -> {
             drawCenteredText(value, center, width, textMeasurer, if (isBlocked) Color.White else Color(0xFF102A56))
         }
+        GameType.KAKURO -> if (meta["clueCell"] == true) {
+            drawLine(Color.White.copy(alpha = .75f), origin, origin + Offset(width, height), 1.5f)
+            val clue = listOfNotNull(
+                (meta["downSum"] as? Number)?.let { "↓${it.toInt()}" },
+                (meta["rightSum"] as? Number)?.let { "→${it.toInt()}" },
+            ).joinToString(" ")
+            drawCenteredText(clue, center, width * .78f, textMeasurer, Color.White)
+        } else drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
+        GameType.MATHDOKU -> {
+            drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
+            val label = meta["cageLabel"]?.toString().orEmpty()
+            if (label.isNotEmpty()) {
+                val layout = textMeasurer.measure(label, TextStyle(color = Color(0xFF7C3AED), fontSize = 9.sp, fontWeight = FontWeight.Black))
+                drawText(layout, topLeft = origin + Offset(3f, 1f))
+            }
+            if (meta["cageStart"] == true) drawLine(Color(0xFF7C3AED), origin, Offset(origin.x, origin.y + height), 3f)
+            if (meta["cageEnd"] == true) drawLine(Color(0xFF7C3AED), Offset(origin.x + width, origin.y), Offset(origin.x + width, origin.y + height), 3f)
+        }
+        GameType.CROSSWORD -> {
+            drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
+            val clue = (meta["clue"] as? Number)?.toInt() ?: 0
+            if (clue > 0) {
+                val layout = textMeasurer.measure(clue.toString(), TextStyle(color = Color(0xFF0057D9), fontSize = 8.sp, fontWeight = FontWeight.Bold))
+                drawText(layout, topLeft = origin + Offset(2f, 1f))
+            }
+        }
         else -> drawCenteredText(if (value == "MINE") "✹" else value, center, width, textMeasurer, if (value == "MINE") Color.Red else Color(0xFF102A56))
     }
 }
@@ -231,14 +306,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCenteredText(
 private fun GenericMoveControls(gameType: GameType, enabled: Boolean, onMove: (Any?) -> Unit) {
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
-        GameType.MINESWEEPER -> Button(onClick = { onMove("REVEAL") }, enabled = enabled) { Text("Revelar casilla") }
-        GameType.NONOGRAM -> Button(onClick = { onMove("FILL") }, enabled = enabled) { Text("Pintar píxel") }
-        GameType.HITORI -> Button(onClick = { onMove("BLOCK") }, enabled = enabled) { Text("Apagar número") }
-        GameType.DOTS_AND_BOXES -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            listOf("top" to "Arriba", "right" to "Derecha", "bottom" to "Abajo", "left" to "Izquierda").forEach { (id, label) ->
-                OutlinedButton({ onMove(id) }, enabled = enabled, modifier = Modifier.weight(1f)) { Text(label, fontSize = 10.sp) }
-            }
-        }
+        GameType.MINESWEEPER, GameType.NONOGRAM, GameType.HITORI, GameType.DOTS_AND_BOXES -> Unit
         GameType.WORD_SEARCH -> Text("Arrastra desde la primera hasta la última letra de una palabra.")
         GameType.CROSSWORD -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(text, { text = it.uppercase().take(1) }, label = { Text("Letra") }, modifier = Modifier.weight(1f))
@@ -246,7 +314,7 @@ private fun GenericMoveControls(gameType: GameType, enabled: Boolean, onMove: (A
             Button({ onMove(text); text = "" }, enabled = enabled && text.isNotBlank()) { Text("Colocar") }
         }
         else -> {
-            val maximum = if (gameType == GameType.RUMMIKUB) 13 else 9
+            val maximum = when (gameType) { GameType.RUMMIKUB -> 13; GameType.MATHDOKU -> 6; else -> 9 }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 (1..maximum).chunked(if (maximum > 9) 7 else 5).forEach { numbers ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -284,9 +352,9 @@ private fun wordAlong(state: GenericBoardState, start: CellPosition, end: CellPo
 private fun parseGenericColor(hex: String): Color = runCatching { Color(AndroidColor.parseColor(hex)) }.getOrDefault(Color.Gray)
 
 fun gameTitle(type: GameType): String = when (type) {
-    GameType.SUDOKU -> "Sudoku Arena"; GameType.MINESWEEPER -> "Buscaminas Arena"; GameType.WORD_SEARCH -> "Sopa de Letras Arena"
-    GameType.CROSSWORD -> "Crucigramas Arena"; GameType.NONOGRAM -> "Nonogram Arena"; GameType.DOTS_AND_BOXES -> "Timbiriche Arena"
-    GameType.KAKURO -> "Kakuro Arena"; GameType.MATHDOKU -> "Mathdoku Arena"; GameType.HITORI -> "Hitori Arena"; GameType.RUMMIKUB -> "Rummikub Arena"
+    GameType.SUDOKU -> "Multi Arena · Sudoku"; GameType.MINESWEEPER -> "Multi Arena · Buscaminas"; GameType.WORD_SEARCH -> "Multi Arena · Sopa de Letras"
+    GameType.CROSSWORD -> "Multi Arena · Crucigramas"; GameType.NONOGRAM -> "Multi Arena · Nonogram"; GameType.DOTS_AND_BOXES -> "Multi Arena · Timbiriche"
+    GameType.KAKURO -> "Multi Arena · Kakuro"; GameType.MATHDOKU -> "Multi Arena · Mathdoku"; GameType.HITORI -> "Multi Arena · Hitori"; GameType.RUMMIKUB -> "Multi Arena · Rummikub"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

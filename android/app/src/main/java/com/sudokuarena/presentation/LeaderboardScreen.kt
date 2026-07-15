@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -33,24 +35,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.sudokuarena.domain.GlobalLeaderboards
+import com.sudokuarena.domain.GameLeaderboards
+import com.sudokuarena.domain.GameType
 import com.sudokuarena.domain.LeaderboardRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeaderboardBottomSheet(
     repository: LeaderboardRepository,
+    initialGameType: GameType,
     onDismiss: () -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    var data by remember { mutableStateOf<GlobalLeaderboards?>(null) }
+    var selectedGame by remember { mutableStateOf(initialGameType) }
+    var data by remember { mutableStateOf<GameLeaderboards?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(reloadKey) {
+    LaunchedEffect(reloadKey, selectedGame) {
         data = null
         error = null
-        runCatching { repository.loadTopTen() }
+        runCatching { repository.loadGameTopTen(selectedGame) }
             .onSuccess { data = it }
             .onFailure { error = "No se pudo cargar el Cuadro de Honor" }
     }
@@ -62,22 +67,36 @@ fun LeaderboardBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("CUADRO DE HONOR", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text("Clasificación independiente para cada arena")
             Spacer(Modifier.height(12.dp))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                GameType.entries.chunked(2).forEach { games ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        games.forEach { game ->
+                            Button(onClick = { selectedGame = game }, modifier = Modifier.weight(1f)) {
+                                Text(if (selectedGame == game) "● ${shortGameTitle(game)}" else shortGameTitle(game))
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
             TabRow(selectedTabIndex = selectedTab, containerColor = ArenaColors.Surface) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Solitario ⏱") })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Multijugador 🏆") })
+                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Mejor tiempo ⏱") })
+                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Mayor puntaje 🏆") })
             }
             Spacer(Modifier.height(12.dp))
             when {
                 data != null -> {
                     val rows = if (selectedTab == 0) {
-                        data!!.solo.map { HonorRow(it.rank, it.nickname, formatHonorTime(it.bestTimeMs)) }
+                        data!!.time.map { HonorRow(it.rank, it.nickname, formatHonorTime(it.bestTimeMs ?: 0)) }
                     } else {
-                        data!!.multiplayer.map { HonorRow(it.rank, it.nickname, "${it.wins} victorias") }
+                        data!!.score.map { HonorRow(it.rank, it.nickname, "${it.bestScore ?: 0} pts · ${it.wins} V") }
                     }
                     if (rows.isEmpty()) {
                         Text("Aún no hay campeones. ¡Sé el primero!", modifier = Modifier.padding(30.dp))
@@ -100,6 +119,12 @@ fun LeaderboardBottomSheet(
             }
         }
     }
+}
+
+private fun shortGameTitle(type: GameType): String = when (type) {
+    GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa"
+    GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
+    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
 }
 
 private data class HonorRow(val rank: Int, val nickname: String, val value: String)

@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.MatchResultEntry
+import com.sudokuarena.domain.GameType
 import com.sudokuarena.domain.TeamMode
 import kotlinx.coroutines.delay
 
@@ -59,7 +60,7 @@ fun MatchResultsOverlay(
             MatchResultEntry(
                 rank = 1,
                 playerId = "solo",
-                name = if (state.soloNewRecord) "¡Nuevo récord!" else "Sudoku completado",
+                name = if (state.soloNewRecord) "¡Nuevo récord!" else "${gameName(state.gameType)} completado",
                 score = state.ownPlayer?.score ?: 0,
                 teamId = "solo",
                 teamScore = state.ownPlayer?.score ?: 0,
@@ -83,7 +84,7 @@ fun MatchResultsOverlay(
             verticalArrangement = Arrangement.Center,
         ) {
             Text(
-                if (state.isSoloMode) "SUDOKU COMPLETADO" else "RESULTADOS DE LA ARENA",
+                if (state.isSoloMode) "${gameName(state.gameType).uppercase()} COMPLETADO" else "RESULTADOS DE MULTI ARENA",
                 color = Color.White,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Black,
@@ -106,7 +107,7 @@ fun MatchResultsOverlay(
                 AnimatedResultCard(
                     result = result,
                     index = index,
-                    showTeamScore = !state.isSoloMode && state.roomState?.config?.teamMode != TeamMode.FFA,
+                    showTeamScore = !state.isSoloMode && state.roomState?.config?.teamMode !in setOf(TeamMode.FFA, TeamMode.DUEL),
                 )
                 Spacer(Modifier.height(8.dp))
             }
@@ -193,4 +194,17 @@ private fun rankMedal(rank: Int): String = when (rank) {
 private fun formatResultDuration(milliseconds: Long): String {
     val seconds = (milliseconds / 1_000).coerceAtLeast(0)
     return "%02d:%02d".format(seconds / 60, seconds % 60)
+}
+
+private fun gameName(gameType: GameType): String = when (gameType) {
+    GameType.SUDOKU -> "Sudoku"
+    GameType.MINESWEEPER -> "Buscaminas"
+    GameType.WORD_SEARCH -> "Sopa de Letras"
+    GameType.CROSSWORD -> "Crucigrama"
+    GameType.NONOGRAM -> "Nonogram"
+    GameType.DOTS_AND_BOXES -> "Timbiriche"
+    GameType.KAKURO -> "Kakuro"
+    GameType.MATHDOKU -> "Mathdoku"
+    GameType.HITORI -> "Hitori"
+    GameType.RUMMIKUB -> "Rummikub"
 }

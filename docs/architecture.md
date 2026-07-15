@@ -2,18 +2,17 @@
 
 ## Modos de juego
 
-- **Solitario:** `RandomSudokuGenerator` crea una solución y 45 casillas vacías
-  dentro de Android. `ArenaViewModel` valida localmente, aplica el bloqueo de 3
-  segundos y persiste nickname/récord mediante `PlayerRecordStore`. No se crea
-  `SocketGameClient`.
+- **Solitario:** Sudoku usa `RandomSudokuGenerator`; los otros nueve juegos usan
+  `LocalPuzzleEngine`. Todo se valida dentro de Android, aplica su penalización
+  local y persiste tiempo/puntaje por juego mediante `PlayerRecordStore`. No se
+  crea `SocketGameClient`. La pausa detiene el cronómetro y difumina el tablero.
 - **Multijugador:** Android conecta Socket.IO y solicita crear o unirse a una
   sala. Cada sala contiene su propio `ArenaGame`, solución, jugadores, clima y
   temporizadores; ningún evento se transmite a otras salas.
 
 La configuración online acepta `gameType`: `SUDOKU`, `MINESWEEPER`,
 `WORD_SEARCH`, `CROSSWORD`, `NONOGRAM`, `DOTS_AND_BOXES`, `KAKURO`,
-`MATHDOKU`, `HITORI` o `RUMMIKUB`. El modo Solitario permanece disponible para
-Sudoku; las otras arenas son competitivas y autoritativas en esta versión.
+`MATHDOKU`, `HITORI` o `RUMMIKUB`. Todos cuentan con práctica solitaria offline.
 
 ## Motor matricial genérico
 
@@ -58,11 +57,15 @@ Cada sala publica además este estado de lobby/partida:
   "startedAt": 1783915200000,
   "endsAt": 1783915380000,
   "suddenDeath": false,
-  "rematchVotes": 0
+  "rematchVotes": 0,
+  "pauseRequesterId": null,
+  "pauseVotes": 0,
+  "pauseRequired": 2,
+  "resumeCountdownEndsAt": null
 }
 ```
 
-Modos: `FFA`, `TWO_V_TWO` y `THREE_V_ONE`. En 3v1 el Host es Jefe; sus
+Modos: `DUEL`, `TWO_V_ONE`, `FFA`, `TWO_V_TWO` y `THREE_V_ONE`. En 2v1/3v1 el Host es Jefe; sus
 aciertos base y carga de energía tienen multiplicador x2. El equipo de tres
 comparte `teamScore`. En 2v2 ambos integrantes también reciben el mismo total de
 equipo y las celdas publican `ownerTeamId` para compartir color/progreso.
@@ -119,6 +122,9 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Cliente → servidor | `room:start` | sin payload; sólo Host |
 | Cliente → servidor | `player:loadout` | `{ powers: ["FOG", "REVEAL"] }`; exactamente dos |
 | Cliente → servidor | `room:rematch` | voto de revancha al finalizar |
+| Cliente → servidor | `pause:request` | solicita pausa consensuada |
+| Cliente → servidor | `pause:respond` | `{ accepted }` |
+| Solicitante → servidor | `pause:resume` | inicia cuenta regresiva de 3 segundos |
 | Servidor → cliente | `room:joined` | `{ roomCode }` |
 | Servidor → sala | `room:state` | configuración, fase y tiempos |
 | Servidor → cliente | `room:error` | `{ code, message }` |
@@ -143,6 +149,7 @@ cliente calcule la cuenta regresiva usando el reloj del servidor.
 | Servidor → sala | `game:started` | `{ startedAt, endsAt }` |
 | Servidor → sala | `game:sudden-death` | `{ endsAt }`; la próxima jugada correcta gana |
 | Servidor → sala | `game:finished` | `{ results, finishedAt }` |
+| Servidor → sala | `pause:requested` / `pause:started` / `pause:resuming` / `pause:ended` | ciclo autoritativo de pausa |
 
 Emojis admitidos: `LAUGH`, `CRY`, `ANGRY` y `SURPRISED`. El servidor limita las
 reacciones a una cada 500 ms por conexión.
@@ -176,8 +183,8 @@ bonificación dentro de cada sala.
 
 ### Bots autoritativos
 
-- En FFA, el primer `fill_with_ai` con un solo humano crea un duelo 1v1; una
-  segunda pulsación puede completar cuatro. En 2v2 y 3v1 completa cuatro slots.
+- `fill_with_ai` completa exactamente 2 slots en 1v1, 3 en 2v1 y 4 en 2v2/3v1;
+  en FFA completa los espacios libres.
 - `EASY`, `MEDIUM` y `HARD` controlan el intervalo y la probabilidad de acierto.
 - Cada Bot tiene una personalidad visible: `CALCULATOR` prioriza precisión,
   `TRICKSTER` juega rápido y usa Niebla, y `GUARDIAN` anticipa Escudos.
@@ -185,6 +192,8 @@ bonificación dentro de cada sala.
   las mismas carreras, puntos, energía, error y bloqueo que para un socket humano.
 - Activa Escudo si detecta un rival con energía completa y usa Ojo de Lince tras
   dos intentos fallidos o siete segundos sin progreso.
+- Niebla tiene espera inicial de 25–45 segundos, una probabilidad baja por turno
+  y un enfriamiento de 40–65 segundos después de cada ataque.
 - Tres humanos en 3v1 reciben un Jefe IA. Con un humano, éste es Jefe contra tres
   Bots. Las victorias de Bots no se registran en el Cuadro de Honor.
 
@@ -199,16 +208,16 @@ consumen un token de desafío de un solo uso emitido al iniciar la partida.
 ## Responsabilidades Android
 
 - `SocketGameClient`: traduce JSON a eventos de dominio.
-- `ArenaViewModel`: recibe `isSoloMode`; usa `SudokuGenerator`/`PlayerRecordStore`
+- `ArenaViewModel`: recibe `isSoloMode`; usa `SudokuGenerator`/`LocalPuzzleEngine`/`PlayerRecordStore`
   en local o `GameRealtimeGateway` online, sin depender de APIs Android.
 - `WelcomeScreen`: guarda nickname y bifurca entre Solitario, Crear Sala y
   Unirse a Sala.
-- `SplashScreen`/`ArenaLogo`: Splash Art bitmap animado e identidad Canvas auxiliar.
+- `SplashScreen`/`ArenaLogo`: nueva identidad Multi Arena para los diez puzzles.
 - `RoomLobbyScreen`: configuración sincronizada y editable sólo por el Host.
 - `MatchResultsOverlay`: confeti Canvas y tarjetas escalonadas de clasificación.
 - `HapticFeedbackController`: usa `VibratorManager`/`Vibrator` según la versión.
 - `ArenaScreen`: dibuja oro y clima, anima la limpieza, muestra reacciones y
   captura swipes rápidos del overlay de niebla.
-- `ArenaTutorialOverlay`: onboarding paginado que sólo aparece la primera vez.
+- `ArenaTutorialOverlay`: onboarding paginado independiente para cada juego.
 - `PlayerPreferences`: nickname, récord, identidad de reconexión, XP, tutorial y
   marca del reto diario.

@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TileType
+import com.sudokuarena.domain.GameType
 
 /** Mapeo visual estable: el índice 0 representa el valor Sudoku 1 y así hasta 9. */
 object SudokuTilePalette {
@@ -43,6 +44,7 @@ object SudokuTilePalette {
 
 @Composable
 fun SoloSetupScreen(
+    gameType: GameType,
     isColorMode: Boolean,
     onColorModeChanged: (Boolean) -> Unit,
     onStart: () -> Unit,
@@ -56,15 +58,17 @@ fun SoloSetupScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text("PARTIDA SOLITARIO", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Elige cómo representar las nueve fichas", modifier = Modifier.padding(vertical = 14.dp))
-            Card(Modifier.fillMaxWidth()) {
-                TileTypeSelector(
-                    selected = if (isColorMode) TileType.COLORS else TileType.NUMBERS,
-                    enabled = true,
-                    onSelected = { onColorModeChanged(it == TileType.COLORS) },
-                    modifier = Modifier.padding(16.dp),
-                )
+            Text("${gameTitle(gameType).uppercase()} · SOLITARIO", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text("La partida se ejecuta localmente y puede pausarse.", modifier = Modifier.padding(vertical = 14.dp))
+            if (gameType == GameType.SUDOKU) {
+                Card(Modifier.fillMaxWidth()) {
+                    TileTypeSelector(
+                        selected = if (isColorMode) TileType.COLORS else TileType.NUMBERS,
+                        enabled = true,
+                        onSelected = { onColorModeChanged(it == TileType.COLORS) },
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
             }
             Button(onClick = onStart, modifier = Modifier.fillMaxWidth().padding(top = 18.dp)) {
                 Text("Comenzar")

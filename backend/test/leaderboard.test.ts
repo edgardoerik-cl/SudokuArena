@@ -31,4 +31,26 @@ describe("LeaderboardStore", () => {
       ["Ada", 1]
     ]);
   });
+
+  it("mantiene tiempo y puntaje independientes para cada juego", async () => {
+    const store = new LeaderboardStore(file);
+    await store.recordGame("MINESWEEPER", "Ada", 80_000, 120, true);
+    await store.recordGame("MINESWEEPER", "Ada", 95_000, 180, false);
+    await store.recordGame("KAKURO", "Ada", 70_000, 90, true);
+    await store.recordGame("MINESWEEPER", "Linus", 75_000, 100, false);
+
+    const mines = await store.topGame("MINESWEEPER");
+    assert.deepEqual(mines.time.map((entry) => [entry.nickname, entry.bestTimeMs]), [
+      ["Linus", 75_000],
+      ["Ada", 80_000]
+    ]);
+    assert.deepEqual(mines.score.map((entry) => [entry.nickname, entry.bestScore]), [
+      ["Ada", 180],
+      ["Linus", 100]
+    ]);
+
+    const kakuro = await store.topGame("KAKURO");
+    assert.equal(kakuro.time.length, 1);
+    assert.equal(kakuro.time[0]?.bestTimeMs, 70_000);
+  });
 });

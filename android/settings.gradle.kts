@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SudokuArena"
+rootProject.name = "MultiArena"
 include(":app")

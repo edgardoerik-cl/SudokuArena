@@ -31,6 +31,7 @@ class SocketGameClient(
     serverUrl: String,
     playerName: String,
     clientId: String,
+    avatarId: String,
 ) : GameRealtimeGateway {
     private val mutableEvents = MutableSharedFlow<RealtimeEvent>(
         extraBufferCapacity = 64,
@@ -46,7 +47,7 @@ class SocketGameClient(
             .setReconnectionAttempts(10)
             .setReconnectionDelay(1_000)
             .setReconnectionDelayMax(5_000)
-            .setAuth(mapOf("name" to playerName, "clientId" to clientId))
+            .setAuth(mapOf("name" to playerName, "clientId" to clientId, "avatarId" to avatarId))
             .build(),
     )
 
@@ -283,6 +284,14 @@ class SocketGameClient(
         socket.emit("send_reaction", JSONObject().put("emojiId", emojiId))
     }
 
+    override fun requestPause() { socket.emit("pause:request") }
+
+    override fun respondPause(accepted: Boolean) {
+        socket.emit("pause:respond", JSONObject().put("accepted", accepted))
+    }
+
+    override fun resumePausedGame() { socket.emit("pause:resume") }
+
     private fun parseSafely(args: Array<out Any>, parser: (JSONObject) -> RealtimeEvent) {
         runCatching { parser(args.first() as JSONObject) }
             .onSuccess(::emit)
@@ -333,6 +342,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             botPersona = player.optString("botPersona").takeIf(String::isNotBlank),
             powerLoadout = player.optJSONArray("powerLoadout")?.mapObjects { it.toString() }
                 ?: listOf("FOG", "REVEAL"),
+            avatarId = player.optString("avatarId", "ORBIT"),
         )
     }
     return GameSnapshot(
@@ -368,6 +378,10 @@ private fun parseRoomState(json: JSONObject): RoomState {
         endsAt = if (json.isNull("endsAt")) null else json.getLong("endsAt"),
         suddenDeath = json.optBoolean("suddenDeath", false),
         rematchVotes = json.optInt("rematchVotes", 0),
+        pauseRequesterId = json.optString("pauseRequesterId").takeIf(String::isNotBlank),
+        pauseVotes = json.optInt("pauseVotes", 0),
+        pauseRequired = json.optInt("pauseRequired", 0),
+        resumeCountdownEndsAt = if (json.isNull("resumeCountdownEndsAt")) null else json.optLong("resumeCountdownEndsAt"),
     )
 }
 

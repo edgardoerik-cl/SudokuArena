@@ -23,6 +23,7 @@ import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
+import com.sudokuarena.data.local.LocalPuzzleEngine
 import java.util.UUID
 import java.time.LocalDate
 import kotlinx.coroutines.channels.BufferOverflow
@@ -77,20 +78,24 @@ data class ArenaUiState(
     val rematchRequested: Boolean = false,
     val genericBoard: GenericBoardState? = null,
     val explosionRemainingMs: Long = 0,
+    val activeGameType: GameType = GameType.SUDOKU,
+    val isLocallyPaused: Boolean = false,
+    val resumeCountdownMs: Long = 0,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
             pendingRequestId == null && penaltyRemainingMs == 0L &&
-            fogSwipesRemaining == 0 && !soloCompleted
+            fogSwipesRemaining == 0 && !soloCompleted && !isLocallyPaused && roomState?.phase != RoomPhase.PAUSED
 
     val ownPlayer: Player?
         get() = players.firstOrNull { it.id == playerId }
 
     val level: Int get() = totalXp / 500 + 1
-    val gameType: GameType get() = roomState?.config?.gameType ?: GameType.SUDOKU
+    val gameType: GameType get() = roomState?.config?.gameType ?: activeGameType
     val canMakeGenericMove: Boolean
         get() = connected && gameType != GameType.SUDOKU && selected != null &&
-            penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null
+            penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null &&
+            !soloCompleted && !isLocallyPaused && roomState?.phase != RoomPhase.PAUSED
 }
 
 class ArenaViewModel(
@@ -109,10 +114,11 @@ class ArenaViewModel(
         ArenaUiState(
             isSoloMode = isSoloMode,
             isColorMode = isSoloMode && initialColorMode,
-            soloBestMs = recordStore.soloBestMs(),
-            showTutorial = !recordStore.tutorialCompleted(),
+            soloBestMs = recordStore.soloBestMs(initialGameType),
+            showTutorial = !recordStore.tutorialCompleted(initialGameType),
             isDailyChallenge = isDailyChallenge,
             totalXp = recordStore.totalXp(),
+            activeGameType = initialGameType,
         ),
     )
     val state: StateFlow<ArenaUiState> = mutableState.asStateFlow()
@@ -133,6 +139,9 @@ class ArenaViewModel(
     private var soloChallengeToken: String? = null
     private var explosionUntil = 0L
     private var initialGameConfigured = false
+    private var localPuzzleEngine: LocalPuzzleEngine? = null
+    private var soloPausedAt = 0L
+    private var soloPausedAccumulatedMs = 0L
 
     init {
         if (isSoloMode) {
@@ -156,9 +165,11 @@ class ArenaViewModel(
                             ?.let { (it - now).coerceAtLeast(0) }
                             ?: 0,
                         soloElapsedMs = if (current.isSoloMode && !current.soloCompleted) {
-                            (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
+                            val currentPause = if (current.isLocallyPaused) System.currentTimeMillis() - soloPausedAt else 0L
+                            (System.currentTimeMillis() - soloStartedAt - soloPausedAccumulatedMs - currentPause).coerceAtLeast(0)
                         } else current.soloElapsedMs,
                         explosionRemainingMs = (explosionUntil - System.currentTimeMillis()).coerceAtLeast(0),
+                        resumeCountdownMs = current.roomState?.resumeCountdownEndsAt?.let { (it - now).coerceAtLeast(0) } ?: 0L,
                     )
                 }
                 delay(100)
@@ -195,7 +206,7 @@ class ArenaViewModel(
     }
 
     fun completeTutorial() {
-        recordStore.markTutorialCompleted()
+        recordStore.markTutorialCompleted(initialGameType)
         mutableState.update { it.copy(showTutorial = false) }
     }
 
@@ -245,7 +256,7 @@ class ArenaViewModel(
     fun selectGeneric(row: Int, column: Int) {
         val current = mutableState.value
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (!cell.isBlocked && (cell.ownerId == null || current.gameType == GameType.RUMMIKUB) && current.penaltyRemainingMs == 0L && current.fogSwipesRemaining == 0) {
+        if (!cell.isBlocked && cell.ownerId == null && current.penaltyRemainingMs == 0L && current.fogSwipesRemaining == 0) {
             mutableState.update { it.copy(selected = CellPosition(row, column), message = null) }
         }
     }
@@ -254,6 +265,39 @@ class ArenaViewModel(
         val current = mutableState.value
         val selected = current.selected ?: return
         if (!current.canMakeGenericMove) return
+        submitGenericMove(selected, value)
+    }
+
+    fun makeGenericMoveAt(row: Int, column: Int, value: Any?) {
+        val current = mutableState.value
+        if (current.penaltyRemainingMs > 0 || current.fogSwipesRemaining > 0 || current.soloCompleted || current.isLocallyPaused || current.roomState?.phase == RoomPhase.PAUSED) return
+        val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
+        if (cell.isBlocked || cell.ownerId != null) return
+        submitGenericMove(CellPosition(row, column), value)
+    }
+
+    private fun submitGenericMove(selected: CellPosition, value: Any?) {
+        if (isSoloMode) {
+            val result = localPuzzleEngine?.move(selected.row, selected.column, value) ?: return
+            if (!result.accepted && result.penaltyMs > 0) {
+                blockedUntil = System.currentTimeMillis() + result.penaltyMs
+                if (result.hitMine) explosionUntil = System.currentTimeMillis() + 900L
+                mutableHaptics.tryEmit(HapticCue.DANGER)
+            } else if (result.accepted) mutableHaptics.tryEmit(HapticCue.CLICK)
+            mutableState.update { current ->
+                val score = (current.ownPlayer?.score ?: 0) + result.points
+                current.copy(
+                    genericBoard = result.state,
+                    revision = result.state.revision,
+                    players = listOf(soloPlayer(score)),
+                    selected = null,
+                    soloErrors = current.soloErrors + if (!result.accepted && result.penaltyMs > 0) 1 else 0,
+                    message = result.message,
+                )
+            }
+            if (result.state.completed) finishSoloGame()
+            return
+        }
         val requestId = UUID.randomUUID().toString()
         mutableState.update { it.copy(pendingRequestId = requestId, message = null) }
         gateway?.makeMove(requestId, selected.row, selected.column, value)
@@ -268,6 +312,30 @@ class ArenaViewModel(
 
     fun fillWithAi() {
         if (!isSoloMode) gateway?.fillWithAi()
+    }
+
+    fun requestPause() {
+        if (isSoloMode) {
+            toggleSoloPause()
+        } else gateway?.requestPause()
+    }
+
+    fun respondPause(accepted: Boolean) {
+        if (!isSoloMode) gateway?.respondPause(accepted)
+    }
+
+    fun resumePausedGame() {
+        if (isSoloMode) toggleSoloPause() else gateway?.resumePausedGame()
+    }
+
+    private fun toggleSoloPause() {
+        val current = mutableState.value
+        if (current.soloCompleted) return
+        if (current.isLocallyPaused) {
+            soloPausedAccumulatedMs += System.currentTimeMillis() - soloPausedAt
+            soloPausedAt = 0L
+        } else soloPausedAt = System.currentTimeMillis()
+        mutableState.update { it.copy(isLocallyPaused = !current.isLocallyPaused, selected = null) }
     }
 
     fun startOnlineMatch() {
@@ -326,15 +394,18 @@ class ArenaViewModel(
         viewModelScope.launch {
             soloChallengeToken = runCatching { leaderboardRepository.beginSoloChallenge() }.getOrNull()
         }
-        soloPuzzle = sudokuGenerator.generate(if (isDailyChallenge) LocalDate.now().toEpochDay() else null)
+        soloPuzzle = if (initialGameType == GameType.SUDOKU) sudokuGenerator.generate(if (isDailyChallenge) LocalDate.now().toEpochDay() else null) else null
+        localPuzzleEngine = if (initialGameType == GameType.SUDOKU) null else LocalPuzzleEngine(initialGameType)
         soloStartedAt = System.currentTimeMillis()
+        soloPausedAt = 0L
+        soloPausedAccumulatedMs = 0L
         blockedUntil = 0
         nearCompletionKeys = emptySet()
-        val board = soloPuzzle!!.initialBoard.map { row ->
+        val board = soloPuzzle?.initialBoard?.map { row ->
             row.map { value ->
                 BoardCell(value = value, ownerId = null, given = value != null)
             }
-        }
+        } ?: emptyBoard()
         mutableState.value = ArenaUiState(
             isSoloMode = true,
             isColorMode = initialColorMode,
@@ -343,10 +414,12 @@ class ArenaViewModel(
             playerId = SOLO_PLAYER_ID,
             board = board,
             players = listOf(soloPlayer(score = 0)),
-            soloBestMs = recordStore.soloBestMs(),
+            soloBestMs = recordStore.soloBestMs(initialGameType),
             showTutorial = mutableState.value.showTutorial,
             isDailyChallenge = isDailyChallenge,
             totalXp = recordStore.totalXp(),
+            activeGameType = initialGameType,
+            genericBoard = localPuzzleEngine?.snapshot(),
         )
     }
 
@@ -385,15 +458,17 @@ class ArenaViewModel(
     }
 
     private fun finishSoloGame() {
-        val elapsed = (System.currentTimeMillis() - soloStartedAt).coerceAtLeast(0)
-        val newRecord = recordStore.recordSoloTime(elapsed)
+        val elapsed = mutableState.value.soloElapsedMs
+        val score = mutableState.value.ownPlayer?.score ?: 0
+        val newRecord = recordStore.recordSoloTime(initialGameType, elapsed)
+        recordStore.recordSoloScore(initialGameType, score)
         val dailyBonus = isDailyChallenge && recordStore.markDailyCompleted(LocalDate.now().toString())
         recordStore.addXp(100 + if (dailyBonus) 250 else 0)
         mutableState.update {
             it.copy(
                 soloCompleted = true,
                 soloElapsedMs = elapsed,
-                soloBestMs = recordStore.soloBestMs(),
+                soloBestMs = recordStore.soloBestMs(initialGameType),
                 soloNewRecord = newRecord,
                 selected = null,
                 totalXp = recordStore.totalXp(),
@@ -402,7 +477,7 @@ class ArenaViewModel(
         }
         viewModelScope.launch {
             soloChallengeToken?.let { token ->
-                runCatching { leaderboardRepository.submitSoloRecord(playerName, elapsed, token) }
+                runCatching { leaderboardRepository.submitSoloRecord(playerName, initialGameType, elapsed, score, token) }
             }
         }
     }

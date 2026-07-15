@@ -71,6 +71,8 @@ describe("matchmaking por salas", () => {
     const response = await fetch(`${url}/api/leaderboards`);
     const top = await response.json() as { solo: Array<{ rank: number; nickname: string; bestTimeMs: number }> };
     assert.deepEqual(top.solo[0], { rank: 1, nickname: "Speedy", bestTimeMs: 110_000 });
+    const perGame = await fetch(`${url}/api/leaderboards/game?gameType=SUDOKU`).then((value) => value.json()) as { time: Array<{ nickname: string }> };
+    assert.equal(perGame.time[0]?.nickname, "Speedy");
   });
 
   it("crea códigos de cuatro dígitos y aísla eventos entre salas", async () => {
@@ -198,6 +200,33 @@ describe("matchmaking por salas", () => {
     const result = await accepted;
     assert.equal(result.accepted, true);
     assert.equal(result.points, 10);
+  });
+
+  it("pausa por consenso y reanuda con cuenta regresiva", async () => {
+    const host = await connect("PausaHost", `pause-host-${port}`);
+    const joined = nextEvent<any>(host, "game:joined");
+    host.emit("room:create");
+    const room = await joined;
+    const guest = await connect("PausaGuest", `pause-guest-${port}`);
+    const guestJoined = nextEvent<any>(guest, "game:joined");
+    guest.emit("room:join", { roomCode: room.roomCode });
+    await guestJoined;
+    host.emit("room:start");
+    await nextEvent(host, "game:started");
+
+    const requested = nextEvent<any>(guest, "pause:requested");
+    host.emit("pause:request");
+    assert.equal((await requested).requesterId, room.playerId);
+    const paused = nextMatchingEvent<any>(host, "room:state", (state) => state.phase === "PAUSED");
+    guest.emit("pause:respond", { accepted: true });
+    const pausedState = await paused;
+    assert.equal(pausedState.pauseVotes, 2);
+
+    const countdown = nextEvent<any>(guest, "pause:resuming");
+    host.emit("pause:resume");
+    assert.ok((await countdown).endsAt > Date.now());
+    const resumed = await nextMatchingEvent<any>(guest, "room:state", (state) => state.phase === "PLAYING", 5_000);
+    assert.ok(resumed.endsAt > Date.now());
   });
 });
 

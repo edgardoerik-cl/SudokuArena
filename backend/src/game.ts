@@ -92,7 +92,7 @@ export class ArenaGame {
     return player !== undefined && player.blockedUntil <= now;
   }
 
-  addPlayer(id: string, rawName: string, isBot = false): PlayerState | null {
+  addPlayer(id: string, rawName: string, isBot = false, avatarId = "ORBIT"): PlayerState | null {
     if (this.players.size >= MAX_PLAYERS) return null;
 
     const usedSlots = new Set([...this.players.values()].map((player) => player.slot));
@@ -114,7 +114,8 @@ export class ArenaGame {
       maxCombo: 0,
       comboMultiplier: 1,
       botPersona: isBot ? botPersonaForSlot(slot) : null,
-      powerLoadout: defaultLoadout(isBot ? botPersonaForSlot(slot) : null)
+      powerLoadout: defaultLoadout(isBot ? botPersonaForSlot(slot) : null),
+      avatarId: isBot ? botAvatarForSlot(slot) : sanitizeAvatar(avatarId)
     };
     this.players.set(id, player);
     this.processedRequests.set(id, new Set());
@@ -305,7 +306,7 @@ export class ArenaGame {
     if (targetPlayerId === playerId) return powerReject("SELF_TARGET", "No puedes atacarte a ti mismo");
     const target = this.players.get(targetPlayerId);
     if (!target) return powerReject("TARGET_NOT_FOUND", "El rival ya no está conectado");
-    if (this.configuration.teamMode !== "FFA" && target.teamId === player.teamId) {
+    if (!["FFA", "DUEL"].includes(this.configuration.teamMode) && target.teamId === player.teamId) {
       return powerReject("SAME_TEAM", "No puedes atacar a un compañero");
     }
     if (player.energy < FOG_POWER_COST) {
@@ -637,12 +638,22 @@ function teamAssignment(
   if (mode === "TWO_V_TWO") {
     return { teamId: player.slot % 2 === 0 ? "TEAM_A" : "TEAM_B", role: "TEAMMATE" };
   }
-  if (mode === "THREE_V_ONE") {
+  if (mode === "THREE_V_ONE" || mode === "TWO_V_ONE") {
     return player.id === hostPlayerId
       ? { teamId: "BOSS", role: "BOSS" }
       : { teamId: "RAIDERS", role: "RAIDER" };
   }
   return { teamId: `PLAYER:${player.id}`, role: "PLAYER" };
+}
+
+function botAvatarForSlot(slot: number): string {
+  return ["ROBOT", "BRAIN", "NINJA", "ASTRO"][slot % 4]!;
+}
+
+function sanitizeAvatar(value: string): string {
+  return ["ORBIT", "NOVA", "PIXEL", "NINJA", "ASTRO", "BRAIN", "ROBOT", "FOX"].includes(value)
+    ? value
+    : "ORBIT";
 }
 
 function botPersonaForSlot(slot: number): PlayerState["botPersona"] {

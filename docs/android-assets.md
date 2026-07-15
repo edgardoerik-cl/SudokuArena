@@ -11,7 +11,7 @@ android:roundIcon="@mipmap/ic_launcher"
 
 La vía recomendada es Android Studio: clic derecho sobre `app/src/main/res` →
 **New → Image Asset → Launcher Icons (Adaptive and Legacy)**. Selecciona el arte
-del escudo como foreground, usa `#0F111A` como background y conserva el nombre
+del emblema Multi Arena como foreground, usa `#0F111A` como background y conserva el nombre
 `ic_launcher`. Android Studio generará y reemplazará todas las densidades.
 
 Si se hace manualmente, coloca el icono legado `ic_launcher.png` así:
@@ -32,10 +32,10 @@ ser recortado por máscaras circulares; deja el escudo dentro del 66% central.
 
 ## Splash Art vertical
 
-El arte final se encuentra en:
+El nuevo arte de la plataforma se encuentra en:
 
 ```text
-app/src/main/res/drawable-nodpi/sudoku_arena_splash_art.png
+app/src/main/res/drawable-nodpi/multi_arena_splash_art.png
 ```
 
 `nodpi` evita que Android reescale el bitmap por densidad; Compose lo recorta con

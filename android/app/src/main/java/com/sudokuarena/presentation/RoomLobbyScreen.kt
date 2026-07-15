@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TeamMode
@@ -68,7 +69,10 @@ fun RoomLobbyScreen(
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("JUGADORES ${state.players.size}/4", style = MaterialTheme.typography.labelLarge)
                     state.players.forEach { player ->
-                        Text("• ${if (player.isBot) "🤖 " else ""}${player.name}${if (player.id == room.hostPlayerId) "  👑" else ""}")
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AvatarBadge(player.avatarId, identityColor(player.colorHex), 30.dp)
+                            Text("${if (player.isBot) "🤖 " else ""}${player.name}${if (player.id == room.hostPlayerId) "  👑" else ""}")
+                        }
                     }
                 }
             }
@@ -169,7 +173,9 @@ fun RoomLobbyScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("🤖 Llenar con IA") }
                 val validCount = when (room.config.teamMode) {
+                    TeamMode.DUEL -> state.players.size == 2
                     TeamMode.FFA -> state.players.size >= 2
+                    TeamMode.TWO_V_ONE -> state.players.size == 3
                     TeamMode.TWO_V_TWO, TeamMode.THREE_V_ONE -> state.players.size == 4
                 }
                 Button(onClick = onStart, enabled = validCount, modifier = Modifier.fillMaxWidth()) {
@@ -188,13 +194,17 @@ private fun shortGameTitle(type: GameType): String = when (type) {
 }
 
 private fun teamModeLabel(mode: TeamMode): String = when (mode) {
+    TeamMode.DUEL -> "1 vs 1 · duelo directo"
     TeamMode.FFA -> "Todos contra todos (1v1v1v1)"
+    TeamMode.TWO_V_ONE -> "2 vs 1 · equipo contra Jefe"
     TeamMode.TWO_V_TWO -> "2 vs 2 · puntaje compartido"
     TeamMode.THREE_V_ONE -> "3 vs 1 · Host como Jefe"
 }
 
 private fun playerRequirement(mode: TeamMode): String = when (mode) {
+    TeamMode.DUEL -> "Se requieren 2 jugadores"
     TeamMode.FFA -> "Esperando al menos 2 jugadores"
+    TeamMode.TWO_V_ONE -> "Se requieren 3 jugadores"
     TeamMode.TWO_V_TWO -> "Se requieren 4 jugadores"
     TeamMode.THREE_V_ONE -> "Se requieren 4 jugadores"
 }
@@ -204,3 +214,7 @@ private fun botDifficultyLabel(difficulty: BotDifficulty): String = when (diffic
     BotDifficulty.MEDIUM -> "Media"
     BotDifficulty.HARD -> "Difícil"
 }
+
+private fun identityColor(hex: String): Color = runCatching {
+    Color(android.graphics.Color.parseColor(hex))
+}.getOrDefault(ArenaColors.ElectricBlue)

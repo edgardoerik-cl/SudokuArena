@@ -66,7 +66,7 @@ export class GenericPuzzleEngine {
     requests.add(move.requestId);
 
     const cell = this.board[move.row]![move.col]!;
-    if (cell.isBlocked || (cell.ownerId !== null && this.gameType !== "RUMMIKUB")) {
+    if (cell.isBlocked || cell.ownerId !== null) {
       return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
     }
 
@@ -173,6 +173,7 @@ export class GenericPuzzleEngine {
       if (mine) {
         cell.value = "MINE";
         cell.isRevealed = true;
+        cell.isBlocked = true;
         return { correct: false, hitMine: true };
       }
       cell.value = this.adjacentMineCount(move.row, move.col);
@@ -199,10 +200,12 @@ export class GenericPuzzleEngine {
       const side = String(move.val ?? "").toLowerCase();
       if (!["top", "right", "bottom", "left"].includes(side) || cell.meta[side] === true) return { correct: false };
       cell.meta[side] = true;
-      this.mirrorDotsEdge(move.row, move.col, side);
+      const neighbour = this.mirrorDotsEdge(move.row, move.col, side);
       const closed = ["top", "right", "bottom", "left"].every((edge) => cell.meta[edge] === true);
       if (closed) { cell.ownerId = playerId; cell.isRevealed = true; }
-      return { correct: true, points: closed ? 50 : 5 };
+      const neighbourClosed = neighbour !== null && ["top", "right", "bottom", "left"].every((edge) => neighbour.meta[edge] === true);
+      if (neighbourClosed && neighbour) { neighbour.ownerId = playerId; neighbour.isRevealed = true; }
+      return { correct: true, points: (closed ? 50 : 0) + (neighbourClosed ? 50 : 0) || 5 };
     }
 
     if (this.gameType === "RUMMIKUB") {
@@ -283,13 +286,14 @@ export class GenericPuzzleEngine {
     return count;
   }
 
-  private mirrorDotsEdge(row: number, col: number, side: string): void {
+  private mirrorDotsEdge(row: number, col: number, side: string): GenericCell | null {
     const neighbour = side === "top" ? { row: row - 1, col, edge: "bottom" }
       : side === "right" ? { row, col: col + 1, edge: "left" }
         : side === "bottom" ? { row: row + 1, col, edge: "top" }
           : { row, col: col - 1, edge: "right" };
     const adjacent = this.board[neighbour.row]?.[neighbour.col];
     if (adjacent) adjacent.meta[neighbour.edge] = true;
+    return adjacent ?? null;
   }
 
   private isPuzzleComplete(): boolean {

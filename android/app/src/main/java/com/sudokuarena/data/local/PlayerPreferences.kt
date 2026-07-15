@@ -18,20 +18,34 @@ class PlayerPreferences(context: Context) : PlayerRecordStore {
         return UUID.randomUUID().toString().also { preferences.edit().putString(KEY_CLIENT_ID, it).apply() }
     }
 
-    override fun soloBestMs(): Long = preferences.getLong(KEY_SOLO_BEST_MS, 0L)
+    fun avatarId(): String = preferences.getString(KEY_AVATAR, "ORBIT") ?: "ORBIT"
+
+    fun saveAvatarId(avatarId: String) {
+        if (avatarId in AVATARS) preferences.edit().putString(KEY_AVATAR, avatarId).apply()
+    }
+
+    override fun soloBestMs(gameType: com.sudokuarena.domain.GameType): Long = preferences.getLong("${KEY_SOLO_BEST_MS}_${gameType.name}", preferences.getLong(KEY_SOLO_BEST_MS, 0L).takeIf { gameType == com.sudokuarena.domain.GameType.SUDOKU } ?: 0L)
 
     /** Devuelve true si el tiempo se convirtió en el nuevo récord. */
-    override fun recordSoloTime(elapsedMs: Long): Boolean {
-        val previous = soloBestMs()
+    override fun recordSoloTime(gameType: com.sudokuarena.domain.GameType, elapsedMs: Long): Boolean {
+        val previous = soloBestMs(gameType)
         val isRecord = previous == 0L || elapsedMs < previous
-        if (isRecord) preferences.edit().putLong(KEY_SOLO_BEST_MS, elapsedMs).apply()
+        if (isRecord) preferences.edit().putLong("${KEY_SOLO_BEST_MS}_${gameType.name}", elapsedMs).apply()
         return isRecord
     }
 
-    override fun tutorialCompleted(): Boolean = preferences.getBoolean(KEY_TUTORIAL, false)
+    override fun soloBestScore(gameType: com.sudokuarena.domain.GameType): Int = preferences.getInt("solo_best_score_${gameType.name}", 0)
 
-    override fun markTutorialCompleted() {
-        preferences.edit().putBoolean(KEY_TUTORIAL, true).apply()
+    override fun recordSoloScore(gameType: com.sudokuarena.domain.GameType, score: Int): Boolean {
+        val record = score > soloBestScore(gameType)
+        if (record) preferences.edit().putInt("solo_best_score_${gameType.name}", score).apply()
+        return record
+    }
+
+    override fun tutorialCompleted(gameType: com.sudokuarena.domain.GameType): Boolean = preferences.getBoolean("${KEY_TUTORIAL}_${gameType.name}", false)
+
+    override fun markTutorialCompleted(gameType: com.sudokuarena.domain.GameType) {
+        preferences.edit().putBoolean("${KEY_TUTORIAL}_${gameType.name}", true).apply()
     }
 
     override fun totalXp(): Int = preferences.getInt(KEY_XP, 0)
@@ -53,5 +67,7 @@ class PlayerPreferences(context: Context) : PlayerRecordStore {
         const val KEY_XP = "total_xp"
         const val KEY_DAILY = "daily_completed"
         const val KEY_CLIENT_ID = "client_id"
+        const val KEY_AVATAR = "avatar_id"
+        val AVATARS = setOf("ORBIT", "NOVA", "PIXEL", "NINJA", "ASTRO", "BRAIN", "ROBOT", "FOX")
     }
 }

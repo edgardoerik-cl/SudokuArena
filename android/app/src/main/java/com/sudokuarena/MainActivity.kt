@@ -26,9 +26,9 @@ import com.sudokuarena.presentation.ArenaRoute
 import com.sudokuarena.presentation.ArenaViewModel
 import com.sudokuarena.presentation.WelcomeScreen
 import com.sudokuarena.presentation.MultiplayerEntryScreen
-import com.sudokuarena.presentation.SudokuArenaSplashScreen
+import com.sudokuarena.presentation.MultiArenaSplashScreen
 import com.sudokuarena.presentation.SoloSetupScreen
-import com.sudokuarena.presentation.SudokuArenaTheme
+import com.sudokuarena.presentation.MultiArenaTheme
 import com.sudokuarena.domain.GameType
 
 class MainActivity : ComponentActivity() {
@@ -36,8 +36,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableImmersiveMode()
         setContent {
-            SudokuArenaTheme {
-                SudokuArenaApp()
+            MultiArenaTheme {
+                MultiArenaApp()
             }
         }
     }
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun SudokuArenaApp() {
+private fun MultiArenaApp() {
     val context = LocalContext.current
     val preferences = remember(context) { PlayerPreferences(context) }
     val leaderboardRepository = remember { HttpLeaderboardRepository(BuildConfig.SOCKET_URL) }
@@ -71,7 +71,7 @@ private fun SudokuArenaApp() {
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
 
     if (screen == "SPLASH") {
-        SudokuArenaSplashScreen { screen = "WELCOME" }
+        MultiArenaSplashScreen { screen = "WELCOME" }
         return
     }
 
@@ -79,10 +79,12 @@ private fun SudokuArenaApp() {
         WelcomeScreen(
             initialNickname = preferences.nickname(),
             initialXp = preferences.totalXp(),
+            initialAvatar = preferences.avatarId(),
             selectedGameType = selectedGameType,
             onGameSelected = { selectedGameType = it },
             leaderboardRepository = leaderboardRepository,
             onSaveNickname = preferences::saveNickname,
+            onSaveAvatar = preferences::saveAvatarId,
             onSoloMode = {
                 dailyChallenge = false
                 requestedRoomCode = null
@@ -103,6 +105,7 @@ private fun SudokuArenaApp() {
 
     if (screen == "SOLO_SETUP") {
         SoloSetupScreen(
+            gameType = selectedGameType,
             isColorMode = soloColorMode,
             onColorModeChanged = { soloColorMode = it },
             onStart = {
@@ -141,6 +144,7 @@ private fun SudokuArenaApp() {
             serverUrl = BuildConfig.SOCKET_URL,
             playerName = preferences.nickname(),
             clientId = preferences.clientId(),
+            avatarId = preferences.avatarId(),
         )
     }
     val factory = remember(sessionId) {

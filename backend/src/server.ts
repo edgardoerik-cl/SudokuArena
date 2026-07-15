@@ -34,6 +34,7 @@ interface BotRuntime {
   disabledUntil: number;
   lastProgressAt: number;
   failedActions: number;
+  fogReadyAt: number;
 }
 
 interface RoomRuntime {
@@ -50,6 +51,14 @@ interface RoomRuntime {
   rematchVotes: Set<string>;
   suddenDeath: boolean;
   genericEngine: GenericPuzzleEngine | null;
+  pauseRequesterId: string | null;
+  pauseVotes: Set<string>;
+  pausedAt: number | null;
+  pausedRemainingMs: number;
+  pausedPhase: "PLAYING" | "SUDDEN_DEATH" | null;
+  resumeCountdownEndsAt: number | null;
+  resumeTimer: NodeJS.Timeout | null;
+  totalPausedMs: number;
 }
 
 const port = Number(process.env.PORT ?? 3000);
@@ -84,6 +93,7 @@ const boardEventInterval = setInterval(() => {
 
 io.on("connection", (socket) => {
   const requestedName = String(socket.handshake.auth.name ?? socket.handshake.query.name ?? "");
+  const requestedAvatar = normalizeAvatar(socket.handshake.auth.avatarId);
   const clientId = normalizeClientId(socket.handshake.auth.clientId);
   const playerId = clientId ? `human:${clientId}` : socket.id;
   socket.data.playerId = playerId;
@@ -94,7 +104,7 @@ io.on("connection", (socket) => {
     if (socket.data.roomCode) return emitRoomError(socket, "ALREADY_IN_ROOM", "Ya estás dentro de una sala");
     const room = createRoom(playerId);
     socket.emit("room:created", { roomCode: room.code });
-    joinRoom(socket, room, requestedName);
+    joinRoom(socket, room, requestedName, requestedAvatar);
   });
 
   socket.on("room:join", (payload: { roomCode?: unknown }) => {
@@ -106,7 +116,7 @@ io.on("connection", (socket) => {
     if (room.phase !== "LOBBY" && !room.game.hasPlayer(playerId)) {
       return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     }
-    joinRoom(socket, room, requestedName);
+    joinRoom(socket, room, requestedName, requestedAvatar);
   });
 
   socket.on("room:configure", (payload: Partial<RoomConfig>) => {
@@ -168,6 +178,44 @@ io.on("connection", (socket) => {
     emitRoomState(room);
     const humans = room.game.snapshot().players.filter((player) => !player.isBot);
     if (humans.length > 0 && humans.every((player) => room.rematchVotes.has(player.id))) startMatch(room, true);
+  });
+
+  socket.on("pause:request", () => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    if (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH") return emitRoomError(socket, "MATCH_NOT_PLAYING", "La partida no está activa");
+    if (room.pauseRequesterId) return emitRoomError(socket, "PAUSE_PENDING", "Ya existe una solicitud de pausa");
+    room.pauseRequesterId = playerId;
+    room.pauseVotes = new Set([playerId]);
+    io.to(room.code).emit("pause:requested", { requesterId: playerId, expiresAt: Date.now() + 15_000 });
+    emitRoomState(room);
+    maybeActivatePause(room);
+    setTimeout(() => {
+      if (rooms.get(room.code) === room && room.pauseRequesterId === playerId && room.phase !== "PAUSED") cancelPauseRequest(room, "La solicitud de pausa expiró");
+    }, 15_000);
+  });
+
+  socket.on("pause:respond", (payload: { accepted?: unknown }) => {
+    const room = roomFor(socket);
+    if (!room || !room.pauseRequesterId || room.phase === "PAUSED") return;
+    if (payload?.accepted !== true) {
+      cancelPauseRequest(room, "Un jugador rechazó la pausa");
+      return;
+    }
+    room.pauseVotes.add(playerId);
+    emitRoomState(room);
+    maybeActivatePause(room);
+  });
+
+  socket.on("pause:resume", () => {
+    const room = roomFor(socket);
+    if (!room || room.phase !== "PAUSED") return emitRoomError(socket, "NOT_PAUSED", "La partida no está pausada");
+    if (room.pauseRequesterId !== playerId) return emitRoomError(socket, "REQUESTER_ONLY", "Sólo quien solicitó la pausa puede continuar");
+    if (room.resumeCountdownEndsAt) return;
+    room.resumeCountdownEndsAt = Date.now() + 3_000;
+    emitRoomState(room);
+    io.to(room.code).emit("pause:resuming", { endsAt: room.resumeCountdownEndsAt });
+    room.resumeTimer = setTimeout(() => resumeRoom(room), 3_000);
   });
 
   socket.on("player:place", (payload: PlaceProposal) => {
@@ -298,13 +346,21 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     bots: new Map(),
     rematchVotes: new Set(),
     suddenDeath: false,
-    genericEngine: null
+    genericEngine: null,
+    pauseRequesterId: null,
+    pauseVotes: new Set(),
+    pausedAt: null,
+    pausedRemainingMs: 0,
+    pausedPhase: null,
+    resumeCountdownEndsAt: null,
+    resumeTimer: null,
+    totalPausedMs: 0
   };
   rooms.set(code, room);
   return room;
 }
 
-function joinRoom(socket: Socket, room: RoomRuntime, playerName: string): void {
+function joinRoom(socket: Socket, room: RoomRuntime, playerName: string, avatarId: string): void {
   const playerId = String(socket.data.playerId ?? socket.id);
   const previousDisconnect = disconnectTimers.get(playerId);
   if (previousDisconnect) {
@@ -312,7 +368,7 @@ function joinRoom(socket: Socket, room: RoomRuntime, playerName: string): void {
     disconnectTimers.delete(playerId);
   }
   const existingPlayer = room.game.snapshot().players.find((entry) => entry.id === playerId);
-  const player = existingPlayer ?? room.game.addPlayer(playerId, playerName);
+  const player = existingPlayer ?? room.game.addPlayer(playerId, playerName, false, avatarId);
   if (!player) {
     emitRoomError(socket, "ROOM_FULL", "La sala ya tiene 4 jugadores");
     return;
@@ -346,10 +402,27 @@ function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
   if (room.game.humanPlayerCount === 0) {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
+    if (room.resumeTimer) clearTimeout(room.resumeTimer);
     clearBotTimers(room);
     rooms.delete(room.code);
-  } else if (room.hostPlayerId === playerId) {
-    room.hostPlayerId = room.game.snapshot().players.find((player) => !player.isBot)!.id;
+    return;
+  }
+
+  const nextHumanId = room.game.snapshot().players.find((player) => !player.isBot)!.id;
+  if (room.hostPlayerId === playerId) room.hostPlayerId = nextHumanId;
+
+  if (room.pauseRequesterId === playerId) {
+    if (room.phase === "PAUSED") {
+      // Evita una pausa huérfana: el control para reanudar pasa al primer humano conectado.
+      room.pauseRequesterId = nextHumanId;
+      room.pauseVotes = new Set([nextHumanId]);
+    } else {
+      cancelPauseRequest(room, "Quien solicitó la pausa abandonó la sala");
+      return;
+    }
+  }
+
+  if (room.phase === "PAUSED" || room.pauseRequesterId) {
     emitRoomState(room);
   }
 }
@@ -376,7 +449,11 @@ function toRoomState(room: RoomRuntime): RoomState {
     startedAt: room.startedAt,
     endsAt: room.endsAt,
     suddenDeath: room.suddenDeath,
-    rematchVotes: room.rematchVotes.size
+    rematchVotes: room.rematchVotes.size,
+    pauseRequesterId: room.pauseRequesterId,
+    pauseVotes: room.pauseVotes.size,
+    pauseRequired: humanPlayers(room).length,
+    resumeCountdownEndsAt: room.resumeCountdownEndsAt
   };
 }
 
@@ -395,7 +472,13 @@ function normalizeClientId(value: unknown): string | null {
 }
 
 function normalizeTeamMode(value: unknown): TeamMode | null {
-  return value === "FFA" || value === "TWO_V_TWO" || value === "THREE_V_ONE" ? value : null;
+  return value === "DUEL" || value === "FFA" || value === "TWO_V_ONE" || value === "TWO_V_TWO" || value === "THREE_V_ONE" ? value : null;
+}
+
+function normalizeAvatar(value: unknown): string {
+  return typeof value === "string" && ["ORBIT", "NOVA", "PIXEL", "NINJA", "ASTRO", "BRAIN", "ROBOT", "FOX"].includes(value)
+    ? value
+    : "ORBIT";
 }
 
 function normalizeTileType(value: unknown): TileType | null {
@@ -412,7 +495,9 @@ function normalizeGameType(value: unknown): GameType | null {
 
 function validatePlayerCount(room: RoomRuntime): string | null {
   const count = room.game.playerCount;
+  if (room.config.teamMode === "DUEL" && count !== 2) return "El modo 1 vs 1 requiere exactamente 2 jugadores";
   if (room.config.teamMode === "FFA" && count < 2) return "Se necesitan al menos 2 jugadores";
+  if (room.config.teamMode === "TWO_V_ONE" && count !== 3) return "El modo 2 vs 1 requiere exactamente 3 jugadores";
   if (room.config.teamMode === "TWO_V_TWO" && count !== 4) return "El modo 2 vs 2 requiere exactamente 4 jugadores";
   if (room.config.teamMode === "THREE_V_ONE" && count !== 4) return "El modo 3 vs 1 requiere exactamente 4 jugadores";
   return null;
@@ -422,6 +507,8 @@ function startMatch(room: RoomRuntime, rematch = false): void {
   room.phase = "PLAYING";
   room.suddenDeath = false;
   room.rematchVotes.clear();
+  clearPauseState(room);
+  room.totalPausedMs = 0;
   room.startedAt = Date.now();
   room.endsAt = room.startedAt + matchDurationMs;
   if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
@@ -462,6 +549,11 @@ function finishMatch(room: RoomRuntime, force = false): void {
       console.error("No se pudo registrar la victoria", error);
     });
   }
+  const elapsedMs = Math.max(1_000, room.endsAt - (room.startedAt ?? room.endsAt) - room.totalPausedMs);
+  for (const result of results.filter((entry) => !entry.isBot)) {
+    void leaderboard.recordGame(room.config.gameType, result.name, elapsedMs, result.score, result.teamId === winningTeam)
+      .catch((error) => console.error("No se pudo registrar resultado por juego", error));
+  }
   emitRoomState(room);
   emitState(room);
   io.to(room.code).emit("game:finished", { results, finishedAt: room.endsAt });
@@ -470,7 +562,9 @@ function finishMatch(room: RoomRuntime, force = false): void {
 
 function fillRoomWithBots(room: RoomRuntime): void {
   // Con un solo humano en FFA crea un duelo 1v1; los modos por equipo llenan 4.
-  const targetPlayers = room.config.teamMode === "FFA" && room.game.playerCount === 1 ? 2 : 4;
+  const targetPlayers = room.config.teamMode === "DUEL" ? 2
+    : room.config.teamMode === "TWO_V_ONE" ? 3
+      : room.config.teamMode === "FFA" && room.game.playerCount === 1 ? 2 : 4;
   const usedNames = new Set(room.game.snapshot().players.map((player) => player.name));
   while (room.game.playerCount < targetPlayers) {
     const id = `bot:${randomUUID()}`;
@@ -478,14 +572,14 @@ function fillRoomWithBots(room: RoomRuntime): void {
     const player = room.game.addPlayer(id, baseName, true);
     if (!player) break;
     usedNames.add(player.name);
-    room.bots.set(id, { timer: null, disabledUntil: 0, lastProgressAt: Date.now(), failedActions: 0 });
+    room.bots.set(id, { timer: null, disabledUntil: 0, lastProgressAt: Date.now(), failedActions: 0, fogReadyAt: Date.now() + randomBetween(25_000, 45_000) });
   }
   emitState(room);
   emitRoomState(room);
 }
 
 function resolveBossPlayerId(room: RoomRuntime): string {
-  if (room.config.teamMode !== "THREE_V_ONE") return room.hostPlayerId;
+  if (room.config.teamMode !== "THREE_V_ONE" && room.config.teamMode !== "TWO_V_ONE") return room.hostPlayerId;
   const players = room.game.snapshot().players;
   const humans = players.filter((player) => !player.isBot);
   // Tres humanos reciben un Jefe IA; con un humano, éste es Jefe contra tres Bots.
@@ -695,7 +789,9 @@ function runBotPower(room: RoomRuntime, botId: string): void {
   if (!room.config.powersEnabled) return;
   const snapshot = room.game.snapshot();
   const bot = snapshot.players.find((player) => player.id === botId);
-  const fogChance = bot?.botPersona === "TRICKSTER" ? 0.48 : 0.22;
+  const runtime = room.bots.get(botId);
+  if (!runtime || Date.now() < runtime.fogReadyAt) return;
+  const fogChance = bot?.botPersona === "TRICKSTER" ? 0.16 : 0.07;
   if (Math.random() > fogChance) return;
   if (!bot || bot.energy < 100) return;
   const targets = snapshot.players.filter((player) =>
@@ -705,6 +801,7 @@ function runBotPower(room: RoomRuntime, botId: string): void {
   if (!target) return;
   const result = room.game.useFogPower(botId, target.id);
   if (!result.accepted || result.type !== "FOG") return;
+  runtime.fogReadyAt = Date.now() + randomBetween(40_000, 65_000);
   applyFogDelivery(room, botId, result.recipientPlayerId, result.reflected ? result.targetPlayerId : undefined);
   emitState(room);
 }
@@ -729,6 +826,59 @@ function clearBotTimers(room: RoomRuntime): void {
     if (runtime.timer) clearTimeout(runtime.timer);
     runtime.timer = null;
   }
+}
+
+function humanPlayers(room: RoomRuntime) {
+  return room.game.snapshot().players.filter((player) => !player.isBot);
+}
+
+function maybeActivatePause(room: RoomRuntime): void {
+  const humans = humanPlayers(room);
+  if (!room.pauseRequesterId || !humans.every((player) => room.pauseVotes.has(player.id))) return;
+  room.pausedPhase = room.phase === "SUDDEN_DEATH" ? "SUDDEN_DEATH" : "PLAYING";
+  room.pausedAt = Date.now();
+  room.pausedRemainingMs = Math.max(1_000, (room.endsAt ?? Date.now()) - Date.now());
+  room.phase = "PAUSED";
+  room.endsAt = null;
+  if (room.matchTimeout) clearTimeout(room.matchTimeout);
+  room.matchTimeout = null;
+  clearBotTimers(room);
+  if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
+  room.boardEventTimeout = null;
+  room.game.endBoardEvent();
+  emitRoomState(room);
+  emitState(room);
+  io.to(room.code).emit("pause:started", { requesterId: room.pauseRequesterId });
+}
+
+function cancelPauseRequest(room: RoomRuntime, message: string): void {
+  room.pauseRequesterId = null;
+  room.pauseVotes.clear();
+  emitRoomState(room);
+  io.to(room.code).emit("pause:cancelled", { message });
+}
+
+function resumeRoom(room: RoomRuntime): void {
+  if (rooms.get(room.code) !== room || room.phase !== "PAUSED") return;
+  room.phase = room.pausedPhase ?? "PLAYING";
+  room.endsAt = Date.now() + room.pausedRemainingMs;
+  room.matchTimeout = setTimeout(() => finishMatch(room), room.pausedRemainingMs);
+  room.totalPausedMs += room.pausedAt ? Date.now() - room.pausedAt : 0;
+  clearPauseState(room);
+  for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
+  emitRoomState(room);
+  io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
+}
+
+function clearPauseState(room: RoomRuntime): void {
+  if (room.resumeTimer) clearTimeout(room.resumeTimer);
+  room.resumeTimer = null;
+  room.pauseRequesterId = null;
+  room.pauseVotes.clear();
+  room.pausedAt = null;
+  room.pausedRemainingMs = 0;
+  room.pausedPhase = null;
+  room.resumeCountdownEndsAt = null;
 }
 
 function randomBetween(minimum: number, maximum: number): number {
@@ -757,6 +907,12 @@ async function handleHttp(
       sendJson(response, 200, await leaderboard.topTen());
       return;
     }
+    if (request.method === "GET" && request.url?.startsWith("/api/leaderboards/game")) {
+      const gameType = normalizeGameType(new URL(request.url, "http://local").searchParams.get("gameType"));
+      if (!gameType) return sendJson(response, 400, { error: "Tipo de juego inválido" });
+      sendJson(response, 200, await leaderboard.topGame(gameType));
+      return;
+    }
     if (request.method === "POST" && request.url === "/api/solo/challenge") {
       const cutoff = Date.now() - 14_400_000;
       for (const [existingToken, createdAt] of soloChallenges) {
@@ -778,11 +934,14 @@ async function handleHttp(
       }
       const nickname = sanitizeNickname(payload.nickname);
       const elapsedMs = Number(payload.elapsedMs);
+      const gameType = normalizeGameType(payload.gameType) ?? "SUDOKU";
+      const score = Number(payload.score ?? 0);
       if (!Number.isInteger(elapsedMs) || elapsedMs < 30_000 || elapsedMs > 86_400_000) {
         sendJson(response, 400, { error: "Tiempo inválido" });
         return;
       }
       await leaderboard.recordSolo(nickname, elapsedMs);
+      await leaderboard.recordGame(gameType, nickname, elapsedMs, Number.isFinite(score) ? score : 0, false);
       sendJson(response, 200, { ok: true });
       return;
     }
@@ -837,7 +996,7 @@ function startRandomBoardEvent(room: RoomRuntime): void {
 }
 
 httpServer.listen(port, "0.0.0.0", () => {
-  console.log(`Sudoku Arena escuchando en :${port}`);
+  console.log(`Multi Arena escuchando en :${port}`);
 });
 
 function shutdown(): void {
@@ -845,6 +1004,7 @@ function shutdown(): void {
   for (const room of rooms.values()) {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
+    if (room.resumeTimer) clearTimeout(room.resumeTimer);
     clearBotTimers(room);
   }
   io.close(() => process.exit(0));

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Pool } from "pg";
+import type { GameType } from "./puzzles/types.js";
 
 interface StoredPlayerRecord {
   nickname: string;
@@ -10,8 +11,25 @@ interface StoredPlayerRecord {
 }
 
 interface LeaderboardFile {
-  version: 1;
+  version: 1 | 2;
   players: Record<string, StoredPlayerRecord>;
+  gameRecords?: Partial<Record<GameType, Record<string, StoredGameRecord>>>;
+}
+
+interface StoredGameRecord {
+  nickname: string;
+  bestTimeMs: number | null;
+  bestScore: number;
+  wins: number;
+  updatedAt: number;
+}
+
+export interface GameLeaderboardEntry {
+  rank: number;
+  nickname: string;
+  bestTimeMs?: number;
+  bestScore?: number;
+  wins: number;
 }
 
 export interface SoloLeaderboardEntry {
@@ -31,7 +49,7 @@ export interface MultiplayerLeaderboardEntry {
  * reemplazan el archivo mediante rename para evitar estados parciales.
  */
 export class LeaderboardStore {
-  private data: LeaderboardFile = { version: 1, players: {} };
+  private data: LeaderboardFile = { version: 2, players: {}, gameRecords: {} };
   private readonly ready: Promise<void>;
   private writeQueue: Promise<void> = Promise.resolve();
   private readonly pool: Pool | null;
@@ -125,6 +143,69 @@ export class LeaderboardStore {
     }, nickname);
   }
 
+  async topGame(gameType: GameType): Promise<{ gameType: GameType; time: GameLeaderboardEntry[]; score: GameLeaderboardEntry[] }> {
+    await this.ready;
+    if (this.pool) {
+      const [time, score] = await Promise.all([
+        this.pool.query<{ nickname: string; best_time_ms: string; wins: number }>(
+          `SELECT nickname, best_time_ms, wins FROM multi_arena_game_leaderboard
+           WHERE game_type=$1 AND best_time_ms IS NOT NULL ORDER BY best_time_ms ASC, updated_at ASC LIMIT 10`, [gameType]
+        ),
+        this.pool.query<{ nickname: string; best_score: number; wins: number }>(
+          `SELECT nickname, best_score, wins FROM multi_arena_game_leaderboard
+           WHERE game_type=$1 AND best_score > 0 ORDER BY best_score DESC, wins DESC, updated_at ASC LIMIT 10`, [gameType]
+        )
+      ]);
+      return {
+        gameType,
+        time: time.rows.map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestTimeMs: Number(entry.best_time_ms), wins: Number(entry.wins) })),
+        score: score.rows.map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestScore: Number(entry.best_score), wins: Number(entry.wins) }))
+      };
+    }
+    const records = Object.values(this.data.gameRecords?.[gameType] ?? {});
+    return {
+      gameType,
+      time: records.filter((entry): entry is StoredGameRecord & { bestTimeMs: number } => entry.bestTimeMs !== null)
+        .sort((a, b) => a.bestTimeMs - b.bestTimeMs || b.bestScore - a.bestScore).slice(0, 10)
+        .map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestTimeMs: entry.bestTimeMs, wins: entry.wins })),
+      score: records.filter((entry) => entry.bestScore > 0)
+        .sort((a, b) => b.bestScore - a.bestScore || b.wins - a.wins).slice(0, 10)
+        .map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestScore: entry.bestScore, wins: entry.wins }))
+    };
+  }
+
+  async recordGame(gameType: GameType, nickname: string, elapsedMs: number, score: number, won = false): Promise<void> {
+    await this.ready;
+    const clean = sanitizeNickname(nickname);
+    const validTime = Number.isFinite(elapsedMs) && elapsedMs > 0 ? Math.round(elapsedMs) : null;
+    const validScore = Math.max(0, Math.round(score));
+    if (this.pool) {
+      await this.pool.query(
+        `INSERT INTO multi_arena_game_leaderboard (nickname_key, game_type, nickname, best_time_ms, best_score, wins, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,NOW())
+         ON CONFLICT (nickname_key, game_type) DO UPDATE SET nickname=EXCLUDED.nickname,
+           best_time_ms=CASE WHEN EXCLUDED.best_time_ms IS NULL THEN multi_arena_game_leaderboard.best_time_ms
+             ELSE LEAST(COALESCE(multi_arena_game_leaderboard.best_time_ms, EXCLUDED.best_time_ms), EXCLUDED.best_time_ms) END,
+           best_score=GREATEST(multi_arena_game_leaderboard.best_score, EXCLUDED.best_score),
+           wins=multi_arena_game_leaderboard.wins + EXCLUDED.wins, updated_at=NOW()`,
+        [clean.toLocaleLowerCase("es"), gameType, clean, validTime, validScore, won ? 1 : 0]
+      );
+      return;
+    }
+    const gameRecords = this.data.gameRecords ??= {};
+    const records = gameRecords[gameType] ??= {};
+    const key = clean.toLocaleLowerCase("es");
+    const record = records[key] ?? { nickname: clean, bestTimeMs: null, bestScore: 0, wins: 0, updatedAt: Date.now() };
+    record.nickname = clean;
+    if (validTime !== null && (record.bestTimeMs === null || validTime < record.bestTimeMs)) record.bestTimeMs = validTime;
+    record.bestScore = Math.max(record.bestScore, validScore);
+    if (won) record.wins += 1;
+    record.updatedAt = Date.now();
+    records[key] = record;
+    this.writeQueue = this.writeQueue.then(() => this.persist());
+    await this.writeQueue;
+  }
+
   private async mutate(change: (record: StoredPlayerRecord) => void, nickname: string): Promise<void> {
     await this.ready;
     const clean = sanitizeNickname(nickname);
@@ -145,7 +226,9 @@ export class LeaderboardStore {
   private async load(): Promise<void> {
     try {
       const parsed = JSON.parse(await readFile(this.filePath, "utf8")) as LeaderboardFile;
-      if (parsed?.version === 1 && parsed.players && typeof parsed.players === "object") this.data = parsed;
+      if ((parsed?.version === 1 || parsed?.version === 2) && parsed.players && typeof parsed.players === "object") {
+        this.data = { ...parsed, version: 2, gameRecords: parsed.gameRecords ?? {} };
+      }
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") console.error("No se pudo leer el Cuadro de Honor", error);
@@ -160,6 +243,18 @@ export class LeaderboardStore {
         best_solo_time_ms BIGINT NULL,
         multiplayer_wins INTEGER NOT NULL DEFAULT 0,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`
+    );
+    await this.pool!.query(
+      `CREATE TABLE IF NOT EXISTS multi_arena_game_leaderboard (
+        nickname_key TEXT NOT NULL,
+        game_type TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        best_time_ms BIGINT NULL,
+        best_score INTEGER NOT NULL DEFAULT 0,
+        wins INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (nickname_key, game_type)
       )`
     );
   }

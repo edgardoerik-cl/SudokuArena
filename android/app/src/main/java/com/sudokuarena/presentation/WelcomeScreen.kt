@@ -63,10 +63,12 @@ import kotlin.math.sin
 fun WelcomeScreen(
     initialNickname: String,
     initialXp: Int,
+    initialAvatar: String,
     selectedGameType: GameType,
     onGameSelected: (GameType) -> Unit,
     leaderboardRepository: LeaderboardRepository,
     onSaveNickname: (String) -> Unit,
+    onSaveAvatar: (String) -> Unit,
     onSoloMode: () -> Unit,
     onDailyChallenge: () -> Unit,
     onMultiplayerMode: () -> Unit,
@@ -75,6 +77,7 @@ fun WelcomeScreen(
     var firstNickname by remember { mutableStateOf("") }
     var showProfile by remember { mutableStateOf(false) }
     var showHonor by remember { mutableStateOf(false) }
+    var savedAvatar by remember(initialAvatar) { mutableStateOf(initialAvatar) }
     val hasProfile = savedNickname.isNotBlank()
 
     Box(
@@ -128,7 +131,6 @@ fun WelcomeScreen(
                 NeonArenaButton(
                     text = "Modo Solitario",
                     onClick = onSoloMode,
-                    enabled = selectedGameType == GameType.SUDOKU,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(58.dp),
@@ -176,16 +178,19 @@ fun WelcomeScreen(
     if (showProfile) {
         ProfileDialog(
             nickname = savedNickname,
+            avatarId = savedAvatar,
             onDismiss = { showProfile = false },
-            onSave = { updated ->
+            onSave = { updated, avatar ->
                 savedNickname = updated
+                savedAvatar = avatar
                 onSaveNickname(updated)
+                onSaveAvatar(avatar)
                 showProfile = false
             },
         )
     }
     if (showHonor) {
-        LeaderboardBottomSheet(repository = leaderboardRepository, onDismiss = { showHonor = false })
+        LeaderboardBottomSheet(repository = leaderboardRepository, initialGameType = selectedGameType, onDismiss = { showHonor = false })
     }
 }
 
@@ -197,7 +202,7 @@ private fun ArenaBrandHeader(modifier: Modifier = Modifier) {
     ) {
         ArenaLogo(Modifier.size(132.dp))
         Text(
-            "SUDOKU ARENA",
+            "MULTI ARENA",
             style = MaterialTheme.typography.headlineLarge.copy(
                 shadow = Shadow(Color(0x990057D9), blurRadius = 18f),
             ),
@@ -332,21 +337,34 @@ private fun gameMenuName(game: GameType): String = when (game) {
 }
 
 @Composable
-private fun ProfileDialog(nickname: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+private fun ProfileDialog(nickname: String, avatarId: String, onDismiss: () -> Unit, onSave: (String, String) -> Unit) {
     var edited by remember(nickname) { mutableStateOf(nickname) }
+    var selectedAvatar by remember(avatarId) { mutableStateOf(avatarId) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Editar perfil") },
-        text = {
+        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(
                 value = edited,
                 onValueChange = { edited = it.take(20) },
                 label = { Text("Nickname") },
                 singleLine = true,
             )
-        },
+            Text("Elige tu avatar", fontWeight = FontWeight.Bold)
+            MultiArenaAvatars.chunked(4).forEach { avatars ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    avatars.forEach { avatar ->
+                        Surface(
+                            color = if (avatar == selectedAvatar) ArenaColors.ElectricBlue.copy(alpha = .22f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.clickable { selectedAvatar = avatar }.padding(8.dp),
+                        ) { Text(avatarGlyph(avatar), fontSize = 28.sp, modifier = Modifier.padding(6.dp)) }
+                    }
+                }
+            }
+        } },
         confirmButton = {
-            TextButton(onClick = { onSave(edited.trim()) }, enabled = edited.trim().isNotEmpty()) { Text("Guardar") }
+            TextButton(onClick = { onSave(edited.trim(), selectedAvatar) }, enabled = edited.trim().isNotEmpty()) { Text("Guardar") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )

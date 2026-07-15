@@ -10,10 +10,12 @@ interface SudokuGenerator {
 }
 
 interface PlayerRecordStore {
-    fun soloBestMs(): Long
-    fun recordSoloTime(elapsedMs: Long): Boolean
-    fun tutorialCompleted(): Boolean
-    fun markTutorialCompleted()
+    fun soloBestMs(gameType: GameType = GameType.SUDOKU): Long
+    fun recordSoloTime(gameType: GameType, elapsedMs: Long): Boolean
+    fun soloBestScore(gameType: GameType): Int
+    fun recordSoloScore(gameType: GameType, score: Int): Boolean
+    fun tutorialCompleted(gameType: GameType): Boolean
+    fun markTutorialCompleted(gameType: GameType)
     fun totalXp(): Int
     fun addXp(amount: Int)
     fun markDailyCompleted(dayKey: String): Boolean

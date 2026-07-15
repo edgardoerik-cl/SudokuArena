@@ -1,9 +1,9 @@
-# Sudoku Arena
+# Multi Arena
 
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `1.1.0` convierte la aplicación en una Multiarena con diez juegos:
+La versión `2.0.0` convierte la aplicación en una Multiarena con diez juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
 Kakuro, Mathdoku, Hitori y Rummikub. Todos comparten salas, colores de conquista,
 Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
@@ -12,13 +12,14 @@ La plataforma también incorpora un menú animado 100% Compose con un nuevo embl
 Escudo de Espejo, Ojo de Lince, Bots estratégicos, tema de alto contraste,
 Splash Art e icono definitivos,
 pantalla inmersiva, fichas de números o colores y perfil persistente,
-Cuadro de Honor global, lobby configurable, modos FFA/2v2/3v1 y feedback visual
+Cuadro de Honor por juego, lobby configurable, modos 1v1/2v1/FFA/2v2/3v1 y feedback visual
 para victoria, error y sabotaje. Las partidas online duran tres minutos y siguen
 una máquina de estados autoritativa `LOBBY → PLAYING → SUDDEN_DEATH → FINISHED`.
 
-También incluye tutorial de primera partida, combos autoritativos x2/x3, elección
-de dos poderes por jugador, Bots con personalidad, revancha por votación, reto
-diario determinista, niveles/XP y reconexión con 15 segundos de tolerancia.
+También incluye un tutorial independiente por juego, avatar y reacciones rápidas,
+pausa local con tablero difuminado, pausa online por consenso con cuenta regresiva,
+combos autoritativos x2/x3, Bots con personalidad y enfriamiento de sabotajes,
+revancha por votación, niveles/XP y reconexión con 15 segundos de tolerancia.
 
 ## Estructura
 
@@ -44,12 +45,12 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`SudokuArena-v1.1.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v2.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor
 
-El servidor guarda los Top 10 en `backend/data/leaderboards.json`. En una nube
+El servidor guarda los Top 10 generales y por cada juego en `backend/data/leaderboards.json`. En una nube
 con disco persistente conviene configurar `LEADERBOARD_FILE` apuntando a ese
 volumen; por ejemplo, en Bonto: `/data/leaderboards.json`. Sin un volumen
 persistente, el ranking se reinicia cuando el contenedor es reemplazado.

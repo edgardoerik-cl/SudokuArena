@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -98,17 +99,24 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         return
     }
 
-    if (!state.isSoloMode && state.gameType != GameType.SUDOKU) {
+    if (state.gameType != GameType.SUDOKU) {
         GenericArenaScreen(
             state = state,
             onCellSelected = viewModel::selectGeneric,
             onMove = viewModel::makeGenericMove,
+            onMoveAt = viewModel::makeGenericMoveAt,
             onWordSelection = viewModel::makeWordSelection,
             onUseFog = viewModel::useFog,
             onUseReflect = viewModel::useReflect,
             onUseReveal = viewModel::useReveal,
             onFogSwipe = viewModel::cleanFogSwipe,
             onRematch = viewModel::requestRematch,
+            onRequestPause = viewModel::requestPause,
+            onPauseResponse = viewModel::respondPause,
+            onResume = viewModel::resumePausedGame,
+            onTutorialComplete = viewModel::completeTutorial,
+            onReaction = viewModel::sendReaction,
+            onNewSoloGame = viewModel::newSoloGame,
             onExit = onExit,
         )
         return
@@ -126,6 +134,9 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         onNewSoloGame = viewModel::newSoloGame,
         onTutorialComplete = viewModel::completeTutorial,
         onRematch = viewModel::requestRematch,
+        onRequestPause = viewModel::requestPause,
+        onPauseResponse = viewModel::respondPause,
+        onResume = viewModel::resumePausedGame,
         onExit = onExit,
     )
 }
@@ -143,6 +154,9 @@ fun ArenaScreen(
     onNewSoloGame: () -> Unit,
     onTutorialComplete: () -> Unit,
     onRematch: () -> Unit,
+    onRequestPause: () -> Unit,
+    onPauseResponse: (Boolean) -> Unit,
+    onResume: () -> Unit,
     onExit: () -> Unit,
 ) {
     val shake = remember { Animatable(0f) }
@@ -161,6 +175,7 @@ fun ArenaScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .blur(if (state.isLocallyPaused || state.roomState?.phase == RoomPhase.PAUSED) 18.dp else 0.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -170,8 +185,8 @@ fun ArenaScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("Sudoku Arena", style = MaterialTheme.typography.headlineSmall)
-                    TextButton(onClick = onExit) { Text("Salir") }
+                    Text("Multi Arena · Sudoku", style = MaterialTheme.typography.headlineSmall)
+                    Row { PauseControl(state, onRequestPause); TextButton(onClick = onExit) { Text("Salir") } }
                 }
                 Text(
                     when {
@@ -264,10 +279,12 @@ fun ArenaScreen(
             if (state.showTutorial) {
                 ArenaTutorialOverlay(
                     isSoloMode = state.isSoloMode,
+                    gameType = state.gameType,
                     onFinished = onTutorialComplete,
                     modifier = Modifier.zIndex(40f),
                 )
             }
+            PauseLayer(state, onPauseResponse, onResume, Modifier.zIndex(50f))
         }
     }
 }
@@ -335,7 +352,10 @@ fun Scoreboard(state: ArenaUiState) {
                             .background(color.copy(alpha = if (player.id == state.playerId) 0.28f else 0.13f))
                             .padding(7.dp),
                     ) {
-                        Text("${if (player.isBot) "🤖 " else ""}${player.name}", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            AvatarBadge(player.avatarId, color, 26.dp)
+                            Text(player.name, maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                        }
                         Text("${player.score} pts", style = MaterialTheme.typography.titleMedium)
                         if (player.comboMultiplier > 1) {
                             Text("COMBO x${player.comboMultiplier}", color = Color(0xFFE65100), fontWeight = FontWeight.Black)
@@ -345,7 +365,7 @@ fun Scoreboard(state: ArenaUiState) {
                             Text("⚡ ${player.energy}%", style = MaterialTheme.typography.labelSmall)
                             if (shieldActive) Text("🛡 ESCUDO", color = Color(0xFF6D28D9), fontWeight = FontWeight.Black)
                         }
-                        if (!state.isSoloMode && state.roomState?.config?.teamMode != TeamMode.FFA) {
+                        if (!state.isSoloMode && state.roomState?.config?.teamMode !in setOf(TeamMode.FFA, TeamMode.DUEL)) {
                             Text("Equipo ${player.teamScore}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                         }
                     }

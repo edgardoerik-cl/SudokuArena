@@ -6,8 +6,8 @@ export function createPuzzleBlueprint(gameType) {
         case "CROSSWORD": return crossword();
         case "NONOGRAM": return nonogram();
         case "DOTS_AND_BOXES": return dotsAndBoxes();
-        case "KAKURO": return numberPuzzle("sum", 9);
-        case "MATHDOKU": return numberPuzzle("cage", 6);
+        case "KAKURO": return kakuro();
+        case "MATHDOKU": return mathdoku();
         case "HITORI": return hitori();
         case "RUMMIKUB": return rummikub();
         case "SUDOKU": return numberPuzzle("sudoku", 9);
@@ -31,8 +31,18 @@ function wordSearch() {
 function crossword() {
     const rows = ["ARENA#RED", "LOGICA###", "NEON#BOT#", "MATRIZ###", "PUZZLE###", "JUEGO####", "COLOR####", "PODER####", "MENTE####"];
     const answers = rows.map((row) => row.padEnd(9, "#").slice(0, 9).split('').map((value) => value === "#" ? null : value));
-    const board = answers.map((row, rowIndex) => row.map((answer, col) => answer === null ? cell(null, true, { block: true }) : cell(null, false, { clue: col === 0 ? rowIndex + 1 : 0 })));
-    return { board, answers, meta: { clues: rows.map((_, index) => `${index + 1}. Palabra de la Arena`) } };
+    const board = answers.map((row, rowIndex) => row.map((answer, col) => answer === null ? blockedCell({ block: true }) : cell(null, false, { clue: col === 0 ? rowIndex + 1 : 0 })));
+    return { board, answers, meta: { clues: [
+                "1. Lugar donde compiten los jugadores",
+                "2. Razonamiento necesario para resolver",
+                "3. Luz de color muy brillante",
+                "4. Organización rectangular de datos",
+                "5. Rompecabezas en inglés",
+                "6. Actividad con reglas y objetivos",
+                "7. Propiedad visual de cada equipo",
+                "8. Habilidad especial que consume energía",
+                "9. Capacidad para razonar"
+            ] } };
 }
 function nonogram() {
     const pattern = ["00111100", "01111110", "11011011", "11111111", "01111110", "00111100", "00011000", "00111100"];
@@ -55,19 +65,61 @@ function numberPuzzle(kind, size) {
     }));
     return { board, answers, meta: { kind, size } };
 }
+function kakuro() {
+    const size = 5;
+    const answers = matrix(size, size, (row, col) => row === 0 || col === 0 ? null : ((row + col - 2) % 4) + 1);
+    const board = matrix(size, size, (row, col) => {
+        if (row === 0 && col === 0)
+            return blockedCell({ clueCell: true });
+        if (row === 0)
+            return blockedCell({ clueCell: true, downSum: 10 });
+        if (col === 0)
+            return blockedCell({ clueCell: true, rightSum: 10 });
+        return cell(null, false, { runLength: 4 });
+    });
+    return { board, answers, meta: { instructions: "Cada fila y columna suma 10 sin repetir cifras." } };
+}
+function mathdoku() {
+    const size = 6;
+    const source = matrix(size, size, (row, col) => ((row + col) % size) + 1);
+    const answers = source.map((row) => row.map((value) => value));
+    const board = matrix(size, size, (row, col) => {
+        const cageStart = col - col % 2;
+        const cageId = row * 3 + Math.floor(col / 2);
+        const target = source[row][cageStart] + source[row][cageStart + 1];
+        return cell(null, false, {
+            cageId,
+            cageLabel: col % 2 === 0 ? `${target}+` : "",
+            cageStart: col % 2 === 0,
+            cageEnd: col % 2 === 1
+        });
+    });
+    return { board, answers, meta: { size, instructions: "Usa 1 a 6 sin repetir por fila o columna y cumple cada jaula." } };
+}
 function hitori() {
-    const answers = matrix(8, 8, (row, col) => (row + col) % 5 === 0);
-    const board = matrix(8, 8, (row, col) => cell(((row * 2 + col) % 8) + 1, true));
-    return { board, answers, meta: { action: "BLOCK_DUPLICATES" } };
+    const size = 6;
+    const black = new Set(["0:0", "0:3", "2:1", "2:4", "4:0", "4:3"]);
+    const values = matrix(size, size, (row, col) => ((row + col) % size) + 1);
+    for (const key of black) {
+        const [row, col] = key.split(":").map(Number);
+        values[row][col] = values[row][(col + 1) % size];
+    }
+    const answers = matrix(size, size, (row, col) => black.has(`${row}:${col}`));
+    const board = values.map((row) => row.map((value) => cell(value, true)));
+    return { board, answers, meta: { action: "BLOCK_DUPLICATES", instructions: "Apaga duplicados sin dejar casillas negras adyacentes." } };
 }
 function rummikub() {
     const colors = ["RED", "BLUE", "GREEN", "ORANGE"];
-    const answers = matrix(4, 13, (_, col) => col + 1);
-    const board = matrix(4, 13, (row) => cell(null, false, { tileColor: colors[row] }));
-    return { board, answers, meta: { colors, operations: ["PLACE", "MOVE", "GROUP", "RUN"] } };
+    const starts = [1, 3, 5, 7];
+    const answers = matrix(4, 7, (row, col) => starts[row] + col);
+    const board = matrix(4, 7, (row) => cell(null, false, { tileColor: colors[row], meld: "RUN" }));
+    return { board, answers, meta: { colors, operations: ["PLACE", "MOVE", "GROUP", "RUN"], instructions: "Completa las cuatro escaleras de siete fichas." } };
 }
 function cell(value, isRevealed, meta = {}) {
     return { value, isRevealed, ownerId: null, isBlocked: false, meta };
+}
+function blockedCell(meta = {}) {
+    return { value: null, isRevealed: true, ownerId: null, isBlocked: true, meta };
 }
 function matrix(rows, columns, create) {
     return Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, col) => create(row, col)));

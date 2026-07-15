@@ -31,19 +31,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.sudokuarena.domain.GameType
 
 private data class TutorialStep(val icon: String, val title: String, val body: String)
 
 @Composable
 fun ArenaTutorialOverlay(
     isSoloMode: Boolean,
+    gameType: GameType,
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val steps = remember(isSoloMode) {
+    val steps = remember(isSoloMode, gameType) {
         buildList {
-            add(TutorialStep("1–9", "Elige una casilla", "Toca una casilla vacía y luego coloca la ficha correcta. Un error bloquea el tablero durante 3 segundos."))
-            add(TutorialStep("×3", "Mantén el combo", "Encadena aciertos antes de 4,5 segundos para multiplicar los puntos hasta x3."))
+            addAll(gameTutorialSteps(gameType))
             if (!isSoloMode) {
                 add(TutorialStep("⚡", "Carga tus poderes", "Cada acierto entrega energía. Usa Ojo de Lince, Escudo o Niebla en el momento justo."))
                 add(TutorialStep("🏁", "Conquista la arena", "Completa filas, columnas o cuadrantes. Si hay empate al terminar, la próxima jugada correcta gana."))
@@ -93,4 +94,47 @@ fun ArenaTutorialOverlay(
             }
         }
     }
+}
+
+private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (gameType) {
+    GameType.SUDOKU -> listOf(
+        TutorialStep("1–9", "Completa sin repetir", "Coloca del 1 al 9 sin repetir en fila, columna o bloque 3×3."),
+        TutorialStep("×3", "Conquista secciones", "El último acierto de una fila, columna o bloque conquista y limpia esa zona."),
+    )
+    GameType.MINESWEEPER -> listOf(
+        TutorialStep("✹", "Evita las minas", "Toca casillas seguras. El número indica minas en las ocho casillas vecinas."),
+        TutorialStep("⏳", "Explosión", "Pisar una mina te congela cinco segundos, pero la partida continúa."),
+    )
+    GameType.WORD_SEARCH -> listOf(
+        TutorialStep("A↗", "Arrastra palabras", "Desliza desde la primera hasta la última letra en línea recta."),
+        TutorialStep("🖍", "Firma tu hallazgo", "Cada palabra encontrada queda tachada con tu color."),
+    )
+    GameType.CROSSWORD -> listOf(
+        TutorialStep("✚", "Lee las pistas", "Selecciona una casilla blanca y escribe una letra de la respuesta."),
+        TutorialStep("ABC", "Resuelve primero", "Cada letra correcta suma territorio y puntos."),
+    )
+    GameType.NONOGRAM -> listOf(
+        TutorialStep("▦", "Interpreta las pistas", "Cada número indica grupos consecutivos de píxeles en esa fila o columna."),
+        TutorialStep("🎨", "Revela el mosaico", "Toca los píxeles correctos hasta completar la imagen."),
+    )
+    GameType.DOTS_AND_BOXES -> listOf(
+        TutorialStep("□", "Traza una arista", "Toca cerca del borde de un cuadro para dibujar esa línea."),
+        TutorialStep("🎯", "Cierra cuadros", "La cuarta arista conquista el cuadro y entrega una bonificación."),
+    )
+    GameType.KAKURO -> listOf(
+        TutorialStep("Σ", "Cumple las sumas", "Las flechas muestran la suma del grupo horizontal o vertical."),
+        TutorialStep("1–9", "Sin repetir", "Dentro de una suma no puede repetirse ninguna cifra."),
+    )
+    GameType.MATHDOKU -> listOf(
+        TutorialStep("×+", "Resuelve jaulas", "Los números de cada jaula deben producir el objetivo indicado."),
+        TutorialStep("1–6", "Cuadrado latino", "No repitas números en una fila ni columna."),
+    )
+    GameType.HITORI -> listOf(
+        TutorialStep("◼", "Apaga duplicados", "Toca cifras repetidas para que cada fila y columna quede sin duplicados."),
+        TutorialStep("⛓", "Mantén conectado", "Las casillas apagadas no deben tocarse por sus lados."),
+    )
+    GameType.RUMMIKUB -> listOf(
+        TutorialStep("123", "Completa escaleras", "Selecciona un hueco y coloca la ficha numérica que continúa su color."),
+        TutorialStep("🃏", "Domina el tablero", "Las fichas correctas quedan marcadas con tu identidad."),
+    )
 }

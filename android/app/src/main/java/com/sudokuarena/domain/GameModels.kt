@@ -29,16 +29,17 @@ data class Player(
     val comboMultiplier: Int = 1,
     val botPersona: String? = null,
     val powerLoadout: List<String> = listOf("FOG", "REVEAL"),
+    val avatarId: String = "ORBIT",
 )
 
-enum class TeamMode { FFA, TWO_V_TWO, THREE_V_ONE }
+enum class TeamMode { DUEL, FFA, TWO_V_ONE, TWO_V_TWO, THREE_V_ONE }
 enum class TileType { NUMBERS, COLORS }
 enum class BotDifficulty { EASY, MEDIUM, HARD }
 enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
 }
-enum class RoomPhase { LOBBY, PLAYING, SUDDEN_DEATH, FINISHED }
+enum class RoomPhase { LOBBY, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
 data class RoomConfig(
     val gameType: GameType = GameType.SUDOKU,
@@ -77,6 +78,10 @@ data class RoomState(
     val endsAt: Long?,
     val suddenDeath: Boolean = false,
     val rematchVotes: Int = 0,
+    val pauseRequesterId: String? = null,
+    val pauseVotes: Int = 0,
+    val pauseRequired: Int = 0,
+    val resumeCountdownEndsAt: Long? = null,
 )
 
 data class MatchResultEntry(
@@ -185,4 +190,7 @@ interface GameRealtimeGateway {
         requestId: String? = null,
     )
     fun sendReaction(emojiId: String)
+    fun requestPause()
+    fun respondPause(accepted: Boolean)
+    fun resumePausedGame()
 }
