@@ -40,4 +40,38 @@ class LocalPuzzleEngineTest {
         assertEquals(5_000L, result.penaltyMs)
         assertTrue(result.state.board.flatten().any { it.value == "MINE" && it.isBlocked })
     }
+
+    @Test
+    fun `Sopa de Letras local acepta un recorrido multidireccional completo`() {
+        val engine = LocalPuzzleEngine(GameType.WORD_SEARCH, seed = 91L)
+        val initial = engine.snapshot()
+        @Suppress("UNCHECKED_CAST")
+        val placement = (initial.meta["placements"] as List<Map<String, Any>>).first()
+        val result = engine.move(
+            placement.getValue("startRow") as Int,
+            placement.getValue("startCol") as Int,
+            mapOf(
+                "word" to placement.getValue("word"),
+                "endRow" to placement.getValue("endRow"),
+                "endCol" to placement.getValue("endCol"),
+            ),
+        )
+        assertTrue(result.accepted)
+        assertTrue((placement.getValue("word") as String).indices.all { offset ->
+            val row = (placement.getValue("startRow") as Int) + (placement.getValue("rowStep") as Int) * offset
+            val col = (placement.getValue("startCol") as Int) + (placement.getValue("colStep") as Int) * offset
+            result.state.board[row][col].ownerId == "solo"
+        })
+    }
+
+    @Test
+    fun `Crucigrama usa pistas reales y Rummikub oculta resultados`() {
+        val crossword = LocalPuzzleEngine(GameType.CROSSWORD, seed = 12L).snapshot()
+        val clues = crossword.meta["clues"] as List<*>
+        assertTrue(clues.all { !it.toString().contains("Palabra de") })
+
+        val rummikub = LocalPuzzleEngine(GameType.RUMMIKUB, seed = 12L).snapshot()
+        assertTrue(rummikub.board.flatten().all { it.value == null })
+        assertTrue(rummikub.board.flatten().all { it.meta["rule"].toString().endsWith("?") })
+    }
 }
