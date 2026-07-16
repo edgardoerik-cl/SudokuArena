@@ -408,7 +408,10 @@ private fun parseRoomState(json: JSONObject): RoomState {
         endsAt = if (json.isNull("endsAt")) null else json.getLong("endsAt"),
         suddenDeath = json.optBoolean("suddenDeath", false),
         rematchVotes = json.optInt("rematchVotes", 0),
-        pauseRequesterId = json.optString("pauseRequesterId").takeIf(String::isNotBlank),
+        // JSONObject.NULL se serializa como la cadena "null" en algunas
+        // versiones de org.json. Nunca debe activar la UI de pausa.
+        pauseRequesterId = json.optString("pauseRequesterId")
+            .takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) },
         pauseVotes = json.optInt("pauseVotes", 0),
         pauseNoVotes = json.optInt("pauseNoVotes", 0),
         pauseRequired = json.optInt("pauseRequired", 0),

@@ -81,8 +81,10 @@ fun PauseControl(
 fun PauseVoteBanner(state: ArenaUiState, onRespond: (Boolean) -> Unit) {
     val room = state.roomState ?: return
     val requesterId = room.pauseRequesterId ?: return
-    if (state.isSoloMode || room.phase == RoomPhase.PAUSED) return
-    val requester = state.players.firstOrNull { it.id == requesterId }?.name ?: "Un jugador"
+    if (state.isSoloMode || room.phase !in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)) return
+    // Si el id no pertenece a la sala, el evento no es una solicitud válida.
+    // Esto también descarta valores heredados como la cadena "null".
+    val requester = state.players.firstOrNull { it.id == requesterId }?.name ?: return
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),

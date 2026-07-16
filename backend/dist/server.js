@@ -768,7 +768,7 @@ function runBotSupportPower(room, botId, runtime) {
     const stuck = runtime.failedActions >= 2 || now - runtime.lastProgressAt >= 7_000;
     if (bot.energy >= 50 && stuck) {
         if (room.genericEngine) {
-            const target = room.genericEngine.createBotMove(1);
+            const target = room.genericEngine.createBotMove(1, botId);
             if (!target)
                 return false;
             const consumed = room.game.consumeGenericRevealPower(botId, now);

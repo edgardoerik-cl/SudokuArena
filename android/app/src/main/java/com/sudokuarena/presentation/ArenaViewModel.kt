@@ -111,7 +111,10 @@ data class ArenaUiState(
     val canInteractGeneric: Boolean
         get() {
             val phaseAllowsPlay = isSoloMode || roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
-            val turnAllowsPlay = gameType !in setOf(GameType.DOTS_AND_BOXES, GameType.CROSS_LETTERS) ||
+            val turnAllowsPlay = gameType !in setOf(
+                GameType.MINESWEEPER, GameType.CROSSWORD, GameType.DOTS_AND_BOXES,
+                GameType.CROSS_LETTERS, GameType.SECRET_CODE,
+            ) ||
                 isSoloMode || genericTurnPlayerId == null || genericTurnPlayerId == playerId
             return connected && genericBoard != null && phaseAllowsPlay && turnAllowsPlay &&
                 penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null &&
@@ -461,6 +464,9 @@ class ArenaViewModel(
             genericBoard = localPuzzleEngine?.snapshot(),
             letterRack = localPuzzleEngine?.letterRack().orEmpty(),
             activeLetterPlayerId = SOLO_PLAYER_ID,
+            secretTeam = if (initialGameType == GameType.SECRET_CODE) "RED" else null,
+            secretRole = if (initialGameType == GameType.SECRET_CODE) "OPERATIVE" else null,
+            secretCurrentTeam = if (initialGameType == GameType.SECRET_CODE) "RED" else null,
         )
     }
 

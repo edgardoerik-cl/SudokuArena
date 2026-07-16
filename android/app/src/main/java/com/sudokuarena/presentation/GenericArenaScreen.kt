@@ -100,7 +100,9 @@ fun GenericArenaScreen(
                         ExitControl(onExit)
                     }
                 }
-                PauseVoteBanner(state, onPauseResponse)
+                if (!state.isSoloMode && state.roomState?.pauseRequesterId != null &&
+                    state.roomState.phase in setOf(com.sudokuarena.domain.RoomPhase.PLAYING, com.sudokuarena.domain.RoomPhase.SUDDEN_DEATH)
+                ) PauseVoteBanner(state, onPauseResponse)
                 Scoreboard(state)
                 if (state.roomState?.config?.powersEnabled == true) {
                     PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
@@ -108,6 +110,19 @@ fun GenericArenaScreen(
                 if (generic == null) {
                     Text("Preparando matriz compartida…")
                 } else {
+                    if (state.gameType == GameType.SECRET_CODE) SecretRoleHeader(state)
+                    val waitingTurn = !state.isSoloMode && state.genericTurnPlayerId != null && state.genericTurnPlayerId != state.playerId
+                    if (waitingTurn) {
+                        Surface(
+                            color = Color(0xFFFFF3CD), shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFA000)),
+                        ) {
+                            Text(
+                                "⏳ Esperando tu turno… ${state.players.firstOrNull { it.id == state.genericTurnPlayerId }?.name.orEmpty()}",
+                                Modifier.fillMaxWidth().padding(10.dp), fontWeight = FontWeight.Black, color = Color(0xFF6D4C00),
+                            )
+                        }
+                    }
                     GenericPuzzleGrid(
                         state = generic,
                         players = state.players.associateBy(Player::id),
@@ -117,6 +132,7 @@ fun GenericArenaScreen(
                         onWordSelection = onWordSelection,
                         onDirectMove = onMoveAt,
                         secretKey = state.secretKey,
+                        secretCanGuess = state.secretRole != "CAPTAIN",
                     )
                     PuzzleHints(generic)
                     GenericMoveControls(state, state.canMakeGenericMove, onMove, onSecretChat)
@@ -134,7 +150,9 @@ fun GenericArenaScreen(
             if (state.soloCompleted || state.matchResults.isNotEmpty()) {
                 MatchResultsOverlay(state, onNewSoloGame = onNewSoloGame, onRematch = onRematch, onExit = onExit, modifier = Modifier.zIndex(30f))
             }
-            PauseLayer(state, onResume, Modifier.zIndex(50f))
+            if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) {
+                PauseLayer(state, onResume, Modifier.zIndex(50f))
+            }
             if (state.showTutorial) {
                 ArenaTutorialOverlay(state.isSoloMode, state.gameType, onTutorialComplete, Modifier.zIndex(60f))
             }
@@ -152,6 +170,7 @@ fun GenericPuzzleGrid(
     onWordSelection: (CellPosition, CellPosition, String) -> Unit,
     onDirectMove: (Int, Int, Any?) -> Unit,
     secretKey: List<String> = emptyList(),
+    secretCanGuess: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     if (state.gameType == GameType.NONOGRAM) {
@@ -285,7 +304,7 @@ fun GenericPuzzleGrid(
                         val side = listOf("left" to localX, "right" to width - localX, "top" to localY, "bottom" to height - localY).minBy { it.second }.first
                         onDirectMove(row, col, side)
                     }
-                    GameType.SECRET_CODE -> onDirectMove(row, col, mapOf("action" to "GUESS"))
+                    GameType.SECRET_CODE -> if (secretCanGuess) onDirectMove(row, col, mapOf("action" to "GUESS")) else onCellSelected(row, col)
                     else -> onCellSelected(row, col)
                 }
             }
@@ -506,7 +525,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
             else drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
             if (meta["center"] == true && value == null) drawCircle(Color(0xFFFFC107), min(width, height) * .11f, center)
         }
-        GameType.SECRET_CODE -> drawCenteredText(value, center, width * .92f, textMeasurer, Color(0xFF102A56))
+        GameType.SECRET_CODE -> drawFittedCellText(value, center, width, textMeasurer, Color(0xFF102A56))
         GameType.HITORI -> {
             drawCenteredText(value, center, width, textMeasurer, if (isBlocked) Color.White else Color(0xFF102A56))
         }
@@ -549,6 +568,54 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCenteredText(
     if (value == null) return
     val layout = textMeasurer.measure(value.toString(), TextStyle(color = color, fontSize = (width * .35f).coerceIn(10f, 24f).sp, fontWeight = FontWeight.Bold))
     drawText(layout, topLeft = Offset(center.x - layout.size.width / 2f, center.y - layout.size.height / 2f))
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFittedCellText(
+    value: Any?, center: Offset, width: Float, textMeasurer: androidx.compose.ui.text.TextMeasurer, color: Color,
+) {
+    val original = value?.toString().orEmpty()
+    if (original.isEmpty()) return
+    var display = original
+    var sizeSp = (width * .23f).coerceIn(7f, 15f)
+    var layout = textMeasurer.measure(display, TextStyle(color = color, fontSize = sizeSp.sp, fontWeight = FontWeight.Black))
+    while (layout.size.width > width - 8f && sizeSp > 6f) {
+        sizeSp -= 1f
+        layout = textMeasurer.measure(display, TextStyle(color = color, fontSize = sizeSp.sp, fontWeight = FontWeight.Black))
+    }
+    if (layout.size.width > width - 6f) {
+        display = original.take(6) + "…"
+        layout = textMeasurer.measure(display, TextStyle(color = color, fontSize = 6.sp, fontWeight = FontWeight.Black))
+    }
+    drawText(layout, topLeft = Offset(center.x - layout.size.width / 2f, center.y - layout.size.height / 2f))
+}
+
+@Composable
+private fun SecretRoleHeader(state: ArenaUiState) {
+    val captain = state.secretRole == "CAPTAIN"
+    val teamColor = if (state.secretTeam == "RED") Color(0xFFE53935) else Color(0xFF1565C0)
+    Surface(
+        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+        color = teamColor.copy(alpha = .13f), border = androidx.compose.foundation.BorderStroke(2.dp, teamColor),
+    ) {
+        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                when (state.secretRole) {
+                    "CAPTAIN" -> "🕵️ ERES EL CAPITÁN"
+                    "OPERATIVE" -> "👥 ERES OPERATIVO"
+                    else -> "🔐 ASIGNANDO TU ROL…"
+                },
+                fontSize = 22.sp, fontWeight = FontWeight.Black, color = teamColor,
+            )
+            Text(
+                when (state.secretRole) {
+                    "CAPTAIN" -> "Da una pista de una palabra y un número"
+                    "OPERATIVE" -> "Adivina las palabras cuando llegue tu turno"
+                    else -> "El servidor está preparando los equipos"
+                },
+                fontWeight = FontWeight.Bold, color = Color(0xFF263238),
+            )
+        }
+    }
 }
 
 @Composable

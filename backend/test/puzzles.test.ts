@@ -97,15 +97,18 @@ describe("motor genérico de puzzles", () => {
     const engine = new GenericPuzzleEngine("SECRET_CODE", "secret-test", { seed: "secret" });
     engine.snapshot(players, 1_000);
     const ids = ["redCaptain", "blueCaptain", "redAgent", "blueAgent"];
-    const captainId = ids.find((id) => engine.secretStateFor(id)?.team === "RED" && engine.secretStateFor(id)?.role === "CAPTAIN")!;
-    const agentId = ids.find((id) => engine.secretStateFor(id)?.team === "RED" && engine.secretStateFor(id)?.role === "OPERATIVE")!;
+    const currentTeam = engine.secretStateFor(ids[0]!)?.currentTeam;
+    const captainId = ids.find((id) => engine.secretStateFor(id)?.team === currentTeam && engine.secretStateFor(id)?.role === "CAPTAIN")!;
+    const agentId = ids.find((id) => engine.secretStateFor(id)?.team === currentTeam && engine.secretStateFor(id)?.role === "OPERATIVE")!;
     assert.equal((engine.secretStateFor(captainId)?.key as string[]).length, 25);
     assert.equal(engine.secretStateFor(agentId)?.key, null);
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, captainId);
     assert.equal(engine.makeMove(captainId, { requestId: "clue", row: 0, col: 0, val: { action: "CLUE", clue: "IDEA", count: 2 } }, players, 1_100).accepted, true);
-    const redIndex = (engine.secretStateFor(captainId)?.key as string[]).findIndex((entry) => entry === "RED");
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, agentId);
+    const redIndex = (engine.secretStateFor(captainId)?.key as string[]).findIndex((entry) => entry === currentTeam);
     const guess = engine.makeMove(agentId, { requestId: "guess", row: Math.floor(redIndex / 5), col: redIndex % 5, val: { action: "GUESS" } }, players, 1_200);
     assert.equal(guess.accepted, true);
-    assert.equal(engine.snapshot(players).board[Math.floor(redIndex / 5)]![redIndex % 5]!.meta.revealedColor, "RED");
+    assert.equal(engine.snapshot(players).board[Math.floor(redIndex / 5)]![redIndex % 5]!.meta.revealedColor, currentTeam);
   });
 
   it("inyecta pistas iniciales bloqueadas en Kakuro y Criptogramas", () => {
@@ -167,6 +170,20 @@ describe("motor genérico de puzzles", () => {
     assert.equal(engine.makeMove("p1", { requestId: "first", row: 0, col: 0, val: "right" }, players).accepted, true);
     assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p2");
   });
+
+  for (const turnGame of ["MINESWEEPER", "CROSSWORD"] as const) {
+    it(`${turnGame} publica el jugador activo, rechaza fuera de turno y rota`, () => {
+      const players = new ArenaGame(`turn-${turnGame}`);
+      players.addPlayer("p1", "Uno"); players.addPlayer("p2", "Dos");
+      players.startMatch({ gameType: turnGame, powersEnabled: true, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+      const engine = new GenericPuzzleEngine(turnGame, `turn-${turnGame}`);
+      assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p1");
+      const proposal = engine.createBotMove(1, "p1")!;
+      assert.equal(engine.makeMove("p2", { ...proposal, requestId: `early-${turnGame}` }, players).accepted, false);
+      assert.equal(engine.makeMove("p1", { ...proposal, requestId: `valid-${turnGame}` }, players).accepted, true);
+      assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p2");
+    });
+  }
 
   it("Ojo de Lince nunca conduce a una mina ni a una penalización", () => {
     const players = new ArenaGame("reveal-players");

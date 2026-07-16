@@ -294,7 +294,9 @@ fun ArenaScreen(
                     modifier = Modifier.zIndex(40f),
                 )
             }
-            PauseLayer(state, onResume, Modifier.zIndex(50f))
+            if (state.isLocallyPaused || state.roomState?.phase == RoomPhase.PAUSED) {
+                PauseLayer(state, onResume, Modifier.zIndex(50f))
+            }
         }
     }
 }

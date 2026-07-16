@@ -15,6 +15,7 @@ import type { PuzzleGenerationOptions } from "./types.js";
 
 const GENERIC_HIT_POINTS = 10;
 const GENERIC_ENERGY = 25;
+const STRICT_PLAYER_TURN_GAMES = new Set<GameType>(["MINESWEEPER", "CROSSWORD", "DOTS_AND_BOXES"]);
 
 interface WordPlacement {
   word: string;
@@ -44,7 +45,7 @@ export class GenericPuzzleEngine {
   private activePlayerId: string | null = null;
   private turnEndsAt = 0;
   private readonly secretAssignments = new Map<string, { team: "RED" | "BLUE"; role: "CAPTAIN" | "OPERATIVE" }>();
-  private secretCurrentTeam: "RED" | "BLUE" = "RED";
+  private secretCurrentTeam: "RED" | "BLUE" = "BLUE";
   private secretClue: { word: string; count: number; remaining: number } | null = null;
   private secretWinnerTeam: "RED" | "BLUE" | null = null;
 
@@ -57,7 +58,7 @@ export class GenericPuzzleEngine {
 
   snapshot(game: ArenaGame, now = Date.now()): GenericBoardState {
     if (this.gameType === "CROSS_LETTERS") this.syncLetterPlayers(game, now);
-    if (this.gameType === "DOTS_AND_BOXES") this.syncDotsPlayers(game);
+    if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) this.syncTurnPlayers(game);
     if (this.gameType === "SECRET_CODE") this.syncSecretPlayers(game);
     return {
       gameId: this.gameId,
@@ -77,8 +78,9 @@ export class GenericPuzzleEngine {
           tilesRemaining: this.letterBag.length,
           rackCounts: Object.fromEntries([...this.racks].map(([id, rack]) => [id, rack.length]))
         } : {}),
-        ...(this.gameType === "DOTS_AND_BOXES" ? { currentPlayerTurn: this.activePlayerId } : {}),
+        ...(STRICT_PLAYER_TURN_GAMES.has(this.gameType) ? { currentPlayerTurn: this.activePlayerId } : {}),
         ...(this.gameType === "SECRET_CODE" ? {
+          currentPlayerTurn: this.secretActivePlayerId(),
           currentTeam: this.secretCurrentTeam,
           clue: this.secretClue,
           winnerTeam: this.secretWinnerTeam,
@@ -144,11 +146,14 @@ export class GenericPuzzleEngine {
       this.syncLetterPlayers(game, now);
       if (this.activePlayerId !== playerId) return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno");
     }
-    if (this.gameType === "DOTS_AND_BOXES") {
-      this.syncDotsPlayers(game);
-      if (this.activePlayerId !== playerId) return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno para trazar");
+    if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) {
+      this.syncTurnPlayers(game);
+      if (this.activePlayerId !== playerId) return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno");
     }
-    if (this.gameType === "SECRET_CODE") this.syncSecretPlayers(game);
+    if (this.gameType === "SECRET_CODE") {
+      this.syncSecretPlayers(game);
+      if (this.secretActivePlayerId() !== playerId) return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno de equipo");
+    }
 
     const cell = this.board[move.row]![move.col]!;
     if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH"].includes(this.gameType))) {
@@ -159,6 +164,7 @@ export class GenericPuzzleEngine {
     if (!outcome.correct) {
       const penaltyMs = this.gameType === "MINESWEEPER" && outcome.hitMine ? 5_000 : 3_000;
       game.applyGenericPenalty(playerId, now + penaltyMs);
+      if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) this.advanceStrictTurn();
       this.revision += 1;
       return {
         accepted: false,
@@ -175,7 +181,7 @@ export class GenericPuzzleEngine {
     game.applyGenericSuccess(playerId, points, options.rewardEnergy === false || points <= 0 ? 0 : GENERIC_ENERGY, now);
     this.completed = this.isPuzzleComplete();
     if (this.gameType === "CROSS_LETTERS") this.advanceLetterTurn(now);
-    if (this.gameType === "DOTS_AND_BOXES") this.advanceDotsTurn();
+    if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) this.advanceStrictTurn();
     this.revision += 1;
     return {
       accepted: true,
@@ -191,7 +197,7 @@ export class GenericPuzzleEngine {
   createBotMove(accuracy: number, playerId?: string): GenericMove | null {
     if (this.gameType === "CROSS_LETTERS") return this.createCrossLettersBotMove(accuracy, playerId);
     if (this.gameType === "SECRET_CODE") return this.createSecretBotMove(playerId);
-    if (this.gameType === "DOTS_AND_BOXES" && playerId && this.activePlayerId !== playerId) return null;
+    if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && playerId && this.activePlayerId !== playerId) return null;
     if (this.gameType === "WORD_SEARCH") {
       const unresolved = this.unresolvedWordPlacements();
       const placement = unresolved[Math.floor(Math.random() * unresolved.length)];
@@ -489,7 +495,7 @@ export class GenericPuzzleEngine {
     }
   }
 
-  private syncDotsPlayers(game: ArenaGame): void {
+  private syncTurnPlayers(game: ArenaGame): void {
     const ids = game.snapshot().players.map((player) => player.id);
     this.turnOrder = ids;
     if (!this.activePlayerId || !ids.includes(this.activePlayerId)) this.activePlayerId = ids[0] ?? null;
@@ -525,7 +531,13 @@ export class GenericPuzzleEngine {
     return remaining;
   }
 
-  private advanceDotsTurn(): void {
+  private secretActivePlayerId(): string | null {
+    const requiredRole = this.secretClue == null ? "CAPTAIN" : "OPERATIVE";
+    return [...this.secretAssignments.entries()]
+      .find(([, assignment]) => assignment.team === this.secretCurrentTeam && assignment.role === requiredRole)?.[0] ?? null;
+  }
+
+  private advanceStrictTurn(): void {
     if (!this.turnOrder.length) return;
     const index = Math.max(0, this.turnOrder.indexOf(this.activePlayerId ?? ""));
     this.activePlayerId = this.turnOrder[(index + 1) % this.turnOrder.length]!;
