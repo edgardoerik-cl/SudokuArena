@@ -20,6 +20,7 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "SLITHERLINK": return slitherlink(random, difficulty);
     case "CRYPTARITHM": return cryptarithm(random, difficulty);
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
+    case "SECRET_CODE": return secretCode(random, difficulty);
     case "SUDOKU": return latinPuzzle(random, 9);
   }
 }
@@ -358,16 +359,45 @@ function crossLetters(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
     const bonus = tripleWord.has(key) ? "TW" : doubleWord.has(key) ? "DW" : tripleLetter.has(key) ? "TL" : doubleLetter.has(key) ? "DL" : "NONE";
     return cell(null, false, { bonus, center: row === 7 && col === 7 });
   });
+  // Cada partida empieza con una palabra distinta cruzando el centro. Así la
+  // primera jugada ya tiene un ancla legal y no depende de que alguien conozca
+  // una regla implícita de Scrabble.
+  const centralCandidates = SPANISH_DICTIONARY
+    .map((entry) => normalizeWord(entry.word))
+    .filter((word) => word.length >= 4 && word.length <= 7);
+  const centralWord = random.pick(centralCandidates) ?? "ARENA";
+  const centralStart = 7 - Math.floor(centralWord.length / 2);
+  [...centralWord].forEach((letter, index) => {
+    const target = board[7]![centralStart + index]!;
+    target.value = letter;
+    target.isRevealed = true;
+    target.meta = { ...target.meta, given: true, centralAnchor: true };
+  });
   return {
     board,
     answers: matrix<CellValue>(size, size, () => null),
     meta: {
       letterScores: SCRABBLE_SCORES,
+      centralWord,
       turnSeconds: difficulty === "EXPERT" ? 35 : difficulty === "HARD" ? 45 : 60,
       instructions: "Forma palabras españolas conectadas. DL/TL multiplican letras y DW/TW la palabra.",
       difficulty,
       seedHint: random.int(0, 999_999)
     }
+  };
+}
+
+function secretCode(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const words = random.shuffle(SPANISH_DICTIONARY.map((entry) => normalizeWord(entry.word)))
+    .filter((word, index, all) => word.length >= 3 && word.length <= 10 && all.indexOf(word) === index)
+    .slice(0, 25);
+  const fallback = ["ARENA", "LOGICA", "NUBE", "SOL", "LUNA", "RIO", "MAR", "FUEGO", "TIERRA", "AIRE", "CASA", "ARBOL", "RELOJ", "PUENTE", "CLAVE", "JUEGO", "EQUIPO", "ROJO", "AZUL", "PISTA", "MENTE", "CAMPO", "TORRE", "REY", "VIAJE"];
+  while (words.length < 25) words.push(fallback[words.length]!);
+  const identities = random.shuffle([...Array(8).fill("RED"), ...Array(8).fill("BLUE"), ...Array(8).fill("NEUTRAL"), "ASSASSIN"]) as string[];
+  return {
+    board: matrix(5, 5, (row, col) => cell(words[row * 5 + col]!, true, { wordIndex: row * 5 + col })),
+    answers: matrix<CellValue>(5, 5, (row, col) => identities[row * 5 + col]!),
+    meta: { instructions: "El capitán da una pista y un número. Los operativos eligen palabras; evita al asesino.", difficulty }
   };
 }
 
@@ -383,3 +413,4 @@ function blockedCell(meta: GenericCell["meta"] = {}): GenericCell { return { val
 function matrix<T>(rows: number, columns: number, create: (row: number, col: number) => T): T[][] { return Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, col) => create(row, col))); }
 function runClues(values: boolean[]): number[] { const result: number[] = []; let run = 0; for (const value of values) { if (value) run += 1; else if (run) { result.push(run); run = 0; } } if (run) result.push(run); return result.length ? result : [0]; }
 function transpose<T>(value: T[][]): T[][] { return value[0]!.map((_, col) => value.map((row) => row[col]!)); }
+function normalizeWord(value: string): string { return value.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-ZÑ]/g, ""); }

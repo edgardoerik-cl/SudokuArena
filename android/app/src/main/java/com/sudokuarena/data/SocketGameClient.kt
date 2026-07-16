@@ -103,6 +103,22 @@ class SocketGameClient(
                 turnEndsAt = payload.optLong("turnEndsAt", 0L),
             )
         } }
+        socket.on("secret:role-state") { args -> parseSafely(args) { payload ->
+            val clue = payload.optJSONObject("clue")
+            RealtimeEvent.SecretRoleUpdated(
+                team = payload.optString("team"), role = payload.optString("role"),
+                key = payload.optJSONArray("key")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
+                currentTeam = payload.optString("currentTeam"),
+                clue = clue?.optString("word")?.takeIf(String::isNotBlank),
+                clueCount = clue?.optInt("remaining", 0) ?: 0,
+            )
+        } }
+        socket.on("secret:chat-message") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.SecretChatMessage(payload.optString("playerId"), payload.optString("message"), payload.optBoolean("penalized"))
+        } }
+        socket.on("secret:chat-locked") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.SecretChatLocked(payload.optLong("blockedUntil"))
+        } }
         socket.on("generic:move-accepted") { args -> parseSafely(args) { payload ->
             RealtimeEvent.GenericMoveAccepted(
                 requestId = payload.getString("requestId"),
@@ -293,6 +309,10 @@ class SocketGameClient(
         socket.emit("send_reaction", JSONObject().put("emojiId", emojiId))
     }
 
+    override fun sendSecretChat(message: String) {
+        socket.emit("secret:chat-send", JSONObject().put("message", message))
+    }
+
     override fun requestPause() { socket.emit("pause:request") }
 
     override fun respondPause(accepted: Boolean) {
@@ -390,6 +410,7 @@ private fun parseRoomState(json: JSONObject): RoomState {
         rematchVotes = json.optInt("rematchVotes", 0),
         pauseRequesterId = json.optString("pauseRequesterId").takeIf(String::isNotBlank),
         pauseVotes = json.optInt("pauseVotes", 0),
+        pauseNoVotes = json.optInt("pauseNoVotes", 0),
         pauseRequired = json.optInt("pauseRequired", 0),
         resumeCountdownEndsAt = if (json.isNull("resumeCountdownEndsAt")) null else json.optLong("resumeCountdownEndsAt"),
     )

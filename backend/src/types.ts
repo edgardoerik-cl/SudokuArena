@@ -37,6 +37,7 @@ export interface RoomState {
   rematchVotes: number;
   pauseRequesterId: string | null;
   pauseVotes: number;
+  pauseNoVotes: number;
   pauseRequired: number;
   resumeCountdownEndsAt: number | null;
 }

@@ -20,17 +20,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -49,14 +44,11 @@ import com.sudokuarena.domain.RoomPhase
 fun PauseControl(
     state: ArenaUiState,
     onRequestPause: () -> Unit,
-    onRespond: (Boolean) -> Unit,
 ) {
     val active = if (state.isSoloMode) !state.soloCompleted else state.roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
     if (!active) return
     val room = state.roomState
     val pending = !state.isSoloMode && room?.pauseRequesterId != null
-    val pendingForMe = pending && room?.pauseRequesterId != state.playerId
-    var menuOpen by remember(pending) { mutableStateOf(false) }
     val pulse by rememberInfiniteTransition(label = "pauseBadge").animateFloat(
         initialValue = .82f,
         targetValue = 1.18f,
@@ -66,7 +58,7 @@ fun PauseControl(
     Box {
         NeonActionButton(
             contentDescription = if (pending) "Revisar solicitud de pausa" else if (state.isSoloMode) "Pausar partida" else "Solicitar pausa",
-            onClick = { if (pending) menuOpen = true else onRequestPause() },
+            onClick = { if (!pending) onRequestPause() },
         ) {
             val barWidth = size.width * .17f
             val barHeight = size.height * .52f
@@ -82,16 +74,38 @@ fun PauseControl(
                     .background(Color(0xFFE53935), CircleShape),
             )
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            val requester = state.players.firstOrNull { it.id == room?.pauseRequesterId }?.name ?: "Un jugador"
-            DropdownMenuItem(
-                text = { Text(if (pendingForMe) "$requester solicita una pausa" else "Esperando respuestas…", fontWeight = FontWeight.Bold) },
-                onClick = {},
-                enabled = false,
-            )
-            if (pendingForMe) {
-                DropdownMenuItem(text = { Text("Aceptar", color = Color(0xFF00875A)) }, onClick = { menuOpen = false; onRespond(true) })
-                DropdownMenuItem(text = { Text("Rechazar", color = Color(0xFFC62828)) }, onClick = { menuOpen = false; onRespond(false) })
+    }
+}
+
+@Composable
+fun PauseVoteBanner(state: ArenaUiState, onRespond: (Boolean) -> Unit) {
+    val room = state.roomState ?: return
+    val requesterId = room.pauseRequesterId ?: return
+    if (state.isSoloMode || room.phase == RoomPhase.PAUSED) return
+    val requester = state.players.firstOrNull { it.id == requesterId }?.name ?: "Un jugador"
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = Color(0xFFF8FAFF),
+        border = BorderStroke(2.dp, Color(0xFF7C3AED)),
+        shadowElevation = 6.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("$requester solicita pausa", fontWeight = FontWeight.Black, color = Color(0xFF102A56))
+                Text("Sí: ${room.pauseVotes}  |  No: ${room.pauseNoVotes}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            if (requesterId != state.playerId) {
+                Surface(shape = CircleShape, color = Color(0xFF00A651)) {
+                    IconButton(onClick = { onRespond(true) }, modifier = Modifier.size(40.dp)) { Text("✓", color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp) }
+                }
+                Surface(shape = CircleShape, color = Color(0xFFE53935)) {
+                    IconButton(onClick = { onRespond(false) }, modifier = Modifier.size(40.dp)) { Text("×", color = Color.White, fontWeight = FontWeight.Black, fontSize = 22.sp) }
+                }
             }
         }
     }

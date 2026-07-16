@@ -209,15 +209,16 @@ describe("ArenaGame", () => {
 
   it("comparte el puntaje de equipo y la conquista de celda en 2 vs 2", () => {
     const game = new ArenaGame();
-    for (const id of ["p1", "p2", "p3", "p4"]) game.addPlayer(id, id);
+    for (const id of ["p1", "p2", "p3", "p4"]) game.addPlayer(id, id, id === "p1");
     game.startMatch({ gameType: "SUDOKU", powersEnabled: true, teamMode: "TWO_V_TWO", tileType: "COLORS", botDifficulty: "MEDIUM" }, "p1");
-    game.place("p1", { requestId: "team", row: 0, column: 0, value: 5 });
+    const correct = game.createBotProposal("p1", 1)!;
+    game.place("p1", { ...correct, requestId: "team" });
     const state = game.snapshot();
 
     assert.equal(state.players.find((player) => player.id === "p1")?.teamScore, 10);
     assert.equal(state.players.find((player) => player.id === "p3")?.teamScore, 10);
     assert.equal(state.players.find((player) => player.id === "p2")?.teamScore, 0);
-    assert.equal(state.board[0]![0]!.ownerTeamId, "TEAM_A");
+    assert.equal(state.board[correct.row]![correct.column]!.ownerTeamId, "TEAM_A");
   });
 
   it("desactiva energía y niebla cuando el host apaga poderes", () => {
@@ -235,9 +236,9 @@ describe("ArenaGame", () => {
 
   it("otorga al Jefe carga y puntos dobles en 3 vs 1", () => {
     const game = new ArenaGame();
-    for (const id of ["boss", "r1", "r2", "r3"]) game.addPlayer(id, id);
+    for (const id of ["boss", "r1", "r2", "r3"]) game.addPlayer(id, id, id === "boss");
     game.startMatch({ gameType: "SUDOKU", powersEnabled: true, teamMode: "THREE_V_ONE", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "boss");
-    game.place("boss", { requestId: "boss-hit", row: 0, column: 0, value: 5 });
+    game.place("boss", { ...game.createBotProposal("boss", 1)!, requestId: "boss-hit" });
     const boss = game.snapshot().players.find((player) => player.id === "boss");
 
     assert.equal(boss?.role, "BOSS");

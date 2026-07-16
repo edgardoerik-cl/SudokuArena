@@ -1,8 +1,8 @@
 {
   "name": "multi-arena",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "private": true,
-  "description": "Multi Arena: catorce juegos de lógica competitivos en una sola plataforma",
+  "description": "Multi Arena: dieciséis juegos de lógica competitivos en una sola plataforma",
   "engines": {
     "node": ">=20"
   },

@@ -39,7 +39,7 @@ enum class PuzzleDifficulty { EASY, MEDIUM, HARD, EXPERT }
 enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
-    NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM, CROSS_LETTERS,
+    NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM, CROSS_LETTERS, SECRET_CODE,
 }
 enum class RoomPhase { LOBBY, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
@@ -83,6 +83,7 @@ data class RoomState(
     val rematchVotes: Int = 0,
     val pauseRequesterId: String? = null,
     val pauseVotes: Int = 0,
+    val pauseNoVotes: Int = 0,
     val pauseRequired: Int = 0,
     val resumeCountdownEndsAt: Long? = null,
 )
@@ -169,6 +170,12 @@ sealed interface RealtimeEvent {
     data class GenericMoveAccepted(val requestId: String, val points: Int, val completed: Boolean) : RealtimeEvent
     data class GenericMoveRejected(val requestId: String, val code: String, val message: String) : RealtimeEvent
     data class LetterRackUpdated(val letters: List<String>, val activePlayerId: String?, val turnEndsAt: Long) : RealtimeEvent
+    data class SecretRoleUpdated(
+        val team: String, val role: String, val key: List<String>,
+        val currentTeam: String, val clue: String?, val clueCount: Int,
+    ) : RealtimeEvent
+    data class SecretChatMessage(val playerId: String, val message: String, val penalized: Boolean) : RealtimeEvent
+    data class SecretChatLocked(val blockedUntil: Long) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 
@@ -194,6 +201,7 @@ interface GameRealtimeGateway {
         requestId: String? = null,
     )
     fun sendReaction(emojiId: String)
+    fun sendSecretChat(message: String)
     fun requestPause()
     fun respondPause(accepted: Boolean)
     fun resumePausedGame()

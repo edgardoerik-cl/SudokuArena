@@ -3,10 +3,10 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `3.2.0` amplía la aplicación a una Multiarena con quince juegos:
+La versión `3.3.0` amplía la aplicación a una Multiarena con dieciséis juegos e incorpora Código Secreto, pausa inteligente y Letras Cruzadas con bolsa finita:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
-Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink y
-Criptogramas y Letras Cruzadas. Todos comparten salas, colores de conquista,
+Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink,
+Criptogramas, Letras Cruzadas y Código Secreto. Todos comparten salas, colores de conquista,
 Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
 
 Los tableros se generan desde una semilla distinta y admiten dificultad
@@ -51,7 +51,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v3.2.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v3.3.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

@@ -171,6 +171,11 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("DL·TW", "Aprovecha premios", "Las casillas DL/TL multiplican una letra; DW/TW multiplican toda la palabra."),
         TutorialStep("★", "Conecta palabras", "La primera palabra cruza la estrella central y las siguientes deben enlazarse al tablero."),
     )
+    GameType.SECRET_CODE -> listOf(
+        TutorialStep("5×5", "Dos equipos, una clave", "Cada palabra oculta un agente rojo, azul, neutral o al asesino."),
+        TutorialStep("💡 3", "El capitán conecta ideas", "Solo el capitán ve los colores y entrega una pista de una palabra más un número."),
+        TutorialStep("⚠", "Operativos: elijan", "Toca palabras relacionadas. Una neutral termina el turno; el asesino pierde la partida al instante."),
+    )
 }
 
 @Composable

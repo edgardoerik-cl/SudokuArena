@@ -50,7 +50,7 @@ describe("motor genérico de puzzles", () => {
     }));
   });
 
-  for (const gameType of GAME_TYPES.filter((type) => type !== "SUDOKU" && type !== "CROSS_LETTERS")) {
+  for (const gameType of GAME_TYPES.filter((type) => !["SUDOKU", "CROSS_LETTERS", "SECRET_CODE"].includes(type))) {
     it(`genera y permite a un Bot resolver ${gameType}`, () => {
       const players = new ArenaGame(`players-${gameType}`);
       players.addPlayer("bot", "Bot_Matriz", true);
@@ -85,6 +85,27 @@ describe("motor genérico de puzzles", () => {
     assert.equal(result.accepted, true);
     assert.ok(result.points > 0);
     assert.ok(engine.snapshot(players).board.flat().some((cell) => typeof cell.value === "string"));
+  });
+
+  it("Código Secreto oculta la clave a operativos y resuelve turnos capitán/operativo", () => {
+    const players = new ArenaGame("secret-players");
+    players.addPlayer("redCaptain", "Capitana");
+    players.addPlayer("blueCaptain", "Capitán azul");
+    players.addPlayer("redAgent", "Agente rojo");
+    players.addPlayer("blueAgent", "Agente azul");
+    players.startMatch({ gameType: "SECRET_CODE", powersEnabled: true, teamMode: "TWO_V_TWO", tileType: "NUMBERS", botDifficulty: "HARD", puzzleDifficulty: "MEDIUM" }, "redCaptain");
+    const engine = new GenericPuzzleEngine("SECRET_CODE", "secret-test", { seed: "secret" });
+    engine.snapshot(players, 1_000);
+    const ids = ["redCaptain", "blueCaptain", "redAgent", "blueAgent"];
+    const captainId = ids.find((id) => engine.secretStateFor(id)?.team === "RED" && engine.secretStateFor(id)?.role === "CAPTAIN")!;
+    const agentId = ids.find((id) => engine.secretStateFor(id)?.team === "RED" && engine.secretStateFor(id)?.role === "OPERATIVE")!;
+    assert.equal((engine.secretStateFor(captainId)?.key as string[]).length, 25);
+    assert.equal(engine.secretStateFor(agentId)?.key, null);
+    assert.equal(engine.makeMove(captainId, { requestId: "clue", row: 0, col: 0, val: { action: "CLUE", clue: "IDEA", count: 2 } }, players, 1_100).accepted, true);
+    const redIndex = (engine.secretStateFor(captainId)?.key as string[]).findIndex((entry) => entry === "RED");
+    const guess = engine.makeMove(agentId, { requestId: "guess", row: Math.floor(redIndex / 5), col: redIndex % 5, val: { action: "GUESS" } }, players, 1_200);
+    assert.equal(guess.accepted, true);
+    assert.equal(engine.snapshot(players).board[Math.floor(redIndex / 5)]![redIndex % 5]!.meta.revealedColor, "RED");
   });
 
   it("inyecta pistas iniciales bloqueadas en Kakuro y Criptogramas", () => {
@@ -134,6 +155,17 @@ describe("motor genérico de puzzles", () => {
     assert.equal(result.accepted, true);
     assert.equal(state.board[0]?.[0]?.meta.right, true);
     assert.equal(state.board[0]?.[1]?.meta.left, true);
+  });
+
+  it("Timbiriche rechaza al jugador fuera de turno y avanza tras una línea", () => {
+    const players = new ArenaGame("dots-turns");
+    players.addPlayer("p1", "Uno"); players.addPlayer("p2", "Dos");
+    players.startMatch({ gameType: "DOTS_AND_BOXES", powersEnabled: true, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("DOTS_AND_BOXES", "dots-turns");
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p1");
+    assert.equal(engine.makeMove("p2", { requestId: "early", row: 0, col: 0, val: "right" }, players).accepted, false);
+    assert.equal(engine.makeMove("p1", { requestId: "first", row: 0, col: 0, val: "right" }, players).accepted, true);
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p2");
   });
 
   it("Ojo de Lince nunca conduce a una mina ni a una penalización", () => {

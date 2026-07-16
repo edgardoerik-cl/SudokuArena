@@ -39,9 +39,14 @@ export class GenericPuzzleEngine {
   private readonly processed = new Map<string, Set<string>>();
   private readonly racks = new Map<string, string[]>();
   private readonly suggestedWords = new Map<string, string>();
+  private readonly letterBag = shuffleLetters([...LETTER_BAG, ...LETTER_BAG]);
   private turnOrder: string[] = [];
   private activePlayerId: string | null = null;
   private turnEndsAt = 0;
+  private readonly secretAssignments = new Map<string, { team: "RED" | "BLUE"; role: "CAPTAIN" | "OPERATIVE" }>();
+  private secretCurrentTeam: "RED" | "BLUE" = "RED";
+  private secretClue: { word: string; count: number; remaining: number } | null = null;
+  private secretWinnerTeam: "RED" | "BLUE" | null = null;
 
   constructor(readonly gameType: GameType, readonly gameId: string, options: PuzzleGenerationOptions = {}) {
     const blueprint = createPuzzleBlueprint(gameType, options);
@@ -52,6 +57,8 @@ export class GenericPuzzleEngine {
 
   snapshot(game: ArenaGame, now = Date.now()): GenericBoardState {
     if (this.gameType === "CROSS_LETTERS") this.syncLetterPlayers(game, now);
+    if (this.gameType === "DOTS_AND_BOXES") this.syncDotsPlayers(game);
+    if (this.gameType === "SECRET_CODE") this.syncSecretPlayers(game);
     return {
       gameId: this.gameId,
       gameType: this.gameType,
@@ -67,7 +74,15 @@ export class GenericPuzzleEngine {
         ...(this.gameType === "CROSS_LETTERS" ? {
           activePlayerId: this.activePlayerId,
           turnEndsAt: this.turnEndsAt,
+          tilesRemaining: this.letterBag.length,
           rackCounts: Object.fromEntries([...this.racks].map(([id, rack]) => [id, rack.length]))
+        } : {}),
+        ...(this.gameType === "DOTS_AND_BOXES" ? { currentPlayerTurn: this.activePlayerId } : {}),
+        ...(this.gameType === "SECRET_CODE" ? {
+          currentTeam: this.secretCurrentTeam,
+          clue: this.secretClue,
+          winnerTeam: this.secretWinnerTeam,
+          remaining: this.secretRemainingCounts()
         } : {})
       }
     };
@@ -84,6 +99,27 @@ export class GenericPuzzleEngine {
       [rack[index], rack[target]] = [rack[target]!, rack[index]!];
     }
     return [...rack];
+  }
+
+  secretStateFor(playerId: string): Record<string, unknown> | null {
+    if (this.gameType !== "SECRET_CODE") return null;
+    const assignment = this.secretAssignments.get(playerId);
+    if (!assignment) return null;
+    return {
+      ...assignment,
+      currentTeam: this.secretCurrentTeam,
+      clue: this.secretClue,
+      winnerTeam: this.secretWinnerTeam,
+      key: assignment.role === "CAPTAIN" ? this.answers.flat().map(String) : null
+    };
+  }
+
+  secretWords(): string[] {
+    return this.gameType === "SECRET_CODE" ? this.board.flat().map((cell) => String(cell.value ?? "")) : [];
+  }
+
+  secretTeamFor(playerId: string): string | null {
+    return this.secretAssignments.get(playerId)?.team ?? null;
   }
 
   makeMove(
@@ -108,6 +144,11 @@ export class GenericPuzzleEngine {
       this.syncLetterPlayers(game, now);
       if (this.activePlayerId !== playerId) return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno");
     }
+    if (this.gameType === "DOTS_AND_BOXES") {
+      this.syncDotsPlayers(game);
+      if (this.activePlayerId !== playerId) return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno para trazar");
+    }
+    if (this.gameType === "SECRET_CODE") this.syncSecretPlayers(game);
 
     const cell = this.board[move.row]![move.col]!;
     if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH"].includes(this.gameType))) {
@@ -134,6 +175,7 @@ export class GenericPuzzleEngine {
     game.applyGenericSuccess(playerId, points, options.rewardEnergy === false || points <= 0 ? 0 : GENERIC_ENERGY, now);
     this.completed = this.isPuzzleComplete();
     if (this.gameType === "CROSS_LETTERS") this.advanceLetterTurn(now);
+    if (this.gameType === "DOTS_AND_BOXES") this.advanceDotsTurn();
     this.revision += 1;
     return {
       accepted: true,
@@ -148,6 +190,8 @@ export class GenericPuzzleEngine {
   /** Produce una intención; siempre vuelve a pasar por `makeMove`. */
   createBotMove(accuracy: number, playerId?: string): GenericMove | null {
     if (this.gameType === "CROSS_LETTERS") return this.createCrossLettersBotMove(accuracy, playerId);
+    if (this.gameType === "SECRET_CODE") return this.createSecretBotMove(playerId);
+    if (this.gameType === "DOTS_AND_BOXES" && playerId && this.activePlayerId !== playerId) return null;
     if (this.gameType === "WORD_SEARCH") {
       const unresolved = this.unresolvedWordPlacements();
       const placement = unresolved[Math.floor(Math.random() * unresolved.length)];
@@ -232,6 +276,7 @@ export class GenericPuzzleEngine {
     cell: GenericCell
   ): { correct: boolean; hitMine?: boolean; points?: number } {
     if (this.gameType === "CROSS_LETTERS") return this.applyCrossLettersMove(playerId, move);
+    if (this.gameType === "SECRET_CODE") return this.applySecretCodeMove(playerId, move, cell);
 
     if (this.gameType === "NURIKABE") {
       const action = String(move.val ?? "").toUpperCase();
@@ -407,6 +452,7 @@ export class GenericPuzzleEngine {
   }
 
   private isPuzzleComplete(): boolean {
+    if (this.gameType === "SECRET_CODE") return this.completed;
     if (this.gameType === "MINESWEEPER") {
       return this.board.every((row, y) => row.every((cell, x) => this.answers[y]![x] === true || cell.ownerId !== null));
     }
@@ -424,14 +470,17 @@ export class GenericPuzzleEngine {
         return expected.every((edge) => cell.meta[edge] === true);
       }));
     }
-    if (this.gameType === "CROSS_LETTERS") return false;
+    if (this.gameType === "CROSS_LETTERS") {
+      return this.letterBag.length === 0 && [...this.racks.values()].every((rack) => rack.length === 0 || findWordForRack(rack) === null);
+    }
     return this.board.every((row, y) => row.every((cell, x) => this.answers[y]![x] === null || cell.isBlocked || cell.ownerId !== null));
   }
 
   private syncLetterPlayers(game: ArenaGame, now: number): void {
-    const ids = game.snapshot(now).players.map((player) => player.id);
+    const players = game.snapshot(now).players;
+    const ids = players.map((player) => player.id);
     this.turnOrder = ids;
-    for (const id of ids) this.ensureRack(id);
+    for (const player of players) this.ensureRack(player.id, player.isBot);
     for (const id of [...this.racks.keys()]) if (!ids.includes(id)) this.racks.delete(id);
     if (!this.activePlayerId || !ids.includes(this.activePlayerId) || now >= this.turnEndsAt) {
       const previous = this.activePlayerId ? ids.indexOf(this.activePlayerId) : -1;
@@ -440,24 +489,69 @@ export class GenericPuzzleEngine {
     }
   }
 
-  private ensureRack(playerId: string): void {
+  private syncDotsPlayers(game: ArenaGame): void {
+    const ids = game.snapshot().players.map((player) => player.id);
+    this.turnOrder = ids;
+    if (!this.activePlayerId || !ids.includes(this.activePlayerId)) this.activePlayerId = ids[0] ?? null;
+  }
+
+  private syncSecretPlayers(game: ArenaGame): void {
+    const players = game.snapshot().players;
+    if (this.secretAssignments.size === 0 && players.length > 0) {
+      const shuffled = [...players].sort(() => Math.random() - 0.5);
+      shuffled.forEach((player, index) => {
+        const team: "RED" | "BLUE" = index % 2 === 0 ? "RED" : "BLUE";
+        const hasCaptain = [...this.secretAssignments.values()].some((entry) => entry.team === team && entry.role === "CAPTAIN");
+        this.secretAssignments.set(player.id, { team, role: hasCaptain ? "OPERATIVE" : "CAPTAIN" });
+      });
+      return;
+    }
+    for (const player of players) {
+      if (this.secretAssignments.has(player.id)) continue;
+      const red = [...this.secretAssignments.values()].filter((entry) => entry.team === "RED").length;
+      const blue = [...this.secretAssignments.values()].filter((entry) => entry.team === "BLUE").length;
+      const team: "RED" | "BLUE" = red <= blue ? "RED" : "BLUE";
+      const hasCaptain = [...this.secretAssignments.values()].some((entry) => entry.team === team && entry.role === "CAPTAIN");
+      this.secretAssignments.set(player.id, { team, role: hasCaptain ? "OPERATIVE" : "CAPTAIN" });
+    }
+  }
+
+  private secretRemainingCounts(): Record<string, number> {
+    const remaining: Record<string, number> = { RED: 0, BLUE: 0 };
+    this.board.forEach((row, y) => row.forEach((cell, x) => {
+      const identity = String(this.answers[y]![x]);
+      if (cell.ownerId === null && (identity === "RED" || identity === "BLUE")) remaining[identity] = (remaining[identity] ?? 0) + 1;
+    }));
+    return remaining;
+  }
+
+  private advanceDotsTurn(): void {
+    if (!this.turnOrder.length) return;
+    const index = Math.max(0, this.turnOrder.indexOf(this.activePlayerId ?? ""));
+    this.activePlayerId = this.turnOrder[(index + 1) % this.turnOrder.length]!;
+  }
+
+  private ensureRack(playerId: string, guaranteeBotMove = false): void {
     if (this.racks.has(playerId)) return;
-    const candidates = SPANISH_DICTIONARY.map((entry) => normalizeSpanishWord(entry.word)).filter((word) => word.length >= 3 && word.length <= 7);
-    const suggested = candidates[Math.floor(Math.random() * candidates.length)] ?? "ARENA";
-    this.suggestedWords.set(playerId, suggested);
-    const rack = [...suggested];
-    while (rack.length < 7) rack.push(randomLetter());
-    this.racks.set(playerId, rack.slice(0, 7));
+    let rack: string[] = [];
+    let suggested: string | null = null;
+    for (let attempt = 0; attempt < (guaranteeBotMove ? 80 : 1); attempt += 1) {
+      rack = [];
+      while (rack.length < 7 && this.letterBag.length) rack.push(this.letterBag.pop()!);
+      suggested = findAnchoredWordForRack(rack, String(this.meta.centralWord ?? "ARENA"));
+      if (!guaranteeBotMove || suggested) break;
+      this.letterBag.unshift(...rack);
+      shuffleLetters(this.letterBag);
+    }
+    this.racks.set(playerId, rack);
+    this.suggestedWords.set(playerId, suggested ?? findWordForRack(rack) ?? "");
   }
 
   private refillRack(playerId: string): void {
-    const candidates = SPANISH_DICTIONARY.map((entry) => normalizeSpanishWord(entry.word)).filter((word) => word.length >= 3 && word.length <= 7);
-    const suggested = candidates[Math.floor(Math.random() * candidates.length)] ?? "LOGICA";
-    this.suggestedWords.set(playerId, suggested);
     const rack = this.racks.get(playerId) ?? [];
-    for (const letter of suggested) if (rack.length < 7) rack.push(letter);
-    while (rack.length < 7) rack.push(randomLetter());
+    while (rack.length < 7 && this.letterBag.length) rack.push(this.letterBag.pop()!);
     this.racks.set(playerId, rack);
+    this.suggestedWords.set(playerId, findWordForRack(rack) ?? "");
   }
 
   private advanceLetterTurn(now: number): void {
@@ -512,6 +606,62 @@ export class GenericPuzzleEngine {
     return { correct: true, points: points * wordMultiplier + (newTiles.length === 7 ? 50 : 0) };
   }
 
+  private applySecretCodeMove(playerId: string, move: GenericMove, cell: GenericCell): { correct: boolean; points?: number } {
+    const payload = typeof move.val === "object" && move.val !== null ? move.val as Record<string, unknown> : {};
+    const action = String(payload.action ?? "GUESS").toUpperCase();
+    const assignment = this.secretAssignments.get(playerId);
+    if (!assignment || assignment.team !== this.secretCurrentTeam) return { correct: false };
+    if (action === "CLUE") {
+      if (assignment.role !== "CAPTAIN") return { correct: false };
+      const word = normalizeSpanishWord(String(payload.clue ?? ""));
+      const count = Number(payload.count);
+      if (word.length < 2 || word.length > 20 || !Number.isInteger(count) || count < 1 || count > 9) return { correct: false };
+      if (this.secretWords().some((boardWord) => boardWord.includes(word) || word.includes(boardWord))) return { correct: false };
+      this.secretClue = { word, count, remaining: count };
+      return { correct: true, points: 0 };
+    }
+    if (action !== "GUESS" || assignment.role !== "OPERATIVE" || !this.secretClue || cell.ownerId !== null) return { correct: false };
+    const identity = String(this.answers[move.row]![move.col]);
+    cell.ownerId = playerId;
+    cell.meta.revealedColor = identity;
+    if (identity === "ASSASSIN") {
+      this.secretWinnerTeam = assignment.team === "RED" ? "BLUE" : "RED";
+      this.completed = true;
+      return { correct: true, points: 0 };
+    }
+    if (identity === assignment.team) {
+      this.secretClue.remaining -= 1;
+      if (this.secretRemainingCounts()[assignment.team] === 0) {
+        this.secretWinnerTeam = assignment.team;
+        this.completed = true;
+      } else if (this.secretClue.remaining <= 0) this.switchSecretTeam();
+      return { correct: true, points: 20 };
+    }
+    this.switchSecretTeam();
+    return { correct: true, points: identity === "NEUTRAL" ? 0 : 10 };
+  }
+
+  private switchSecretTeam(): void {
+    this.secretCurrentTeam = this.secretCurrentTeam === "RED" ? "BLUE" : "RED";
+    this.secretClue = null;
+  }
+
+  private createSecretBotMove(playerId?: string): GenericMove | null {
+    if (!playerId) return null;
+    const assignment = this.secretAssignments.get(playerId);
+    if (!assignment || assignment.team !== this.secretCurrentTeam) return null;
+    if (assignment.role === "CAPTAIN" && !this.secretClue) {
+      return { requestId: `secret-bot-${randomUUID()}`, row: 0, col: 0, val: { action: "CLUE", clue: "IDEA", count: 1 } };
+    }
+    if (assignment.role !== "OPERATIVE" || !this.secretClue) return null;
+    for (let row = 0; row < 5; row += 1) for (let col = 0; col < 5; col += 1) {
+      if (this.board[row]![col]!.ownerId === null && this.answers[row]![col] === assignment.team) {
+        return { requestId: `secret-bot-${randomUUID()}`, row, col, val: { action: "GUESS" } };
+      }
+    }
+    return null;
+  }
+
   private createCrossLettersBotMove(accuracy: number, playerId?: string): GenericMove | null {
     const id = playerId ?? this.activePlayerId;
     if (!id || this.activePlayerId !== id) return null;
@@ -521,6 +671,7 @@ export class GenericPuzzleEngine {
     if (empty) return { requestId: `letters-bot-${randomUUID()}`, row: 7, col: Math.max(0, 7 - Math.floor(word.length / 2)), val: { word: correctWord, direction: "H" } };
     for (let row = 0; row < this.board.length; row += 1) for (let col = 0; col < this.board[row]!.length; col += 1) {
       const letter = String(this.board[row]![col]!.value ?? "");
+      if (!letter) continue;
       const index = word.indexOf(letter);
       if (index < 0) continue;
       const start = row - index;
@@ -582,6 +733,39 @@ function normalizeSpanishWord(value: string): string {
   return value.trim().toUpperCase().replace(/Ñ/g, "#").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/#/g, "Ñ").replace(/[^A-ZÑ]/g, "");
 }
 
-function randomLetter(): string {
-  return LETTER_BAG[Math.floor(Math.random() * LETTER_BAG.length)] ?? "A";
+function shuffleLetters(letters: string[]): string[] {
+  for (let index = letters.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [letters[index], letters[target]] = [letters[target]!, letters[index]!];
+  }
+  return letters;
+}
+
+function findWordForRack(rack: string[]): string | null {
+  return SPANISH_DICTIONARY.map((entry) => normalizeSpanishWord(entry.word))
+    .filter((word) => word.length >= 2 && word.length <= rack.length)
+    .find((word) => {
+      const available = [...rack];
+      return [...word].every((letter) => {
+        const index = available.indexOf(letter);
+        if (index < 0) return false;
+        available.splice(index, 1);
+        return true;
+      });
+    }) ?? null;
+}
+
+function findAnchoredWordForRack(rack: string[], anchor: string): string | null {
+  const anchors = new Set(anchor);
+  return SPANISH_DICTIONARY.map((entry) => normalizeSpanishWord(entry.word))
+    .filter((word) => word.length >= 2 && word.length <= rack.length && [...word].some((letter) => anchors.has(letter)))
+    .find((word) => {
+      const available = [...rack];
+      return [...word].every((letter) => {
+        const index = available.indexOf(letter);
+        if (index < 0) return false;
+        available.splice(index, 1);
+        return true;
+      });
+    }) ?? null;
 }

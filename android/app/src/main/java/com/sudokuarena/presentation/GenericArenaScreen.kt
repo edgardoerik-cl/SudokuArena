@@ -77,6 +77,7 @@ fun GenericArenaScreen(
     onTutorialComplete: () -> Unit,
     onOpenTutorial: () -> Unit,
     onReaction: (String) -> Unit,
+    onSecretChat: (String) -> Unit,
     onNewSoloGame: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -95,10 +96,11 @@ fun GenericArenaScreen(
                     }
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
-                        PauseControl(state, onRequestPause, onPauseResponse)
+                        PauseControl(state, onRequestPause)
                         ExitControl(onExit)
                     }
                 }
+                PauseVoteBanner(state, onPauseResponse)
                 Scoreboard(state)
                 if (state.roomState?.config?.powersEnabled == true) {
                     PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
@@ -110,13 +112,14 @@ fun GenericArenaScreen(
                         state = generic,
                         players = state.players.associateBy(Player::id),
                         selected = state.selected,
-                        enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
+                        enabled = state.canInteractGeneric,
                         onCellSelected = onCellSelected,
                         onWordSelection = onWordSelection,
                         onDirectMove = onMoveAt,
+                        secretKey = state.secretKey,
                     )
                     PuzzleHints(generic)
-                    GenericMoveControls(state, state.canMakeGenericMove, onMove)
+                    GenericMoveControls(state, state.canMakeGenericMove, onMove, onSecretChat)
                     if (!state.isSoloMode) ReactionMenu(onReaction)
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
                 }
@@ -148,6 +151,7 @@ fun GenericPuzzleGrid(
     onCellSelected: (Int, Int) -> Unit,
     onWordSelection: (CellPosition, CellPosition, String) -> Unit,
     onDirectMove: (Int, Int, Any?) -> Unit,
+    secretKey: List<String> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     if (state.gameType == GameType.NONOGRAM) {
@@ -281,6 +285,7 @@ fun GenericPuzzleGrid(
                         val side = listOf("left" to localX, "right" to width - localX, "top" to localY, "bottom" to height - localY).minBy { it.second }.first
                         onDirectMove(row, col, side)
                     }
+                    GameType.SECRET_CODE -> onDirectMove(row, col, mapOf("action" to "GUESS"))
                     else -> onCellSelected(row, col)
                 }
             }
@@ -305,6 +310,8 @@ fun GenericPuzzleGrid(
                     state.gameType == GameType.NURIKABE && cell.value == "RIVER" -> Color(0xFF2196F3).copy(alpha = .78f)
                     state.gameType == GameType.NURIKABE && cell.value == "ISLAND" -> Color(0xFF66BB6A).copy(alpha = .72f)
                     bridgeValid -> Color(0xFF00C853).copy(alpha = .32f)
+                    state.gameType == GameType.SECRET_CODE && cell.meta["revealedColor"] != null -> secretColor(cell.meta["revealedColor"].toString()).copy(alpha = .82f)
+                    state.gameType == GameType.SECRET_CODE && secretKey.size == 25 -> secretColor(secretKey[row * 5 + col]).copy(alpha = .42f)
                     state.gameType == GameType.BRIDGES && selectedBridgeIsland == CellPosition(row, col) -> Color(0xFF00A8FF).copy(alpha = .28f)
                     cell.meta["given"] == true -> Color(0xFFFFD54F).copy(alpha = .62f)
                     selected == CellPosition(row, col) -> Color(0xFFFFF59D)
@@ -423,6 +430,10 @@ private fun PuzzleHints(state: GenericBoardState) {
             val active = state.meta["activePlayerId"]?.toString()
             Text("Turno: ${active?.take(8) ?: "preparando…"} · selecciona la casilla inicial", fontWeight = FontWeight.Bold)
         }
+        GameType.SECRET_CODE -> {
+            val clue = state.meta["clue"] as? Map<*, *>
+            Text("Turno del equipo ${state.meta["currentTeam"] ?: "ROJO"} · Pista: ${clue?.get("word") ?: "esperando"} ${clue?.get("remaining") ?: ""}", fontWeight = FontWeight.Black)
+        }
         else -> Unit
     }
 }
@@ -495,16 +506,20 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
             else drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
             if (meta["center"] == true && value == null) drawCircle(Color(0xFFFFC107), min(width, height) * .11f, center)
         }
+        GameType.SECRET_CODE -> drawCenteredText(value, center, width * .92f, textMeasurer, Color(0xFF102A56))
         GameType.HITORI -> {
             drawCenteredText(value, center, width, textMeasurer, if (isBlocked) Color.White else Color(0xFF102A56))
         }
         GameType.KAKURO -> if (meta["clueCell"] == true) {
-            drawLine(Color.White.copy(alpha = .75f), origin, origin + Offset(width, height), 1.5f)
-            val clue = listOfNotNull(
-                (meta["downSum"] as? Number)?.let { "↓${it.toInt()}" },
-                (meta["rightSum"] as? Number)?.let { "→${it.toInt()}" },
-            ).joinToString(" ")
-            drawCenteredText(clue, center, width * .78f, textMeasurer, Color.White)
+            drawLine(Color.White.copy(alpha = .92f), origin, origin + Offset(width, height), 2f)
+            (meta["rightSum"] as? Number)?.toInt()?.takeIf { it > 0 }?.let { sum ->
+                val layout = textMeasurer.measure(sum.toString(), TextStyle(color = Color.White, fontSize = (width * .22f).coerceIn(8f, 15f).sp, fontWeight = FontWeight.Black))
+                drawText(layout, topLeft = Offset(origin.x + width - layout.size.width - 3f, origin.y + 2f))
+            }
+            (meta["downSum"] as? Number)?.toInt()?.takeIf { it > 0 }?.let { sum ->
+                val layout = textMeasurer.measure(sum.toString(), TextStyle(color = Color.White, fontSize = (width * .22f).coerceIn(8f, 15f).sp, fontWeight = FontWeight.Black))
+                drawText(layout, topLeft = Offset(origin.x + 3f, origin.y + height - layout.size.height - 2f))
+            }
         } else drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
         GameType.MATHDOKU -> {
             drawCenteredText(value, center, width, textMeasurer, Color(0xFF102A56))
@@ -537,7 +552,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCenteredText(
 }
 
 @Composable
-private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (Any?) -> Unit) {
+private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (Any?) -> Unit, onSecretChat: (String) -> Unit) {
     val gameType = state.gameType
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
@@ -577,6 +592,24 @@ private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (
                 }
             }
         }
+        GameType.SECRET_CODE -> {
+            var clue by remember { mutableStateOf("") }
+            var count by remember { mutableStateOf("1") }
+            var chat by remember { mutableStateOf("") }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Equipo ${state.secretTeam ?: "…"} · ${if (state.secretRole == "CAPTAIN") "Capitán" else "Operativo"}", fontWeight = FontWeight.Black)
+                if (state.secretRole == "CAPTAIN") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    OutlinedTextField(clue, { clue = it.uppercase().take(20) }, label = { Text("Pista") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(count, { count = it.filter(Char::isDigit).take(1) }, label = { Text("Nº") }, modifier = Modifier.weight(.38f))
+                    Button({ onMove(mapOf("action" to "CLUE", "clue" to clue, "count" to (count.toIntOrNull() ?: 1))) }, enabled = enabled && clue.length >= 2) { Text("Dar") }
+                }
+                state.secretChat.forEach { Text("${state.players.firstOrNull { p -> p.id == it.playerId }?.name ?: "Jugador"}: ${it.message}", fontSize = 12.sp, color = if (it.penalized) Color.Red else Color(0xFF263238)) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    OutlinedTextField(chat, { chat = it.take(120) }, label = { Text("Chat de equipo") }, modifier = Modifier.weight(1f))
+                    Button({ onSecretChat(chat); chat = "" }, enabled = chat.isNotBlank() && state.serverNowMs >= state.secretChatBlockedUntil) { Text("Enviar") }
+                }
+            }
+        }
         else -> {
             val values = when (gameType) {
                 GameType.CRYPTARITHM -> 0..9
@@ -593,6 +626,10 @@ private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (
             }
         }
     }
+}
+
+private fun secretColor(value: String): Color = when (value) {
+    "RED" -> Color(0xFFE53935); "BLUE" -> Color(0xFF1E88E5); "ASSASSIN" -> Color(0xFF111827); else -> Color(0xFFB0BEC5)
 }
 
 @Composable
@@ -649,6 +686,7 @@ fun gameTitle(type: GameType): String = when (type) {
     GameType.NURIKABE -> "Multi Arena · Nurikabe"; GameType.BRIDGES -> "Multi Arena · Bridges"
     GameType.SLITHERLINK -> "Multi Arena · Slitherlink"; GameType.CRYPTARITHM -> "Multi Arena · Criptogramas"
     GameType.CROSS_LETTERS -> "Multi Arena · Letras Cruzadas"
+    GameType.SECRET_CODE -> "Multi Arena · Código Secreto"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

@@ -44,6 +44,7 @@ data class CellPosition(val row: Int, val column: Int)
 enum class HapticCue { CLICK, DANGER, CRESCENDO }
 
 data class ReactionUi(val reactionId: String, val emojiId: String)
+data class SecretChatUi(val playerId: String, val message: String, val penalized: Boolean)
 
 data class ArenaUiState(
     val isSoloMode: Boolean = false,
@@ -85,6 +86,14 @@ data class ArenaUiState(
     val letterRack: List<String> = emptyList(),
     val activeLetterPlayerId: String? = null,
     val letterTurnEndsAt: Long = 0,
+    val secretTeam: String? = null,
+    val secretRole: String? = null,
+    val secretKey: List<String> = emptyList(),
+    val secretCurrentTeam: String? = null,
+    val secretClue: String? = null,
+    val secretClueCount: Int = 0,
+    val secretChat: List<SecretChatUi> = emptyList(),
+    val secretChatBlockedUntil: Long = 0,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -96,11 +105,20 @@ data class ArenaUiState(
 
     val level: Int get() = totalXp / 500 + 1
     val gameType: GameType get() = roomState?.config?.gameType ?: activeGameType
+    val genericTurnPlayerId: String?
+        get() = genericBoard?.meta?.get("currentPlayerTurn")?.toString()
+            ?: genericBoard?.meta?.get("activePlayerId")?.toString()
+    val canInteractGeneric: Boolean
+        get() {
+            val phaseAllowsPlay = isSoloMode || roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
+            val turnAllowsPlay = gameType !in setOf(GameType.DOTS_AND_BOXES, GameType.CROSS_LETTERS) ||
+                isSoloMode || genericTurnPlayerId == null || genericTurnPlayerId == playerId
+            return connected && genericBoard != null && phaseAllowsPlay && turnAllowsPlay &&
+                penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null &&
+                !soloCompleted && !isLocallyPaused && roomState?.phase != RoomPhase.PAUSED
+        }
     val canMakeGenericMove: Boolean
-        get() = connected && gameType != GameType.SUDOKU && selected != null &&
-            (gameType != GameType.CROSS_LETTERS || isSoloMode || activeLetterPlayerId == playerId) &&
-            penaltyRemainingMs == 0L && fogSwipesRemaining == 0 && pendingRequestId == null &&
-            !soloCompleted && !isLocallyPaused && roomState?.phase != RoomPhase.PAUSED
+        get() = gameType != GameType.SUDOKU && selected != null && canInteractGeneric
 }
 
 class ArenaViewModel(
@@ -269,10 +287,15 @@ class ArenaViewModel(
         gateway?.configureRoom(current.config.copy(gameType = gameType))
     }
 
+    fun sendSecretChat(message: String) {
+        if (message.isNotBlank()) gateway?.sendSecretChat(message.trim())
+    }
+
     fun selectGeneric(row: Int, column: Int) {
         val current = mutableState.value
+        if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (!cell.isBlocked && cell.ownerId == null && current.penaltyRemainingMs == 0L && current.fogSwipesRemaining == 0) {
+        if (!cell.isBlocked && (cell.ownerId == null || current.gameType in setOf(GameType.CROSS_LETTERS, GameType.NURIKABE))) {
             mutableState.update { it.copy(selected = CellPosition(row, column), message = null) }
         }
     }
@@ -286,7 +309,7 @@ class ArenaViewModel(
 
     fun makeGenericMoveAt(row: Int, column: Int, value: Any?) {
         val current = mutableState.value
-        if (current.penaltyRemainingMs > 0 || current.fogSwipesRemaining > 0 || current.soloCompleted || current.isLocallyPaused || current.roomState?.phase == RoomPhase.PAUSED) return
+        if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
         if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.SLITHERLINK, GameType.WORD_SEARCH))) return
         submitGenericMove(CellPosition(row, column), value)
@@ -636,6 +659,18 @@ class ArenaViewModel(
             }
             is RealtimeEvent.LetterRackUpdated -> mutableState.update {
                 it.copy(letterRack = event.letters, activeLetterPlayerId = event.activePlayerId, letterTurnEndsAt = event.turnEndsAt)
+            }
+            is RealtimeEvent.SecretRoleUpdated -> mutableState.update {
+                it.copy(
+                    secretTeam = event.team, secretRole = event.role, secretKey = event.key,
+                    secretCurrentTeam = event.currentTeam, secretClue = event.clue, secretClueCount = event.clueCount,
+                )
+            }
+            is RealtimeEvent.SecretChatMessage -> mutableState.update {
+                it.copy(secretChat = (it.secretChat + SecretChatUi(event.playerId, event.message, event.penalized)).takeLast(5))
+            }
+            is RealtimeEvent.SecretChatLocked -> mutableState.update {
+                it.copy(secretChatBlockedUntil = event.blockedUntil, message = "Chat bloqueado 10 segundos por mencionar una palabra del tablero")
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }

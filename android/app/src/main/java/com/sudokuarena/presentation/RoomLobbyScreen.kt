@@ -208,6 +208,7 @@ private fun shortGameTitle(type: GameType): String = when (type) {
     GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
     GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Slitherlink"; GameType.CRYPTARITHM -> "Criptograma"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
+    GameType.SECRET_CODE -> "Código Secreto"
 }
 
 private fun teamModeLabel(mode: TeamMode): String = when (mode) {

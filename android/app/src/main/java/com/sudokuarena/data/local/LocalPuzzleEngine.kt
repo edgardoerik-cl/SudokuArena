@@ -43,9 +43,18 @@ class LocalPuzzleEngine(
             val payload = value as? Map<*, *> ?: return incorrect()
             val word = payload["word"]?.toString()?.uppercase().orEmpty()
             val direction = payload["direction"]?.toString()?.uppercase().orEmpty()
-            if (word != "ARENA" || direction != "H" || row != 7 || col != 5) return incorrect()
-            word.forEachIndexed { index, letter -> replace(7, 5 + index, board[7][5 + index].copy(value = letter.toString(), isRevealed = true, ownerId = OWNER)) }
+            if (word != "MENTE" || direction != "V" || row != 6 || col != 7) return incorrect()
+            word.forEachIndexed { index, letter ->
+                val target = board[6 + index][7]
+                if (target.value == null) replace(6 + index, 7, target.copy(value = letter.toString(), isRevealed = true, ownerId = OWNER))
+            }
             return accept(50)
+        }
+        if (gameType == GameType.SECRET_CODE) {
+            if (cell.ownerId != null) return reject("Palabra ya revelada")
+            val identity = blueprint.answers[row][col].toString()
+            replace(row, col, cell.copy(ownerId = OWNER, meta = cell.meta + ("revealedColor" to identity)))
+            return accept(if (identity == "RED") 20 else 0)
         }
         if (gameType == GameType.NURIKABE) {
             val action = value?.toString()?.uppercase().orEmpty()
@@ -148,7 +157,8 @@ class LocalPuzzleEngine(
         GameType.NURIKABE -> board.indices.all { y -> board[y].indices.all { x -> board[y][x].meta["islandClue"] == true || board[y][x].value == if (blueprint.answers[y][x] == true) "RIVER" else "ISLAND" } }
         GameType.NONOGRAM, GameType.HITORI, GameType.BRIDGES -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] != true || board[y][x].ownerId != null } }
         GameType.SLITHERLINK -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x].toString().split('|').filter(String::isNotBlank).all { board[y][x].meta[it] == true } } }
-        GameType.CROSS_LETTERS -> board[7].slice(5..9).all { it.value != null }
+        GameType.CROSS_LETTERS -> listOf(6, 8, 9, 10).all { board[it][7].ownerId != null }
+        GameType.SECRET_CODE -> board.flatten().count { it.ownerId != null && it.meta["revealedColor"] == "RED" } == 8
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -158,7 +168,7 @@ class LocalPuzzleEngine(
         GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.NONOGRAM -> nonogram()
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
         GameType.RUMMIKUB -> logicTiles(); GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges(); GameType.SLITHERLINK -> slitherlink()
-        GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
+        GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }
 
     private fun mines(): Blueprint { val size = size(8,10,12,14); val count=(size*size*when(difficulty){PuzzleDifficulty.EASY->.10;PuzzleDifficulty.MEDIUM->.14;PuzzleDifficulty.HARD->.18;PuzzleDifficulty.EXPERT->.22}).toInt(); val mines=(0 until size*size).shuffled(random).take(count).toSet(); return result(matrix(size,size){_,_->GenericCell()}, matrix(size,size){r,c->r*size+c in mines}, mapOf("mineCount" to count)) }
@@ -345,10 +355,22 @@ class LocalPuzzleEngine(
                 (row + col) % 11 == 0 -> "DL"
                 else -> "NONE"
             }
-            GenericCell(meta = mapOf("bonus" to bonus, "center" to (row == 7 && col == 7)))
+            val anchor = if (row == 7 && col in 5..9) "ARENA"[col - 5].toString() else null
+            GenericCell(value = anchor, isRevealed = anchor != null, meta = mapOf("bonus" to bonus, "center" to (row == 7 && col == 7), "given" to (anchor != null)))
         }
-        val answers = matrix<Any?>(15, 15) { row, col -> if (row == 7 && col in 5..9) "ARENA"[col - 5].toString() else null }
-        return result(board, answers, mapOf("rack" to listOf("A", "R", "E", "N", "A", "L", "S"), "instructions" to "Forma ARENA horizontalmente pasando por la estrella central."))
+        val answers = matrix<Any?>(15, 15) { _, _ -> null }
+        return result(board, answers, mapOf("rack" to listOf("M", "E", "N", "T", "E", "S", "O"), "instructions" to "El tablero comienza con ARENA. Cruza una palabra válida usando tu atril."))
+    }
+
+    private fun secretCode(): Blueprint {
+        val words = WORDS.map { it.first }.shuffled(random).take(25).toMutableList()
+        while (words.size < 25) words += "CLAVE${words.size}"
+        val identities = (List(8) { "RED" } + List(8) { "BLUE" } + List(8) { "NEUTRAL" } + "ASSASSIN").shuffled(random)
+        return result(
+            matrix(5, 5) { row, col -> GenericCell(value = words[row * 5 + col], isRevealed = true) },
+            matrix<Any?>(5, 5) { row, col -> identities[row * 5 + col] },
+            mapOf("currentTeam" to "RED", "instructions" to "Encuentra las ocho palabras rojas y evita al asesino."),
+        )
     }
 
     private fun blocked(meta: Map<String, Any?> = emptyMap()) = GenericCell(isRevealed = true, isBlocked = true, meta = meta)

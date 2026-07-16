@@ -118,6 +118,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onTutorialComplete = viewModel::completeTutorial,
             onOpenTutorial = viewModel::openTutorial,
             onReaction = viewModel::sendReaction,
+            onSecretChat = viewModel::sendSecretChat,
             onNewSoloGame = viewModel::newSoloGame,
             onExit = onExit,
         )
@@ -192,10 +193,11 @@ fun ArenaScreen(
                     Text("Multi Arena · Sudoku", style = MaterialTheme.typography.headlineSmall)
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
-                        PauseControl(state, onRequestPause, onPauseResponse)
+                        PauseControl(state, onRequestPause)
                         ExitControl(onExit)
                     }
                 }
+                PauseVoteBanner(state, onPauseResponse)
                 Text(
                     when {
                         state.roomState?.suddenDeath == true -> "MUERTE SÚBITA · la próxima jugada correcta gana"
