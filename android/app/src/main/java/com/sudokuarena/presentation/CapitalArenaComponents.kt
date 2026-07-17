@@ -154,11 +154,24 @@ fun CapitalArenaControls(
                 }
             }
         }
-        if (event.isNotBlank()) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp),
-                color = Color(0xFFEAFBFF), border = BorderStroke(1.dp, Color(0xFF00A8FF)),
-            ) { Text("⚡ $event", Modifier.padding(10.dp), fontWeight = FontWeight.Bold) }
+        AnimatedContent(
+            targetState = event,
+            transitionSpec = { (scaleIn(tween(300)) + fadeIn()) togetherWith (scaleOut(tween(160)) + fadeOut()) },
+            label = "capitalPropertyCard",
+        ) { message ->
+            if (message.isNotBlank()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(13.dp),
+                    color = if ("conquistó" in message) Color(0xFFE9FFF3) else Color(0xFFEAFBFF),
+                    border = BorderStroke(2.dp, if ("conquistó" in message) Color(0xFF00A651) else Color(0xFF00A8FF)),
+                    shadowElevation = 8.dp,
+                ) {
+                    Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if ("conquistó" in message) Text("TÍTULO DE PROPIEDAD", fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color(0xFF00A651))
+                        Text("⚡ $message", fontWeight = FontWeight.Black, color = Color(0xFF102A56))
+                    }
+                }
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             when (stage) {
