@@ -28,6 +28,15 @@ export class GenericPuzzleEngine {
     secretCurrentTeam = "BLUE";
     secretClue = null;
     secretWinnerTeam = null;
+    capitalBalances = new Map();
+    capitalPositions = new Map();
+    capitalPropertyOwners = new Map();
+    capitalPropertyLevels = new Map();
+    capitalStage = "ROLL";
+    capitalPendingProperty = null;
+    capitalDice = [1, 1];
+    capitalLastMove = null;
+    capitalEvent = "La economía neón está lista";
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
         this.gameId = gameId;
@@ -43,6 +52,8 @@ export class GenericPuzzleEngine {
             this.syncTurnPlayers(game);
         if (this.gameType === "SECRET_CODE")
             this.syncSecretPlayers(game);
+        if (this.gameType === "CAPITAL_ARENA")
+            this.syncCapitalPlayers(game);
         return {
             gameId: this.gameId,
             gameType: this.gameType,
@@ -68,6 +79,18 @@ export class GenericPuzzleEngine {
                     clue: this.secretClue,
                     winnerTeam: this.secretWinnerTeam,
                     remaining: this.secretRemainingCounts()
+                } : {}),
+                ...(this.gameType === "CAPITAL_ARENA" ? {
+                    currentPlayerTurn: this.activePlayerId,
+                    stage: this.capitalStage,
+                    pendingProperty: this.capitalPendingProperty,
+                    dice: this.capitalDice,
+                    lastMove: this.capitalLastMove,
+                    lastEvent: this.capitalEvent,
+                    balances: Object.fromEntries(this.capitalBalances),
+                    positions: Object.fromEntries(this.capitalPositions),
+                    propertyOwners: Object.fromEntries(this.capitalPropertyOwners),
+                    propertyLevels: Object.fromEntries(this.capitalPropertyLevels)
                 } : {})
             }
         };
@@ -132,11 +155,16 @@ export class GenericPuzzleEngine {
             if (this.secretActivePlayerId() !== playerId)
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno de equipo");
         }
+        if (this.gameType === "CAPITAL_ARENA") {
+            this.syncCapitalPlayers(game);
+            if (this.activePlayerId !== playerId)
+                return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
+        }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH"].includes(this.gameType))) {
+        if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA"].includes(this.gameType))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
-        const outcome = this.applySpecificMove(playerId, move, cell);
+        const outcome = this.applySpecificMove(playerId, move, cell, game);
         if (!outcome.correct) {
             const penaltyMs = this.gameType === "MINESWEEPER" && outcome.hitMine ? 5_000 : 3_000;
             game.applyGenericPenalty(playerId, now + penaltyMs);
@@ -176,6 +204,8 @@ export class GenericPuzzleEngine {
             return this.createCrossLettersBotMove(accuracy, playerId);
         if (this.gameType === "SECRET_CODE")
             return this.createSecretBotMove(playerId);
+        if (this.gameType === "CAPITAL_ARENA")
+            return this.createCapitalBotMove(playerId);
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && playerId && this.activePlayerId !== playerId)
             return null;
         if (this.gameType === "WORD_SEARCH") {
@@ -228,6 +258,8 @@ export class GenericPuzzleEngine {
         };
     }
     revealMove(row, col) {
+        if (this.gameType === "CAPITAL_ARENA")
+            return null;
         if (!this.board[row]?.[col] || this.board[row][col].ownerId !== null)
             return null;
         let target = { row, col };
@@ -261,11 +293,13 @@ export class GenericPuzzleEngine {
             val: this.botValue(target.row, target.col, true)
         };
     }
-    applySpecificMove(playerId, move, cell) {
+    applySpecificMove(playerId, move, cell, game) {
         if (this.gameType === "CROSS_LETTERS")
             return this.applyCrossLettersMove(playerId, move);
         if (this.gameType === "SECRET_CODE")
             return this.applySecretCodeMove(playerId, move, cell);
+        if (this.gameType === "CAPITAL_ARENA")
+            return this.applyCapitalMove(playerId, move, game);
         if (this.gameType === "NURIKABE") {
             const action = String(move.val ?? "").toUpperCase();
             if (!['RIVER', 'ISLAND', 'CLEAR'].includes(action) || cell.meta.islandClue === true)
@@ -461,6 +495,8 @@ export class GenericPuzzleEngine {
     isPuzzleComplete() {
         if (this.gameType === "SECRET_CODE")
             return this.completed;
+        if (this.gameType === "CAPITAL_ARENA")
+            return false;
         if (this.gameType === "MINESWEEPER") {
             return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] === true || cell.ownerId !== null));
         }
@@ -540,6 +576,191 @@ export class GenericPuzzleEngine {
         const requiredRole = this.secretClue == null ? "CAPTAIN" : "OPERATIVE";
         return [...this.secretAssignments.entries()]
             .find(([, assignment]) => assignment.team === this.secretCurrentTeam && assignment.role === requiredRole)?.[0] ?? null;
+    }
+    syncCapitalPlayers(game) {
+        const players = game.snapshot().players;
+        this.turnOrder = players.map((player) => player.id);
+        for (const player of players) {
+            if (!this.capitalBalances.has(player.id)) {
+                this.capitalBalances.set(player.id, 1_500);
+                this.capitalPositions.set(player.id, 0);
+                game.setGenericScore(player.id, 1_500);
+            }
+        }
+        if (!this.activePlayerId || !this.turnOrder.includes(this.activePlayerId)) {
+            this.activePlayerId = this.turnOrder[0] ?? null;
+            this.capitalStage = "ROLL";
+        }
+    }
+    applyCapitalMove(playerId, move, game) {
+        const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
+        const action = String(payload.action ?? "").toUpperCase();
+        if (action === "ROLL") {
+            if (this.capitalStage !== "ROLL")
+                return { correct: false };
+            const from = this.capitalPositions.get(playerId) ?? 0;
+            const dice = [1 + Math.floor(Math.random() * 6), 1 + Math.floor(Math.random() * 6)];
+            const distance = dice[0] + dice[1];
+            const rawTarget = from + distance;
+            const to = rawTarget % 40;
+            if (rawTarget >= 40)
+                this.changeCapitalBalance(playerId, 200);
+            this.capitalDice = dice;
+            this.capitalPositions.set(playerId, to);
+            this.capitalLastMove = { playerId, from, to };
+            this.resolveCapitalLanding(playerId, to);
+            this.refreshCapitalScores(game);
+            return { correct: true, points: 0 };
+        }
+        if (action === "BUY") {
+            const index = this.capitalPendingProperty;
+            if (this.capitalStage !== "BUY_OR_END" || index == null || this.capitalPropertyOwners.has(index))
+                return { correct: false };
+            const space = this.capitalSpace(index);
+            const balance = this.capitalBalances.get(playerId) ?? 0;
+            if (!space || space.price <= 0 || balance < space.price)
+                return { correct: false };
+            this.changeCapitalBalance(playerId, -space.price);
+            this.capitalPropertyOwners.set(index, playerId);
+            this.capitalPropertyLevels.set(index, 0);
+            const propertyCell = this.capitalCell(index);
+            if (propertyCell)
+                propertyCell.ownerId = playerId;
+            this.capitalEvent = `${playerId.slice(0, 8)} conquistó ${space.name}`;
+            this.capitalPendingProperty = null;
+            this.capitalStage = "END";
+            this.refreshCapitalScores(game);
+            return { correct: true, points: 0 };
+        }
+        if (action === "BUILD") {
+            if (this.capitalStage !== "END")
+                return { correct: false };
+            const index = this.capitalPositions.get(playerId);
+            if (index == null)
+                return { correct: false };
+            const space = this.capitalSpace(index);
+            if (!space)
+                return { correct: false };
+            const level = this.capitalPropertyLevels.get(index) ?? 0;
+            const cost = Math.max(50, Math.round(space.price / 2));
+            if (this.capitalPropertyOwners.get(index) !== playerId || level >= 4 || (this.capitalBalances.get(playerId) ?? 0) < cost)
+                return { correct: false };
+            this.changeCapitalBalance(playerId, -cost);
+            this.capitalPropertyLevels.set(index, level + 1);
+            this.capitalEvent = `Mejora de hackeo nivel ${level + 1} en ${space.name}`;
+            this.refreshCapitalScores(game);
+            return { correct: true, points: 0 };
+        }
+        if (action === "END_TURN") {
+            if (this.capitalStage === "ROLL")
+                return { correct: false };
+            this.advanceCapitalTurn();
+            return { correct: true, points: 0 };
+        }
+        return { correct: false };
+    }
+    resolveCapitalLanding(playerId, index) {
+        const space = this.capitalSpace(index);
+        if (!space) {
+            this.capitalStage = "END";
+            return;
+        }
+        if (space.type === "GO_TO_JAIL") {
+            this.capitalPositions.set(playerId, 10);
+            this.capitalLastMove = { playerId, from: index, to: 10 };
+            this.capitalEvent = "La red de seguridad te envió a la Cárcel";
+            this.capitalStage = "END";
+            return;
+        }
+        if (space.type === "CHANCE") {
+            const cards = [
+                { delta: 180, text: "Hackathon ganado: +180" },
+                { delta: 100, text: "Inversión neón: +100" },
+                { delta: -80, text: "Fallo de servidor: -80" },
+                { delta: -150, text: "Auditoría fiscal: -150" },
+            ];
+            const card = cards[Math.floor(Math.random() * cards.length)];
+            this.changeCapitalBalance(playerId, card.delta);
+            this.capitalEvent = card.text;
+            this.capitalStage = "END";
+            return;
+        }
+        if (space.type === "TAX") {
+            this.changeCapitalBalance(playerId, -120);
+            this.capitalEvent = "Impuesto de infraestructura: -120";
+            this.capitalStage = "END";
+            return;
+        }
+        const owner = this.capitalPropertyOwners.get(index);
+        if (space.price > 0 && !owner) {
+            this.capitalPendingProperty = index;
+            this.capitalStage = "BUY_OR_END";
+            this.capitalEvent = `${space.name} está disponible por ${space.price}`;
+            return;
+        }
+        if (owner && owner !== playerId) {
+            const level = this.capitalPropertyLevels.get(index) ?? 0;
+            const requestedRent = space.rent * (level + 1);
+            const rent = Math.min(requestedRent, this.capitalBalances.get(playerId) ?? 0);
+            this.changeCapitalBalance(playerId, -rent);
+            this.changeCapitalBalance(owner, rent);
+            this.capitalEvent = `Renta ${rent} pagada por ${space.name}`;
+        }
+        else
+            this.capitalEvent = owner === playerId ? `Tu distrito ${space.name}` : space.name;
+        this.capitalStage = "END";
+    }
+    advanceCapitalTurn() {
+        if (!this.turnOrder.length)
+            return;
+        const current = Math.max(0, this.turnOrder.indexOf(this.activePlayerId ?? ""));
+        this.activePlayerId = this.turnOrder[(current + 1) % this.turnOrder.length];
+        this.capitalStage = "ROLL";
+        this.capitalPendingProperty = null;
+        this.capitalEvent = `Turno de ${this.activePlayerId.slice(0, 8)}`;
+    }
+    createCapitalBotMove(playerId) {
+        if (!playerId || this.activePlayerId !== playerId)
+            return null;
+        let action = "ROLL";
+        if (this.capitalStage === "BUY_OR_END") {
+            const index = this.capitalPendingProperty;
+            const space = index == null ? null : this.capitalSpace(index);
+            action = space && (this.capitalBalances.get(playerId) ?? 0) >= space.price && Math.random() < .72 ? "BUY" : "END_TURN";
+        }
+        else if (this.capitalStage === "END") {
+            const index = this.capitalPositions.get(playerId) ?? 0;
+            const space = this.capitalSpace(index);
+            const level = this.capitalPropertyLevels.get(index) ?? 0;
+            const buildCost = Math.max(50, Math.round((space?.price ?? 0) / 2));
+            const canBuild = this.capitalPropertyOwners.get(index) === playerId &&
+                level < 4 && (this.capitalBalances.get(playerId) ?? 0) >= buildCost;
+            action = canBuild && Math.random() < .32 ? "BUILD" : "END_TURN";
+        }
+        return { requestId: `capital-bot-${randomUUID()}`, row: 10, col: 10, val: { action } };
+    }
+    changeCapitalBalance(playerId, delta) {
+        this.capitalBalances.set(playerId, Math.max(0, (this.capitalBalances.get(playerId) ?? 0) + delta));
+    }
+    refreshCapitalScores(game) {
+        for (const playerId of this.turnOrder) {
+            let netWorth = this.capitalBalances.get(playerId) ?? 0;
+            for (const [index, owner] of this.capitalPropertyOwners) {
+                if (owner !== playerId)
+                    continue;
+                const space = this.capitalSpace(index);
+                if (space)
+                    netWorth += space.price + (this.capitalPropertyLevels.get(index) ?? 0) * Math.round(space.price / 2);
+            }
+            game.setGenericScore(playerId, netWorth);
+        }
+    }
+    capitalSpace(index) {
+        const spaces = this.meta.spaces;
+        return spaces.find((space) => space.index === index) ?? null;
+    }
+    capitalCell(index) {
+        return this.board.flat().find((cell) => Number(cell.meta.index) === index) ?? null;
     }
     advanceStrictTurn() {
         if (!this.turnOrder.length)

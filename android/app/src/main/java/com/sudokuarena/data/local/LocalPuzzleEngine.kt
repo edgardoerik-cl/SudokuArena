@@ -26,17 +26,33 @@ class LocalPuzzleEngine(
     private var board = blueprint.board
     private var revision = 0L
     private val foundWords = mutableSetOf<String>()
+    private var capitalPosition = 0
+    private var capitalBalance = 1_500
+    private var capitalStage = "ROLL"
+    private var capitalPending: Int? = null
+    private var capitalDice = listOf(1, 1)
+    private var capitalEvent = "Construye tu imperio neón"
+    private val capitalOwners = mutableMapOf<Int, String>()
+    private val capitalLevels = mutableMapOf<Int, Int>()
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
         revision = revision, serverTime = System.currentTimeMillis(), rows = board.size,
-        columns = board.firstOrNull()?.size ?: 0, board = board, completed = isComplete(), meta = blueprint.meta,
+        columns = board.firstOrNull()?.size ?: 0, board = board, completed = isComplete(),
+        meta = blueprint.meta + if (gameType == GameType.CAPITAL_ARENA) mapOf(
+            "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
+            "dice" to capitalDice, "lastEvent" to capitalEvent,
+            "balances" to mapOf(OWNER to capitalBalance), "positions" to mapOf(OWNER to capitalPosition),
+            "propertyOwners" to capitalOwners.mapKeys { it.key.toString() },
+            "propertyLevels" to capitalLevels.mapKeys { it.key.toString() },
+        ) else emptyMap(),
     )
 
     fun letterRack(): List<String> = (blueprint.meta["rack"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
 
     fun move(row: Int, col: Int, value: Any?): LocalPuzzleMoveResult {
         val cell = board.getOrNull(row)?.getOrNull(col) ?: return reject("Movimiento fuera del tablero")
+        if (gameType == GameType.CAPITAL_ARENA) return capitalMove(value)
         if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.SLITHERLINK, GameType.NURIKABE, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
 
         if (gameType == GameType.CROSS_LETTERS) {
@@ -159,6 +175,7 @@ class LocalPuzzleEngine(
         GameType.SLITHERLINK -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x].toString().split('|').filter(String::isNotBlank).all { board[y][x].meta[it] == true } } }
         GameType.CROSS_LETTERS -> listOf(6, 8, 9, 10).all { board[it][7].ownerId != null }
         GameType.SECRET_CODE -> board.flatten().count { it.ownerId != null && it.meta["revealedColor"] == "RED" } == 8
+        GameType.CAPITAL_ARENA -> false
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -168,7 +185,8 @@ class LocalPuzzleEngine(
         GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.NONOGRAM -> nonogram()
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
         GameType.RUMMIKUB -> logicTiles(); GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges(); GameType.SLITHERLINK -> slitherlink()
-        GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
+        GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
+        GameType.CAPITAL_ARENA -> capitalArena(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }
 
     private fun mines(): Blueprint { val size = size(8,10,12,14); val count=(size*size*when(difficulty){PuzzleDifficulty.EASY->.10;PuzzleDifficulty.MEDIUM->.14;PuzzleDifficulty.HARD->.18;PuzzleDifficulty.EXPERT->.22}).toInt(); val mines=(0 until size*size).shuffled(random).take(count).toSet(); return result(matrix(size,size){_,_->GenericCell()}, matrix(size,size){r,c->r*size+c in mines}, mapOf("mineCount" to count)) }
@@ -370,6 +388,77 @@ class LocalPuzzleEngine(
             matrix(5, 5) { row, col -> GenericCell(value = words[row * 5 + col], isRevealed = true) },
             matrix<Any?>(5, 5) { row, col -> identities[row * 5 + col] },
             mapOf("currentTeam" to "RED", "instructions" to "Encuentra las ocho palabras rojas y evita al asesino."),
+        )
+    }
+
+    private fun capitalMove(value: Any?): LocalPuzzleMoveResult {
+        val action = (value as? Map<*, *>)?.get("action")?.toString().orEmpty()
+        when (action) {
+            "ROLL" -> {
+                if (capitalStage != "ROLL") return reject("Primero termina tu turno")
+                capitalDice = listOf(random.nextInt(1, 7), random.nextInt(1, 7))
+                val raw = capitalPosition + capitalDice.sum()
+                if (raw >= 40) capitalBalance += 200
+                capitalPosition = raw % 40
+                val space = (blueprint.meta["spaces"] as List<Map<String, Any?>>)[capitalPosition]
+                val price = space["price"] as Int
+                capitalPending = capitalPosition.takeIf { price > 0 && capitalOwners[it] == null }
+                capitalStage = if (capitalPending != null) "BUY_OR_END" else "END"
+                capitalEvent = if (capitalPending != null) "${space["name"]} disponible por $price" else "Caíste en ${space["name"]}"
+            }
+            "BUY" -> {
+                val index = capitalPending ?: return reject("No hay una propiedad disponible")
+                @Suppress("UNCHECKED_CAST")
+                val space = (blueprint.meta["spaces"] as List<Map<String, Any?>>)[index]
+                val price = space["price"] as Int
+                if (capitalBalance < price) return reject("Capital insuficiente")
+                capitalBalance -= price; capitalOwners[index] = OWNER; capitalLevels[index] = 0
+                board.flatten().firstOrNull { (it.meta["index"] as? Number)?.toInt() == index }?.let { target ->
+                    val position = board.indices.firstNotNullOf { r -> board[r].indices.firstOrNull { c -> board[r][c] === target }?.let { r to it } }
+                    replace(position.first, position.second, target.copy(ownerId = OWNER))
+                }
+                capitalPending = null; capitalStage = "END"; capitalEvent = "Propiedad conquistada"
+            }
+            "BUILD" -> {
+                if (capitalOwners[capitalPosition] != OWNER) return reject("Debes estar en una propiedad propia")
+                if (capitalBalance < 50) return reject("Capital insuficiente")
+                capitalBalance -= 50; capitalLevels[capitalPosition] = (capitalLevels[capitalPosition] ?: 0) + 1
+                capitalEvent = "Mejora de hackeo construida"
+            }
+            "END_TURN" -> {
+                capitalStage = "ROLL"; capitalPending = null; capitalEvent = "Lanza los dados"
+            }
+            else -> return reject("Acción económica no válida")
+        }
+        revision += 1
+        return LocalPuzzleMoveResult(true, snapshot(), points = 0, message = capitalEvent)
+    }
+
+    private fun capitalArena(): Blueprint {
+        val names = listOf("SALIDA") + (1 until 40).map { "Distrito $it" }
+        val coordinates = buildList {
+            for (col in 10 downTo 0) add(10 to col)
+            for (row in 9 downTo 0) add(row to 0)
+            for (col in 1..10) add(0 to col)
+            for (row in 1..9) add(row to 10)
+        }
+        val spaces = names.mapIndexed { index, name ->
+            val special = index in setOf(0, 2, 4, 7, 10, 17, 20, 22, 30, 33, 37)
+            mapOf<String, Any?>(
+                "index" to index, "name" to name,
+                "type" to if (special) if (index == 0) "START" else "CHANCE" else "PROPERTY",
+                "price" to if (special) 0 else 100 + index * 5, "rent" to if (special) 0 else 15 + index,
+            )
+        }
+        val lookup = coordinates.mapIndexed { index, coordinate -> coordinate to spaces[index] }.toMap()
+        return result(
+            matrix(11, 11) { row, col ->
+                lookup[row to col]?.let { space ->
+                    GenericCell(isRevealed = true, meta = space)
+                } ?: blocked(mapOf("capitalCenter" to true))
+            },
+            matrix<Any?>(11, 11) { _, _ -> null },
+            mapOf("spaces" to spaces, "instructions" to "Lanza dados, compra propiedades y construye mejoras."),
         )
     }
 

@@ -50,7 +50,7 @@ describe("motor genérico de puzzles", () => {
     }));
   });
 
-  for (const gameType of GAME_TYPES.filter((type) => !["SUDOKU", "CROSS_LETTERS", "SECRET_CODE"].includes(type))) {
+  for (const gameType of GAME_TYPES.filter((type) => !["SUDOKU", "CROSS_LETTERS", "SECRET_CODE", "CAPITAL_ARENA"].includes(type))) {
     it(`genera y permite a un Bot resolver ${gameType}`, () => {
       const players = new ArenaGame(`players-${gameType}`);
       players.addPlayer("bot", "Bot_Matriz", true);
@@ -69,6 +69,28 @@ describe("motor genérico de puzzles", () => {
       assert.equal(engine.snapshot(players).completed, true, `${gameType} debe poder completarse`);
     });
   }
+
+  it("Capital Arena controla dados, economía y turnos en el servidor", () => {
+    const players = new ArenaGame("capital-players");
+    players.addPlayer("p1", "Capitalista 1");
+    players.addPlayer("p2", "Capitalista 2");
+    players.startMatch({ gameType: "CAPITAL_ARENA", powersEnabled: true, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("CAPITAL_ARENA", "capital-test");
+
+    const initial = engine.snapshot(players, 1_000);
+    assert.equal(initial.meta.currentPlayerTurn, "p1");
+    assert.equal((initial.meta.balances as Record<string, number>).p1, 1_500);
+    assert.equal(engine.makeMove("p2", { requestId: "capital-wrong-turn", row: 10, col: 10, val: { action: "ROLL" } }, players, 1_001).accepted, false);
+
+    assert.equal(engine.makeMove("p1", { requestId: "capital-roll", row: 10, col: 10, val: { action: "ROLL" } }, players, 1_002).accepted, true);
+    const rolled = engine.snapshot(players, 1_003);
+    assert.equal((rolled.meta.dice as number[]).length, 2);
+    if (rolled.meta.stage === "BUY_OR_END") {
+      assert.equal(engine.makeMove("p1", { requestId: "capital-buy", row: 10, col: 10, val: { action: "BUY" } }, players, 1_004).accepted, true);
+    }
+    assert.equal(engine.makeMove("p1", { requestId: "capital-end", row: 10, col: 10, val: { action: "END_TURN" } }, players, 1_005).accepted, true);
+    assert.equal(engine.snapshot(players, 1_006).meta.currentPlayerTurn, "p2");
+  });
 
   it("Letras Cruzadas entrega atril privado y valida una palabra española por turnos", () => {
     const players = new ArenaGame("letters-players");

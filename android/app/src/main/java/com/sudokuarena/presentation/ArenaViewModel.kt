@@ -113,7 +113,7 @@ data class ArenaUiState(
             val phaseAllowsPlay = isSoloMode || roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
             val turnAllowsPlay = gameType !in setOf(
                 GameType.MINESWEEPER, GameType.CROSSWORD, GameType.DOTS_AND_BOXES,
-                GameType.CROSS_LETTERS, GameType.SECRET_CODE,
+                GameType.CROSS_LETTERS, GameType.SECRET_CODE, GameType.CAPITAL_ARENA,
             ) ||
                 isSoloMode || genericTurnPlayerId == null || genericTurnPlayerId == playerId
             return connected && genericBoard != null && phaseAllowsPlay && turnAllowsPlay &&
@@ -225,7 +225,13 @@ class ArenaViewModel(
 
         val requestId = UUID.randomUUID().toString()
         mutableState.update { it.copy(pendingRequestId = requestId, message = null) }
-        gateway?.place(requestId, selected.row, selected.column, value, current.revision)
+        val activeGateway = gateway
+        if (activeGateway == null) {
+            mutableState.update { it.copy(pendingRequestId = null, message = "Conexión no disponible") }
+            return
+        }
+        activeGateway.place(requestId, selected.row, selected.column, value, current.revision)
+        releasePendingMoveAfterTimeout(requestId)
     }
 
     fun newSoloGame() {
@@ -342,8 +348,26 @@ class ArenaViewModel(
         }
         val requestId = UUID.randomUUID().toString()
         mutableState.update { it.copy(pendingRequestId = requestId, message = null) }
-        gateway?.makeMove(requestId, selected.row, selected.column, value)
+        val activeGateway = gateway
+        if (activeGateway == null) {
+            mutableState.update { it.copy(pendingRequestId = null, message = "Conexión no disponible") }
+            return
+        }
+        activeGateway.makeMove(requestId, selected.row, selected.column, value)
         mutableHaptics.tryEmit(HapticCue.CLICK)
+        releasePendingMoveAfterTimeout(requestId)
+    }
+
+    /** Un ACK perdido o una reconexión nunca deben convertir la UI en un candado permanente. */
+    private fun releasePendingMoveAfterTimeout(requestId: String) {
+        viewModelScope.launch {
+            delay(GENERIC_REQUEST_TIMEOUT_MS)
+            mutableState.update { current ->
+                if (current.pendingRequestId == requestId) {
+                    current.copy(pendingRequestId = null, message = "La jugada tardó demasiado. Intenta nuevamente.")
+                } else current
+            }
+        }
     }
 
     fun makeWordSelection(start: CellPosition, end: CellPosition, word: String) {
@@ -646,8 +670,12 @@ class ArenaViewModel(
             }
             is RealtimeEvent.BoardEventEnded -> mutableState.update { it.copy(boardEvent = null, boardEventRemainingMs = 0) }
             is RealtimeEvent.ReactionReceived -> showReaction(event)
-            is RealtimeEvent.GenericStateUpdated -> mutableState.update {
-                it.copy(genericBoard = event.state, revision = event.state.revision)
+            is RealtimeEvent.GenericStateUpdated -> mutableState.update { current ->
+                current.copy(
+                    genericBoard = event.state,
+                    revision = event.state.revision,
+                    pendingRequestId = if (event.state.revision > current.revision) null else current.pendingRequestId,
+                )
             }
             is RealtimeEvent.GenericMoveAccepted -> mutableState.update {
                 if (it.pendingRequestId == event.requestId) {
@@ -745,6 +773,7 @@ class ArenaViewModel(
     companion object {
         private const val FOG_SWIPES = 6
         private const val SOLO_PENALTY_MS = 3_000L
+        private const val GENERIC_REQUEST_TIMEOUT_MS = 5_000L
         private const val SOLO_PLAYER_ID = "solo"
         private val ALLOWED_REACTIONS = setOf("LAUGH", "CRY", "ANGRY", "SURPRISED")
 

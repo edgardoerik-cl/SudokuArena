@@ -213,4 +213,5 @@ private fun gameName(gameType: GameType): String = when (gameType) {
     GameType.CRYPTARITHM -> "Criptogramas"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
+    GameType.CAPITAL_ARENA -> "Capital Arena"
 }

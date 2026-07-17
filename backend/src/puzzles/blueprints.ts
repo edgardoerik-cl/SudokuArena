@@ -21,6 +21,7 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "CRYPTARITHM": return cryptarithm(random, difficulty);
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
     case "SECRET_CODE": return secretCode(random, difficulty);
+    case "CAPITAL_ARENA": return capitalArena(random, difficulty);
     case "SUDOKU": return latinPuzzle(random, 9);
   }
 }
@@ -398,6 +399,54 @@ function secretCode(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleB
     board: matrix(5, 5, (row, col) => cell(words[row * 5 + col]!, true, { wordIndex: row * 5 + col })),
     answers: matrix<CellValue>(5, 5, (row, col) => identities[row * 5 + col]!),
     meta: { instructions: "El capitán da una pista y un número. Los operativos eligen palabras; evita al asesino.", difficulty }
+  };
+}
+
+const CAPITAL_NAMES = [
+  "SALIDA", "Distrito Cian", "NEÓN", "Distrito Pixel", "Impuesto Red", "Estación Byte",
+  "Avenida Quantum", "SUERTE", "Bulevar Vector", "Plaza Kernel", "CÁRCEL",
+  "Barrio Nova", "Compañía Data", "Paseo Láser", "Jardín Holo", "Estación Cloud",
+  "Puerto Crypto", "DESTINO", "Mercado Bot", "Torre Lógica", "PARKING",
+  "Isla Matrix", "SUERTE", "Centro Arcade", "Ciudad Prisma", "Estación Socket",
+  "Paseo Android", "Avenida Compose", "Compañía Node", "Fortaleza Arena", "IR A CÁRCEL",
+  "Distrito Synth", "Distrito Lumen", "DESTINO", "Metrópolis IA", "Estación Orbit",
+  "Paseo Zenith", "Impuesto Cloud", "Capital Neón", "Palacio Arena",
+] as const;
+
+function capitalArena(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const size = 11;
+  const coordinates: Array<{ row: number; col: number }> = [];
+  for (let col = 10; col >= 0; col -= 1) coordinates.push({ row: 10, col });
+  for (let row = 9; row >= 0; row -= 1) coordinates.push({ row, col: 0 });
+  for (let col = 1; col <= 10; col += 1) coordinates.push({ row: 0, col });
+  for (let row = 1; row <= 9; row += 1) coordinates.push({ row, col: 10 });
+  const special: Record<number, string> = {
+    0: "START", 2: "CHANCE", 4: "TAX", 7: "CHANCE", 10: "JAIL", 12: "UTILITY",
+    17: "CHANCE", 20: "PARKING", 22: "CHANCE", 28: "UTILITY", 30: "GO_TO_JAIL",
+    33: "CHANCE", 37: "TAX",
+  };
+  const stations = new Set([5, 15, 25, 35]);
+  const spaces = CAPITAL_NAMES.map((name, index) => {
+    const type = special[index] ?? (stations.has(index) ? "STATION" : "PROPERTY");
+    const price = type === "PROPERTY" ? 100 + Math.floor(index / 5) * 25 + random.int(0, 3) * 10
+      : type === "STATION" ? 200 : type === "UTILITY" ? 150 : 0;
+    return { index, name, type, price, rent: price > 0 ? Math.max(12, Math.round(price * .12)) : 0 };
+  });
+  const byCoordinate = new Map(coordinates.map((coordinate, index) => [`${coordinate.row}:${coordinate.col}`, spaces[index]!]));
+  const board = matrix(size, size, (row, col) => {
+    const space = byCoordinate.get(`${row}:${col}`);
+    return space
+      ? cell(null, true, { index: space.index, name: space.name, type: space.type, price: space.price, rent: space.rent })
+      : blockedCell({ capitalCenter: true });
+  });
+  return {
+    board,
+    answers: matrix<CellValue>(size, size, () => null),
+    meta: {
+      spaces,
+      instructions: "Lanza dos dados, compra distritos, cobra rentas y construye mejoras de hackeo.",
+      difficulty,
+    },
   };
 }
 

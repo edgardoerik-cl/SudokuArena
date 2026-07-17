@@ -176,6 +176,11 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("💡 3", "El capitán conecta ideas", "Solo el capitán ve los colores y entrega una pista de una palabra más un número."),
         TutorialStep("⚠", "Operativos: elijan", "Toca palabras relacionadas. Una neutral termina el turno; el asesino pierde la partida al instante."),
     )
+    GameType.CAPITAL_ARENA -> listOf(
+        TutorialStep("🎲", "Lanza dos dados", "En tu turno avanza por la arena y resuelve la casilla donde aterrizas."),
+        TutorialStep("🏙", "Compra y mejora", "Adquiere propiedades libres y aumenta su nivel para cobrar rentas mayores."),
+        TutorialStep("⚡", "Administra tu capital", "Cobra al pasar por Salida, evita la quiebra y termina con el patrimonio más alto."),
+    )
 }
 
 @Composable

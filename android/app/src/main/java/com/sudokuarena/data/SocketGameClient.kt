@@ -99,7 +99,7 @@ class SocketGameClient(
         socket.on("letters:rack") { args -> parseSafely(args) { payload ->
             RealtimeEvent.LetterRackUpdated(
                 letters = payload.optJSONArray("letters")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
-                activePlayerId = payload.optString("activePlayerId").takeIf(String::isNotBlank),
+                activePlayerId = payload.nullableString("activePlayerId"),
                 turnEndsAt = payload.optLong("turnEndsAt", 0L),
             )
         } }
@@ -109,7 +109,7 @@ class SocketGameClient(
                 team = payload.optString("team"), role = payload.optString("role"),
                 key = payload.optJSONArray("key")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
                 currentTeam = payload.optString("currentTeam"),
-                clue = clue?.optString("word")?.takeIf(String::isNotBlank),
+                clue = clue?.nullableString("word"),
                 clueCount = clue?.optInt("remaining", 0) ?: 0,
             )
         } }
@@ -178,7 +178,7 @@ class SocketGameClient(
                 attackerId = payload.getString("attackerId"),
                 type = payload.getString("type"),
                 reflected = payload.optBoolean("reflected", false),
-                reflectedBy = payload.optString("reflectedBy").takeIf(String::isNotBlank),
+                reflectedBy = payload.nullableString("reflectedBy"),
             )
         } }
         socket.on("power_used") { args -> parseSafely(args) { payload ->
@@ -368,7 +368,7 @@ private fun parseSnapshot(json: JSONObject): GameSnapshot {
             combo = player.optInt("combo", 0),
             maxCombo = player.optInt("maxCombo", 0),
             comboMultiplier = player.optInt("comboMultiplier", 1),
-            botPersona = player.optString("botPersona").takeIf(String::isNotBlank),
+            botPersona = player.nullableString("botPersona"),
             powerLoadout = player.optJSONArray("powerLoadout")?.mapObjects { it.toString() }
                 ?: listOf("FOG", "REVEAL"),
             avatarId = player.optString("avatarId", "ORBIT"),
@@ -410,8 +410,7 @@ private fun parseRoomState(json: JSONObject): RoomState {
         rematchVotes = json.optInt("rematchVotes", 0),
         // JSONObject.NULL se serializa como la cadena "null" en algunas
         // versiones de org.json. Nunca debe activar la UI de pausa.
-        pauseRequesterId = json.optString("pauseRequesterId")
-            .takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) },
+        pauseRequesterId = json.nullableString("pauseRequesterId"),
         pauseVotes = json.optInt("pauseVotes", 0),
         pauseNoVotes = json.optInt("pauseNoVotes", 0),
         pauseRequired = json.optInt("pauseRequired", 0),
@@ -427,7 +426,9 @@ private fun parseGenericState(json: JSONObject): GenericBoardState {
             GenericCell(
                 value = cell.opt("value").takeUnless { it == JSONObject.NULL },
                 isRevealed = cell.optBoolean("isRevealed", false),
-                ownerId = cell.optString("ownerId").takeIf(String::isNotBlank),
+                // Causa raíz del bloqueo global: JSONObject.NULL podía terminar
+                // convertido en "null", haciendo que toda celda pareciera ocupada.
+                ownerId = cell.nullableString("ownerId"),
                 isBlocked = cell.optBoolean("isBlocked", false),
                 meta = cell.optJSONObject("meta")?.toKotlinMap().orEmpty(),
             )
@@ -447,6 +448,11 @@ private fun parseGenericState(json: JSONObject): GenericBoardState {
 }
 
 private fun JSONObject.toKotlinMap(): Map<String, Any?> = keys().asSequence().associateWith { key -> jsonValueToKotlin(opt(key)) }
+
+private fun JSONObject.nullableString(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    return optString(key).trim().takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
+}
 
 private fun jsonValueToKotlin(value: Any?): Any? = when (value) {
     null, JSONObject.NULL -> null

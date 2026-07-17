@@ -153,6 +153,17 @@ export class ArenaGame {
     return true;
   }
 
+  setGenericScore(playerId: string, score: number): boolean {
+    const player = this.players.get(playerId);
+    if (!player || !Number.isFinite(score)) return false;
+    const normalized = Math.max(0, Math.round(score));
+    const delta = normalized - player.score;
+    player.score = normalized;
+    this.teamScores.set(player.teamId, (this.teamScores.get(player.teamId) ?? 0) + delta);
+    this.revision += 1;
+    return true;
+  }
+
   applyGenericPenalty(playerId: string, blockedUntil: number): boolean {
     const player = this.players.get(playerId);
     if (!player) return false;

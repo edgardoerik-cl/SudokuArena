@@ -171,6 +171,7 @@ fun WelcomeScreen(
                 FloatingActionButton(onClick = { showHonor = true }) {
                     ControlIcon(ControlIconType.TROPHY)
                 }
+                AudioToggleButton()
             }
         }
     }
@@ -331,6 +332,7 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.NURIKABE -> "≈"; GameType.BRIDGES -> "●═●"; GameType.SLITHERLINK -> "□"; GameType.CRYPTARITHM -> "A=7"
     GameType.CROSS_LETTERS -> "AÑ"
     GameType.SECRET_CODE -> "🔐"
+    GameType.CAPITAL_ARENA -> "💰"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
@@ -340,6 +342,7 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Slitherlink"; GameType.CRYPTARITHM -> "Criptogramas"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
+    GameType.CAPITAL_ARENA -> "Capital Arena"
 }
 
 @Composable

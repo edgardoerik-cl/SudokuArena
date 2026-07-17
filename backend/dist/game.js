@@ -100,6 +100,17 @@ export class ArenaGame {
         this.revision += 1;
         return true;
     }
+    setGenericScore(playerId, score) {
+        const player = this.players.get(playerId);
+        if (!player || !Number.isFinite(score))
+            return false;
+        const normalized = Math.max(0, Math.round(score));
+        const delta = normalized - player.score;
+        player.score = normalized;
+        this.teamScores.set(player.teamId, (this.teamScores.get(player.teamId) ?? 0) + delta);
+        this.revision += 1;
+        return true;
+    }
     applyGenericPenalty(playerId, blockedUntil) {
         const player = this.players.get(playerId);
         if (!player)

@@ -96,6 +96,7 @@ fun GenericArenaScreen(
                     }
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
+                        AudioToggleButton()
                         PauseControl(state, onRequestPause)
                         ExitControl(onExit)
                     }
@@ -135,7 +136,7 @@ fun GenericArenaScreen(
                         secretCanGuess = state.secretRole != "CAPTAIN",
                     )
                     PuzzleHints(generic)
-                    GenericMoveControls(state, state.canMakeGenericMove, onMove, onSecretChat)
+                    GenericMoveControls(state, state.canMakeGenericMove, onMove, onMoveAt, onSecretChat)
                     if (!state.isSoloMode) ReactionMenu(onReaction)
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
                 }
@@ -173,6 +174,10 @@ fun GenericPuzzleGrid(
     secretCanGuess: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    if (state.gameType == GameType.CAPITAL_ARENA) {
+        CapitalArenaBoard(state, players, modifier)
+        return
+    }
     if (state.gameType == GameType.NONOGRAM) {
         NonogramPuzzleGrid(state, players, enabled, onDirectMove, modifier)
         return
@@ -195,7 +200,7 @@ fun GenericPuzzleGrid(
             )
             detectDragGestures(
                 onDragStart = { if (enabled) position(it).also { pos -> dragStart = pos; dragEnd = pos } },
-                onDrag = { change, _ -> if (enabled) dragEnd = position(change.position) },
+                onDrag = { change, _ -> if (enabled) { change.consume(); dragEnd = position(change.position) } },
                 onDragEnd = {
                     val start = dragStart
                     val end = dragEnd
@@ -219,7 +224,7 @@ fun GenericPuzzleGrid(
                 var end: CellPosition? = null
                 detectDragGestures(
                     onDragStart = { if (enabled) { start = dot(it); end = start } },
-                    onDrag = { change, _ -> if (enabled) end = dot(change.position) },
+                    onDrag = { change, _ -> if (enabled) { change.consume(); end = dot(change.position) } },
                     onDragEnd = {
                         start?.let { a -> end?.let { b -> dotsEdge(a, b, state.rows, state.columns)?.let { onDirectMove(it.row, it.col, it.side) } } }
                         start = null; end = null
@@ -274,7 +279,7 @@ fun GenericPuzzleGrid(
             }
             detectDragGestures(
                 onDragStart = { lastEdge = null; drawAt(it) },
-                onDrag = { change, _ -> drawAt(change.position) },
+                onDrag = { change, _ -> if (enabled) change.consume(); drawAt(change.position) },
                 onDragEnd = { lastEdge = null },
             )
         }
@@ -311,6 +316,24 @@ fun GenericPuzzleGrid(
         }
     }
 
+    // Cachea geometría/colores fuera del DrawScope: evita parsear colores y crear
+    // mapas por cada celda en cada frame de Timbiriche, Bridges y Slitherlink.
+    val identityColors = remember(players) {
+        players.mapValues { (_, player) -> parseGenericColor(player.colorHex) }
+    }
+    val validBridgeTargets = remember(state.board, selectedBridgeIsland) {
+        selectedBridgeIsland?.let { bridgeTargets(state, it) }.orEmpty()
+    }
+    val completedBridgeIslands = remember(state.board, state.gameType) {
+        if (state.gameType != GameType.BRIDGES) emptySet() else buildSet {
+            state.board.forEachIndexed { row, cells ->
+                cells.forEachIndexed { col, cell ->
+                    if (cell.meta["island"] == true && bridgeSatisfied(state, row, col)) add("$row:$col")
+                }
+            }
+        }
+    }
+
     Canvas(
         modifier.then(gestureModifier)
             .fillMaxWidth()
@@ -322,8 +345,8 @@ fun GenericPuzzleGrid(
         state.board.forEachIndexed { row, cells ->
             cells.forEachIndexed { col, cell ->
                 val origin = Offset(col * cellWidth, row * cellHeight)
-                val ownerColor = cell.ownerId?.let { players[it]?.colorHex }?.let(::parseGenericColor)
-                val bridgeValid = state.gameType == GameType.BRIDGES && selectedBridgeIsland != null && "${row}:${col}" in bridgeTargets(state, selectedBridgeIsland!!)
+                val ownerColor = cell.ownerId?.let(identityColors::get)
+                val bridgeValid = state.gameType == GameType.BRIDGES && "${row}:${col}" in validBridgeTargets
                 val fill = when {
                     CellPosition(row, col) in illegalWater -> Color(0xFFFF1744).copy(alpha = warningAlpha)
                     state.gameType == GameType.NURIKABE && cell.value == "RIVER" -> Color(0xFF2196F3).copy(alpha = .78f)
@@ -339,11 +362,13 @@ fun GenericPuzzleGrid(
                     else -> Color.Transparent
                 }
                 drawRect(fill, origin, Size(cellWidth, cellHeight))
-                val renderMeta = cell.meta + mapOf(
-                    "_row" to row,
-                    "_col" to col,
-                    "completed" to (state.gameType == GameType.BRIDGES && cell.meta["island"] == true && bridgeSatisfied(state, row, col)),
-                )
+                val renderMeta = if (state.gameType == GameType.BRIDGES) {
+                    cell.meta + mapOf(
+                        "_row" to row,
+                        "_col" to col,
+                        "completed" to ("$row:$col" in completedBridgeIslands),
+                    )
+                } else cell.meta
                 renderGenericCell(state.gameType, cell.value, renderMeta, cell.isBlocked, origin, cellWidth, cellHeight, textMeasurer)
                 drawRect(Color(0xFFB0BEC5), origin, Size(cellWidth, cellHeight), style = Stroke(1.2f))
                 if (ownerColor != null) drawRect(ownerColor, origin, Size(cellWidth, cellHeight), style = Stroke(2.4f))
@@ -619,7 +644,13 @@ private fun SecretRoleHeader(state: ArenaUiState) {
 }
 
 @Composable
-private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (Any?) -> Unit, onSecretChat: (String) -> Unit) {
+private fun GenericMoveControls(
+    state: ArenaUiState,
+    enabled: Boolean,
+    onMove: (Any?) -> Unit,
+    onMoveAt: (Int, Int, Any?) -> Unit,
+    onSecretChat: (String) -> Unit,
+) {
     val gameType = state.gameType
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
@@ -677,6 +708,11 @@ private fun GenericMoveControls(state: ArenaUiState, enabled: Boolean, onMove: (
                 }
             }
         }
+        GameType.CAPITAL_ARENA -> CapitalArenaControls(
+            state = state,
+            enabled = state.canInteractGeneric,
+            onAction = { action -> onMoveAt(10, 10, action) },
+        )
         else -> {
             val values = when (gameType) {
                 GameType.CRYPTARITHM -> 0..9
@@ -754,6 +790,7 @@ fun gameTitle(type: GameType): String = when (type) {
     GameType.SLITHERLINK -> "Multi Arena · Slitherlink"; GameType.CRYPTARITHM -> "Multi Arena · Criptogramas"
     GameType.CROSS_LETTERS -> "Multi Arena · Letras Cruzadas"
     GameType.SECRET_CODE -> "Multi Arena · Código Secreto"
+    GameType.CAPITAL_ARENA -> "Multi Arena · Capital Arena"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

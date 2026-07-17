@@ -56,6 +56,7 @@ fun RoomLobbyScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { AudioToggleButton() }
             ArenaLogo(Modifier.size(105.dp))
             Text("Sala ${room?.roomCode ?: "----"}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             if (room == null) {
@@ -209,6 +210,7 @@ private fun shortGameTitle(type: GameType): String = when (type) {
     GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Slitherlink"; GameType.CRYPTARITHM -> "Criptograma"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
+    GameType.CAPITAL_ARENA -> "Capital Arena"
 }
 
 private fun teamModeLabel(mode: TeamMode): String = when (mode) {

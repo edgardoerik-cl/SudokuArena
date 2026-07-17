@@ -70,6 +70,8 @@ import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.RoomPhase
 import com.sudokuarena.domain.TeamMode
 import com.sudokuarena.domain.GameType
+import com.sudokuarena.audio.GameSound
+import com.sudokuarena.audio.GlobalAudioManager
 import kotlin.math.floor
 import kotlin.math.roundToInt
 
@@ -79,7 +81,16 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
     val context = LocalContext.current
     val haptics = remember(context) { HapticFeedbackController(context) }
     LaunchedEffect(viewModel, haptics) {
-        viewModel.haptics.collect(haptics::play)
+        viewModel.haptics.collect { cue ->
+            haptics.play(cue)
+            GlobalAudioManager.play(
+                when (cue) {
+                    HapticCue.CLICK -> GameSound.CLICK
+                    HapticCue.CRESCENDO -> GameSound.SUCCESS
+                    HapticCue.DANGER -> GameSound.DANGER
+                },
+            )
+        }
     }
 
     val roomState = state.roomState
@@ -193,6 +204,7 @@ fun ArenaScreen(
                     Text("Multi Arena · Sudoku", style = MaterialTheme.typography.headlineSmall)
                     Row {
                         TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
+                        AudioToggleButton()
                         PauseControl(state, onRequestPause)
                         ExitControl(onExit)
                     }

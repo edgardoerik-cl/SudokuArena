@@ -14,6 +14,7 @@ export const GAME_TYPES = [
     "SLITHERLINK",
     "CRYPTARITHM",
     "CROSS_LETTERS",
-    "SECRET_CODE"
+    "SECRET_CODE",
+    "CAPITAL_ARENA"
 ];
 //# sourceMappingURL=types.js.map
