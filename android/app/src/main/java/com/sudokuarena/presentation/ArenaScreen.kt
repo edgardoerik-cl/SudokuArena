@@ -176,13 +176,31 @@ fun ArenaScreen(
     onExit: () -> Unit,
 ) {
     val shake = remember { Animatable(0f) }
+    val boardPulse = remember { Animatable(1f) }
     LaunchedEffect(state.penaltyRemainingMs > 0) {
         if (state.penaltyRemainingMs > 0) {
             repeat(7) { index -> shake.animateTo(if (index % 2 == 0) 13f else -13f, tween(42)) }
             shake.animateTo(0f, tween(55))
         }
     }
-    Scaffold { padding ->
+    LaunchedEffect(state.revision) {
+        if (state.revision > 0) {
+            boardPulse.snapTo(.965f)
+            boardPulse.animateTo(1f, tween(190))
+        }
+    }
+    Scaffold(
+        topBar = {
+            PinnedGameHeader(
+                title = "Multi Arena · Sudoku",
+                subtitle = null,
+                state = state,
+                onTutorial = onOpenTutorial,
+                onPause = onRequestPause,
+                onExit = onExit,
+            )
+        },
+    ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -196,19 +214,6 @@ fun ArenaScreen(
                     .padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Multi Arena · Sudoku", style = MaterialTheme.typography.headlineSmall)
-                    Row {
-                        TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
-                        AudioToggleButton()
-                        PauseControl(state, onRequestPause)
-                        ExitControl(onExit)
-                    }
-                }
                 PauseVoteBanner(state, onPauseResponse)
                 Text(
                     when {
@@ -234,7 +239,13 @@ fun ArenaScreen(
                     selected = state.selected,
                     enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
                     onCellSelected = onCellSelected,
-                    modifier = Modifier.offset { IntOffset(shake.value.roundToInt(), 0) },
+                    modifier = Modifier
+                        .offset { IntOffset(shake.value.roundToInt(), 0) }
+                        .graphicsLayer {
+                            scaleX = boardPulse.value
+                            scaleY = boardPulse.value
+                            alpha = .78f + boardPulse.value * .22f
+                        },
                 )
                 Spacer(Modifier.height(8.dp))
                 state.conquestMessage?.let {
@@ -357,11 +368,14 @@ private fun BoardEventBanner(state: ArenaUiState) {
 
 @Composable
 fun Scoreboard(state: ArenaUiState) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        state.players.forEach { player ->
+    val columns = if (state.players.size > 2) 2 else state.players.size.coerceAtLeast(1)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        state.players.chunked(columns).forEach { rowPlayers ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                rowPlayers.forEach { player ->
             val color = parseColor(player.colorHex)
             val shieldActive = player.shieldUntil > state.serverNowMs
             Box(modifier = Modifier.weight(1f)) {
@@ -402,6 +416,9 @@ fun Scoreboard(state: ArenaUiState) {
                             .zIndex(2f),
                     )
                 }
+                }
+                }
+                if (rowPlayers.size < columns) Spacer(Modifier.weight(1f))
             }
         }
     }

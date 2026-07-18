@@ -3,7 +3,7 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `3.4.0` corrige de raíz el bloqueo táctil global, incorpora audio persistente y suma Capital Arena a una Multiarena con diecisiete juegos:
+La versión `3.5.0` incorpora una playlist multigénero, renueva Capital Arena con cartas sorpresa y fichas neón, y fija los controles de partida en una Multiarena con diecisiete juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
 Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink,
 Criptogramas, Letras Cruzadas, Código Secreto y Capital Arena. Todos comparten salas, colores de conquista,
@@ -26,6 +26,11 @@ También incluye un tutorial independiente por juego, avatar y reacciones rápid
 pausa local con tablero difuminado, pausa online por consenso con cuenta regresiva,
 combos autoritativos x2/x3, Bots con personalidad y enfriamiento de sabotajes,
 revancha por votación, niveles/XP y reconexión con 15 segundos de tolerancia.
+
+El audio global ofrece cinco composiciones procedurales originales —Phonk, Pop,
+Rock, Metal y Clásica— con mute persistente, pista siguiente y selector de género.
+Capital Arena admite cuatro participantes, cartas de Suerte con movimiento,
+bonos, multas o cárcel, fichas neón reacomodables y panel económico 2×2.
 
 ## Estructura
 
@@ -51,7 +56,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v3.4.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v3.5.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,6 +40,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sudokuarena.domain.RoomPhase
+
+/** Barra fija: Salir conserva su slot aun en pantallas angostas. */
+@Composable
+fun PinnedGameHeader(
+    title: String,
+    subtitle: String?,
+    state: ArenaUiState,
+    onTutorial: () -> Unit,
+    onPause: () -> Unit,
+    onExit: () -> Unit,
+) {
+    Surface(color = Color(0xFFF8FAFF), shadowElevation = 7.dp) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 1)
+                    subtitle?.let { Text(it, style = MaterialTheme.typography.labelMedium, maxLines = 1) }
+                }
+                ExitControl(onExit)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onTutorial) { Text("?", fontWeight = FontWeight.Black, fontSize = 20.sp) }
+                AudioControls()
+                PauseControl(state, onPause)
+            }
+        }
+    }
+}
 
 @Composable
 fun PauseControl(

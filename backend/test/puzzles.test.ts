@@ -82,14 +82,36 @@ describe("motor genérico de puzzles", () => {
     assert.equal((initial.meta.balances as Record<string, number>).p1, 1_500);
     assert.equal(engine.makeMove("p2", { requestId: "capital-wrong-turn", row: 10, col: 10, val: { action: "ROLL" } }, players, 1_001).accepted, false);
 
-    assert.equal(engine.makeMove("p1", { requestId: "capital-roll", row: 10, col: 10, val: { action: "ROLL" } }, players, 1_002).accepted, true);
+    const originalRandom = Math.random;
+    Math.random = () => 0; // 1+1 cae en Suerte y roba la primera tarjeta.
+    try {
+      assert.equal(engine.makeMove("p1", { requestId: "capital-roll", row: 10, col: 10, val: { action: "ROLL" } }, players, 1_002).accepted, true);
+    } finally {
+      Math.random = originalRandom;
+    }
     const rolled = engine.snapshot(players, 1_003);
     assert.equal((rolled.meta.dice as number[]).length, 2);
+    assert.equal((rolled.meta.surpriseCard as { title: string }).title, "Hackathon Maestro");
+    assert.equal((rolled.meta.balances as Record<string, number>).p1, 1_700);
     if (rolled.meta.stage === "BUY_OR_END") {
       assert.equal(engine.makeMove("p1", { requestId: "capital-buy", row: 10, col: 10, val: { action: "BUY" } }, players, 1_004).accepted, true);
     }
     assert.equal(engine.makeMove("p1", { requestId: "capital-end", row: 10, col: 10, val: { action: "END_TURN" } }, players, 1_005).accepted, true);
     assert.equal(engine.snapshot(players, 1_006).meta.currentPlayerTurn, "p2");
+  });
+
+  it("Capital Arena admite cuatro jugadores y rechaza un quinto slot", () => {
+    const players = new ArenaGame("capital-four");
+    assert.ok(players.addPlayer("p1", "Uno"));
+    assert.ok(players.addPlayer("p2", "Dos"));
+    assert.ok(players.addPlayer("p3", "Tres"));
+    assert.ok(players.addPlayer("p4", "Cuatro"));
+    assert.equal(players.addPlayer("p5", "Cinco"), null);
+    players.startMatch({ gameType: "CAPITAL_ARENA", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("CAPITAL_ARENA", "capital-four-test");
+    const snapshot = engine.snapshot(players);
+    assert.equal(Object.keys(snapshot.meta.balances as object).length, 4);
+    assert.equal(snapshot.players.length, 4);
   });
 
   it("Letras Cruzadas entrega atril privado y valida una palabra española por turnos", () => {

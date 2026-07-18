@@ -57,6 +57,13 @@ export class GenericPuzzleEngine {
   private capitalDice: [number, number] = [1, 1];
   private capitalLastMove: { playerId: string; from: number; to: number } | null = null;
   private capitalEvent = "La economía neón está lista";
+  private capitalCard: {
+    id: string;
+    playerId: string;
+    title: string;
+    description: string;
+    kind: "BONUS" | "PENALTY" | "MOVE";
+  } | null = null;
 
   constructor(readonly gameType: GameType, readonly gameId: string, options: PuzzleGenerationOptions = {}) {
     const blueprint = createPuzzleBlueprint(gameType, options);
@@ -103,6 +110,7 @@ export class GenericPuzzleEngine {
           dice: this.capitalDice,
           lastMove: this.capitalLastMove,
           lastEvent: this.capitalEvent,
+          surpriseCard: this.capitalCard,
           balances: Object.fromEntries(this.capitalBalances),
           positions: Object.fromEntries(this.capitalPositions),
           propertyOwners: Object.fromEntries(this.capitalPropertyOwners),
@@ -653,16 +661,7 @@ export class GenericPuzzleEngine {
       return;
     }
     if (space.type === "CHANCE") {
-      const cards = [
-        { delta: 180, text: "Hackathon ganado: +180" },
-        { delta: 100, text: "Inversión neón: +100" },
-        { delta: -80, text: "Fallo de servidor: -80" },
-        { delta: -150, text: "Auditoría fiscal: -150" },
-      ];
-      const card = cards[Math.floor(Math.random() * cards.length)]!;
-      this.changeCapitalBalance(playerId, card.delta);
-      this.capitalEvent = card.text;
-      this.capitalStage = "END";
+      this.drawCapitalCard(playerId, index);
       return;
     }
     if (space.type === "TAX") {
@@ -686,6 +685,46 @@ export class GenericPuzzleEngine {
       this.changeCapitalBalance(owner, rent);
       this.capitalEvent = `Renta ${rent} pagada por ${space.name}`;
     } else this.capitalEvent = owner === playerId ? `Tu distrito ${space.name}` : space.name;
+    this.capitalStage = "END";
+  }
+
+  private drawCapitalCard(playerId: string, from: number): void {
+    const cards: Array<{
+      title: string;
+      description: string;
+      kind: "BONUS" | "PENALTY" | "MOVE";
+      money?: number;
+      move?: number;
+      jail?: boolean;
+    }> = [
+      { title: "Hackathon Maestro", description: "Recibes 200 créditos", kind: "BONUS" as const, money: 200 },
+      { title: "Inversión Relámpago", description: "Recibes 120 créditos", kind: "BONUS" as const, money: 120 },
+      { title: "Fallo de Servidor", description: "Pagas una multa de 100 créditos", kind: "PENALTY" as const, money: -100 },
+      { title: "Auditoría de la Arena", description: "Pagas una multa de 160 créditos", kind: "PENALTY" as const, money: -160 },
+      { title: "Atajo Quantum", description: "Avanzas 3 casillas", kind: "MOVE" as const, move: 3 },
+      { title: "Firewall Policial", description: "Vas directamente a la cárcel", kind: "PENALTY" as const, jail: true },
+    ];
+    const selected = cards[Math.floor(Math.random() * cards.length)]!;
+    if (selected.money) this.changeCapitalBalance(playerId, selected.money);
+    if (selected.jail) {
+      this.capitalPositions.set(playerId, 10);
+      this.capitalLastMove = { playerId, from, to: 10 };
+    } else if (selected.move) {
+      const rawTarget = from + selected.move;
+      const target = rawTarget % 40;
+      if (rawTarget >= 40) this.changeCapitalBalance(playerId, 200);
+      this.capitalPositions.set(playerId, target);
+      this.capitalLastMove = { playerId, from, to: target };
+      this.resolveCapitalLanding(playerId, target);
+    }
+    this.capitalCard = {
+      id: randomUUID(),
+      playerId,
+      title: selected.title,
+      description: selected.description,
+      kind: selected.kind,
+    };
+    this.capitalEvent = `🎴 ${selected.title}: ${selected.description}`;
     this.capitalStage = "END";
   }
 

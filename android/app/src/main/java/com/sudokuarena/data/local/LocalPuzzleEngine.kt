@@ -32,6 +32,7 @@ class LocalPuzzleEngine(
     private var capitalPending: Int? = null
     private var capitalDice = listOf(1, 1)
     private var capitalEvent = "Construye tu imperio neón"
+    private var capitalCard: Map<String, Any?>? = null
     private val capitalOwners = mutableMapOf<Int, String>()
     private val capitalLevels = mutableMapOf<Int, Int>()
 
@@ -41,7 +42,7 @@ class LocalPuzzleEngine(
         columns = board.firstOrNull()?.size ?: 0, board = board, completed = isComplete(),
         meta = blueprint.meta + if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
-            "dice" to capitalDice, "lastEvent" to capitalEvent,
+            "dice" to capitalDice, "lastEvent" to capitalEvent, "surpriseCard" to capitalCard,
             "balances" to mapOf(OWNER to capitalBalance), "positions" to mapOf(OWNER to capitalPosition),
             "propertyOwners" to capitalOwners.mapKeys { it.key.toString() },
             "propertyLevels" to capitalLevels.mapKeys { it.key.toString() },
@@ -402,9 +403,21 @@ class LocalPuzzleEngine(
                 capitalPosition = raw % 40
                 val space = (blueprint.meta["spaces"] as List<Map<String, Any?>>)[capitalPosition]
                 val price = space["price"] as Int
-                capitalPending = capitalPosition.takeIf { price > 0 && capitalOwners[it] == null }
-                capitalStage = if (capitalPending != null) "BUY_OR_END" else "END"
-                capitalEvent = if (capitalPending != null) "${space["name"]} disponible por $price" else "Caíste en ${space["name"]}"
+                when (space["type"]) {
+                    "CHANCE" -> drawLocalCapitalCard()
+                    "GO_TO_JAIL" -> {
+                        capitalPosition = 10; capitalStage = "END"; capitalEvent = "Vas directamente a la cárcel"
+                    }
+                    "TAX" -> {
+                        capitalBalance = (capitalBalance - 120).coerceAtLeast(0)
+                        capitalStage = "END"; capitalEvent = "Impuesto de infraestructura: -120"
+                    }
+                    else -> {
+                        capitalPending = capitalPosition.takeIf { price > 0 && capitalOwners[it] == null }
+                        capitalStage = if (capitalPending != null) "BUY_OR_END" else "END"
+                        capitalEvent = if (capitalPending != null) "${space["name"]} disponible por $price" else "Caíste en ${space["name"]}"
+                    }
+                }
             }
             "BUY" -> {
                 val index = capitalPending ?: return reject("No hay una propiedad disponible")
@@ -432,6 +445,41 @@ class LocalPuzzleEngine(
         }
         revision += 1
         return LocalPuzzleMoveResult(true, snapshot(), points = 0, message = capitalEvent)
+    }
+
+    private fun drawLocalCapitalCard() {
+        val cards = listOf(
+            Triple("Hackathon Maestro", "Recibes 200 créditos", "BONUS"),
+            Triple("Inversión Relámpago", "Recibes 120 créditos", "BONUS"),
+            Triple("Fallo de Servidor", "Pagas una multa de 100 créditos", "PENALTY"),
+            Triple("Auditoría de la Arena", "Pagas una multa de 160 créditos", "PENALTY"),
+            Triple("Atajo Quantum", "Avanzas 3 casillas", "MOVE"),
+            Triple("Firewall Policial", "Vas directamente a la cárcel", "PENALTY"),
+        )
+        val index = random.nextInt(cards.size)
+        val selected = cards[index]
+        when (index) {
+            0 -> capitalBalance += 200
+            1 -> capitalBalance += 120
+            2 -> capitalBalance = (capitalBalance - 100).coerceAtLeast(0)
+            3 -> capitalBalance = (capitalBalance - 160).coerceAtLeast(0)
+            4 -> {
+                val raw = capitalPosition + 3
+                if (raw >= 40) capitalBalance += 200
+                capitalPosition = raw % 40
+            }
+            5 -> capitalPosition = 10
+        }
+        capitalCard = mapOf(
+            "id" to "local-$revision-${random.nextInt()}",
+            "playerId" to OWNER,
+            "title" to selected.first,
+            "description" to selected.second,
+            "kind" to selected.third,
+        )
+        capitalPending = null
+        capitalStage = "END"
+        capitalEvent = "🎴 ${selected.first}: ${selected.second}"
     }
 
     private fun capitalArena(): Blueprint {

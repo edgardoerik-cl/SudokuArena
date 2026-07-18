@@ -56,7 +56,7 @@ fun RoomLobbyScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { AudioToggleButton() }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { AudioControls() }
             ArenaLogo(Modifier.size(105.dp))
             Text("Sala ${room?.roomCode ?: "----"}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             if (room == null) {

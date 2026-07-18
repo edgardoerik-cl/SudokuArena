@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,25 +84,35 @@ fun GenericArenaScreen(
     onExit: () -> Unit,
 ) {
     val generic = state.genericBoard
-    Scaffold { padding ->
+    val boardPulse = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(generic?.revision) {
+        if ((generic?.revision ?: 0L) > 0L) {
+            boardPulse.snapTo(.965f)
+            boardPulse.animateTo(1f, tween(190))
+        }
+    }
+    Scaffold(
+        topBar = {
+            PinnedGameHeader(
+                title = gameTitle(state.gameType),
+                subtitle = if (state.isSoloMode) {
+                    "Solitario · ${formatGenericTime(state.soloElapsedMs)} · ${state.soloErrors} errores"
+                } else {
+                    "Sala ${state.roomCode.orEmpty()} · ${formatGenericTime(state.matchRemainingMs)}"
+                },
+                state = state,
+                onTutorial = onOpenTutorial,
+                onPause = onRequestPause,
+                onExit = onExit,
+            )
+        },
+    ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
                 Modifier.fillMaxSize().blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp).verticalScroll(rememberScrollState()).padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(gameTitle(state.gameType), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                        Text(if (state.isSoloMode) "Solitario · ${formatGenericTime(state.soloElapsedMs)} · ${state.soloErrors} errores" else "Sala ${state.roomCode.orEmpty()} · ${formatGenericTime(state.matchRemainingMs)}")
-                    }
-                    Row {
-                        TextButton(onClick = onOpenTutorial) { Text("?", fontWeight = FontWeight.Black) }
-                        AudioToggleButton()
-                        PauseControl(state, onRequestPause)
-                        ExitControl(onExit)
-                    }
-                }
                 if (!state.isSoloMode && state.roomState?.pauseRequesterId != null &&
                     state.roomState.phase in setOf(com.sudokuarena.domain.RoomPhase.PLAYING, com.sudokuarena.domain.RoomPhase.SUDDEN_DEATH)
                 ) PauseVoteBanner(state, onPauseResponse)
@@ -134,6 +146,11 @@ fun GenericArenaScreen(
                         onDirectMove = onMoveAt,
                         secretKey = state.secretKey,
                         secretCanGuess = state.secretRole != "CAPTAIN",
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = boardPulse.value
+                            scaleY = boardPulse.value
+                            alpha = .78f + boardPulse.value * .22f
+                        },
                     )
                     PuzzleHints(generic)
                     GenericMoveControls(state, state.canMakeGenericMove, onMove, onMoveAt, onSecretChat)
