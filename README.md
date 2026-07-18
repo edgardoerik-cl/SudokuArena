@@ -3,7 +3,7 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `4.0.0` convierte toda la experiencia a formato horizontal, incorpora chat global, Piedra/Papel/Tijeras para decidir el primer turno y amplía la Multiarena a diecinueve juegos:
+La versión `4.0.1` convierte toda la experiencia a formato horizontal, incorpora chat global, Piedra/Papel/Tijeras para decidir el primer turno y amplía la Multiarena a diecinueve juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
 Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink,
 Criptogramas, Letras Cruzadas, Código Secreto, Capital Arena, Nexo Cero y Abismo Arena. Todos comparten salas, colores de conquista,
@@ -27,8 +27,10 @@ pausa local con tablero difuminado, pausa online por consenso con cuenta regresi
 combos autoritativos x2/x3, Bots con personalidad y enfriamiento de sabotajes,
 revancha por votación, niveles/XP y reconexión con 15 segundos de tolerancia.
 
-El audio global ofrece cinco composiciones procedurales originales —Phonk, Pop,
-Rock, Metal y Clásica— con mute persistente, pista siguiente, selector de género y volumen ajustable.
+El audio global ofrece cinco pistas musicales reales CC0 —Electrónica, Pop,
+Rock, Metal y Clásica— incluidas dentro del APK, con mute persistente, pista
+siguiente, selector de género y volumen ajustable. Autores y fuentes:
+[`docs/music-credits.md`](docs/music-credits.md).
 Capital Arena admite cuatro participantes, cartas de Suerte con movimiento,
 bonos, multas o cárcel, fichas neón reacomodables, información en cuatro esquinas y brillo de turno.
 Abismo Arena utiliza simulación autoritativa a 20 Hz, snapshots volátiles por Socket.IO
@@ -58,7 +60,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v4.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v4.0.1-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

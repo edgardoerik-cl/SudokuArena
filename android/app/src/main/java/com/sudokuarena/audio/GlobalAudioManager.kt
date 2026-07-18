@@ -5,23 +5,37 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.ToneGenerator
-import java.io.BufferedOutputStream
-import java.io.File
-import java.io.FileOutputStream
-import kotlin.math.PI
-import kotlin.math.sin
+import com.sudokuarena.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class GameSound { CLICK, SUCCESS, DANGER }
 
-enum class MusicGenre(val label: String, val icon: String, val slug: String) {
-    PHONK("Phonk", "🚘", "phonk"),
-    POP("Pop", "✨", "pop"),
-    ROCK("Rock", "🎸", "rock"),
-    METAL("Metal", "🤘", "metal"),
-    CLASSICAL("Clásica", "🎻", "classical"),
+/**
+ * Música real incluida dentro del APK. Todas las pistas son CC0 y sus créditos
+ * se encuentran en docs/music-credits.md.
+ */
+enum class MusicGenre(
+    val label: String,
+    val icon: String,
+    val slug: String,
+    val trackTitle: String,
+    val artist: String,
+    val rawResource: Int,
+) {
+    PHONK("Electrónica", "🚘", "electronic", "Electronic Music Loop", "Rami99", R.raw.music_phonk),
+    POP("Pop", "✨", "pop", "High", "Pro Sensory", R.raw.music_pop),
+    ROCK("Rock", "🎸", "rock", "Background Music Loop", "Pro Sensory", R.raw.music_rock),
+    METAL("Metal", "🤘", "metal", "Heavy Dungeon", "Joth", R.raw.music_metal),
+    CLASSICAL(
+        "Clásica",
+        "🎻",
+        "classical",
+        "Classical Pop (Instrumental)",
+        "Pro Sensory",
+        R.raw.music_classical,
+    ),
 }
 
 data class AudioUiState(
@@ -32,15 +46,18 @@ data class AudioUiState(
 )
 
 /**
- * Reproductor único de proceso con playlist procedural sin material protegido.
- * Cada género genera una composición breve original y perfectamente enlazable.
- * El MediaPlayer sobrevive a navegación y recreación de Activity.
+ * Reproductor único para todo el proceso de la aplicación.
+ *
+ * Las canciones están empaquetadas en res/raw, por lo que no dependen de
+ * Internet, no se reinician al navegar entre Composables y sobreviven a la
+ * recreación de la Activity.
  */
 object GlobalAudioManager {
     private const val PREFS = "multi_arena_audio"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_GENRE = "genre"
     private const val KEY_VOLUME = "volume"
+
     private var appContext: Context? = null
     private var player: MediaPlayer? = null
     private var toneGenerator: ToneGenerator? = null
@@ -55,7 +72,9 @@ object GlobalAudioManager {
         appContext = context.applicationContext
         val preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val genre = runCatching {
-            MusicGenre.valueOf(preferences.getString(KEY_GENRE, MusicGenre.PHONK.name).orEmpty())
+            MusicGenre.valueOf(
+                preferences.getString(KEY_GENRE, MusicGenre.PHONK.name).orEmpty(),
+            )
         }.getOrDefault(MusicGenre.PHONK)
         mutableState.value = AudioUiState(
             enabled = preferences.getBoolean(KEY_ENABLED, true),
@@ -80,11 +99,14 @@ object GlobalAudioManager {
 
     @Synchronized
     fun toggle() {
-        val next = !mutableState.value.enabled
-        mutableState.value = mutableState.value.copy(enabled = next)
+        val enabled = !mutableState.value.enabled
+        mutableState.value = mutableState.value.copy(enabled = enabled)
         persist()
-        if (next && foreground) player?.start() ?: prepareTrack(mutableState.value.genre)
-        else player?.pause()
+        if (enabled && foreground) {
+            player?.start() ?: prepareTrack(mutableState.value.genre)
+        } else {
+            player?.pause()
+        }
     }
 
     @Synchronized
@@ -137,23 +159,24 @@ object GlobalAudioManager {
         val context = appContext ?: return
         val token = ++preparationGeneration
         mutableState.value = mutableState.value.copy(preparing = true)
+
         Thread {
             runCatching {
-                val loop = File(context.cacheDir, "multi_arena_${genre.slug}_v2.wav")
-                if (!loop.exists() || loop.length() < 100_000) writeGenreLoop(loop, genre)
-                MediaPlayer().apply {
-                    setAudioAttributes(
+                val ready = MediaPlayer()
+                context.resources.openRawResourceFd(genre.rawResource).use { audio ->
+                    ready.setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_GAME)
                             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                             .build(),
                     )
-                    setDataSource(loop.absolutePath)
-                    isLooping = true
+                    ready.setDataSource(audio.fileDescriptor, audio.startOffset, audio.length)
+                    ready.isLooping = true
                     val volume = mutableState.value.volume
-                    setVolume(volume, volume)
-                    prepare()
+                    ready.setVolume(volume, volume)
+                    ready.prepare()
                 }
+                ready
             }.onSuccess { ready ->
                 synchronized(this) {
                     if (token != preparationGeneration || mutableState.value.genre != genre) {
@@ -167,75 +190,14 @@ object GlobalAudioManager {
                 }
             }.onFailure {
                 synchronized(this) {
-                    if (token == preparationGeneration) mutableState.value = mutableState.value.copy(preparing = false)
+                    if (token == preparationGeneration) {
+                        mutableState.value = mutableState.value.copy(preparing = false)
+                    }
                 }
             }
-        }.apply { name = "MultiArena-Audio-${genre.slug}"; isDaemon = true }.start()
-    }
-
-    private fun writeGenreLoop(file: File, genre: MusicGenre) {
-        val sampleRate = 22_050
-        val seconds = 8
-        val samples = sampleRate * seconds
-        val pcmBytes = samples * 2
-        BufferedOutputStream(FileOutputStream(file)).use { output ->
-            output.write("RIFF".toByteArray()); output.writeLeInt(36 + pcmBytes)
-            output.write("WAVEfmt ".toByteArray()); output.writeLeInt(16)
-            output.writeLeShort(1); output.writeLeShort(1)
-            output.writeLeInt(sampleRate); output.writeLeInt(sampleRate * 2)
-            output.writeLeShort(2); output.writeLeShort(16)
-            output.write("data".toByteArray()); output.writeLeInt(pcmBytes)
-            repeat(samples) { index ->
-                val time = index.toDouble() / sampleRate
-                val edgeFade = minOf(1.0, time / .22, (seconds - time) / .22).coerceAtLeast(0.0)
-                val raw = genreSample(genre, time)
-                val sample = (raw.coerceIn(-.92, .92) * edgeFade * Short.MAX_VALUE).toInt()
-                output.write(sample and 0xFF)
-                output.write((sample ushr 8) and 0xFF)
-            }
-        }
-    }
-
-    private fun genreSample(genre: MusicGenre, time: Double): Double {
-        fun wave(frequency: Double, amplitude: Double = 1.0) =
-            sin(2.0 * PI * frequency * time) * amplitude
-        fun kick(rate: Double): Double {
-            val phase = (time * rate) % 1.0
-            return wave(48.0 + 55.0 * (1.0 - phase), .28 * (1.0 - phase).coerceAtLeast(0.0))
-        }
-        return when (genre) {
-            MusicGenre.PHONK -> {
-                val cowbell = if ((time * 4).toInt() % 4 in 0..1) wave(690.0, .10) + wave(920.0, .05) else 0.0
-                wave(55.0, .34) + wave(82.41, .13) + kick(2.0) + cowbell
-            }
-            MusicGenre.POP -> {
-                val melody = doubleArrayOf(261.63, 329.63, 392.0, 329.63, 293.66, 349.23, 440.0, 349.23)
-                val note = melody[((time * 2).toInt()) % melody.size]
-                wave(130.81, .16) + wave(164.81, .12) + wave(note, .16) + kick(2.0)
-            }
-            MusicGenre.ROCK -> {
-                val root = if ((time * 2).toInt() % 2 == 0) 110.0 else 98.0
-                wave(root, .26) + wave(root * 2, .12) + wave(root * 3, .07) + wave(root * 1.5, .20) + kick(2.0)
-            }
-            MusicGenre.METAL -> {
-                val root = if ((time * 4).toInt() % 4 < 2) 73.42 else 82.41
-                val distorted = (wave(root, .55) + wave(root * 2, .28) + wave(root * 3, .18)).coerceIn(-.55, .55)
-                distorted + kick(4.0) + wave(1_100.0, if ((time * 8).toInt() % 2 == 0) .04 else 0.0)
-            }
-            MusicGenre.CLASSICAL -> {
-                val notes = doubleArrayOf(261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23)
-                val note = notes[((time * 2).toInt()) % notes.size]
-                wave(note, .22) + wave(note * 2, .05) + wave(130.81, .12) + wave(196.0, .08)
-            }
-        }
-    }
-
-    private fun BufferedOutputStream.writeLeInt(value: Int) {
-        write(value and 0xFF); write((value ushr 8) and 0xFF)
-        write((value ushr 16) and 0xFF); write((value ushr 24) and 0xFF)
-    }
-
-    private fun BufferedOutputStream.writeLeShort(value: Int) {
-        write(value and 0xFF); write((value ushr 8) and 0xFF)
+        }.apply {
+            name = "MultiArena-Audio-${genre.slug}"
+            isDaemon = true
+        }.start()
     }
 }

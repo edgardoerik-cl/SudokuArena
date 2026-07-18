@@ -57,13 +57,25 @@ fun AudioControls(modifier: Modifier = Modifier, compact: Boolean = false) {
         Surface(shape = androidx.compose.foundation.shape.CircleShape, color = Color(0xFFF8FAFF), shadowElevation = 4.dp) {
             IconButton(
                 onClick = { menuOpen = true },
-                modifier = Modifier.semantics { contentDescription = "Cambiar género musical. Actual: ${audio.genre.label}" },
+                modifier = Modifier.semantics {
+                    contentDescription =
+                        "Cambiar género musical. Actual: ${audio.genre.trackTitle}, ${audio.genre.artist}"
+                },
             ) { Text(if (audio.preparing) "…" else audio.genre.icon, fontSize = 18.sp) }
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, modifier = Modifier.widthIn(min = 180.dp)) {
             MusicGenre.entries.forEach { genre ->
                 DropdownMenuItem(
-                    text = { Text("${genre.icon}  ${genre.label}${if (genre == audio.genre) "  ✓" else ""}") },
+                    text = {
+                        Column {
+                            Text("${genre.icon}  ${genre.label}${if (genre == audio.genre) "  ✓" else ""}")
+                            Text(
+                                "${genre.trackTitle} · ${genre.artist}",
+                                fontSize = 11.sp,
+                                color = Color(0xFF526078),
+                            )
+                        }
+                    },
                     onClick = {
                         GlobalAudioManager.selectGenre(genre)
                         menuOpen = false
