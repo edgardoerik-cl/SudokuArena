@@ -64,6 +64,7 @@ export class GenericPuzzleEngine {
     description: string;
     kind: "BONUS" | "PENALTY" | "MOVE";
   } | null = null;
+  private readonly lastSlitherMoveAt = new Map<string, number>();
 
   constructor(readonly gameType: GameType, readonly gameId: string, options: PuzzleGenerationOptions = {}) {
     const blueprint = createPuzzleBlueprint(gameType, options);
@@ -199,7 +200,7 @@ export class GenericPuzzleEngine {
       return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
     }
 
-    const outcome = this.applySpecificMove(playerId, move, cell, game);
+    const outcome = this.applySpecificMove(playerId, move, cell, game, now);
     if (!outcome.correct) {
       const penaltyMs = this.gameType === "MINESWEEPER" && outcome.hitMine ? 5_000 : 3_000;
       game.applyGenericPenalty(playerId, now + penaltyMs);
@@ -220,7 +221,7 @@ export class GenericPuzzleEngine {
     game.applyGenericSuccess(playerId, points, options.rewardEnergy === false || points <= 0 ? 0 : GENERIC_ENERGY, now);
     this.completed = this.isPuzzleComplete();
     if (this.gameType === "CROSS_LETTERS") this.advanceLetterTurn(now);
-    if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) this.advanceStrictTurn();
+    if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && outcome.extraTurn !== true) this.advanceStrictTurn();
     this.revision += 1;
     return {
       accepted: true,
@@ -365,7 +366,8 @@ export class GenericPuzzleEngine {
     move: GenericMove,
     cell: GenericCell,
     game: ArenaGame,
-  ): { correct: boolean; hitMine?: boolean; points?: number } {
+    now: number,
+  ): { correct: boolean; hitMine?: boolean; points?: number; extraTurn?: boolean } {
     if (this.gameType === "CROSS_LETTERS") return this.applyCrossLettersMove(playerId, move);
     if (this.gameType === "SECRET_CODE") return this.applySecretCodeMove(playerId, move, cell);
     if (this.gameType === "CAPITAL_ARENA") return this.applyCapitalMove(playerId, move, game);
@@ -420,12 +422,20 @@ export class GenericPuzzleEngine {
       const side = String(move.val ?? "").toLowerCase();
       if (!["top", "right", "bottom", "left"].includes(side) || cell.meta[side] === true) return { correct: false };
       cell.meta[side] = true;
+      cell.meta[`${side}OwnerId`] = playerId;
       const neighbour = this.mirrorDotsEdge(move.row, move.col, side);
+      if (neighbour) neighbour.meta[`${oppositeSide(side)}OwnerId`] = playerId;
       const closed = ["top", "right", "bottom", "left"].every((edge) => cell.meta[edge] === true);
       if (closed) { cell.ownerId = playerId; cell.isRevealed = true; }
       const neighbourClosed = neighbour !== null && ["top", "right", "bottom", "left"].every((edge) => neighbour.meta[edge] === true);
       if (neighbourClosed && neighbour) { neighbour.ownerId = playerId; neighbour.isRevealed = true; }
-      return { correct: true, points: (closed ? 50 : 0) + (neighbourClosed ? 50 : 0) || 5 };
+      const completedBoxes = Number(closed) + Number(neighbourClosed);
+      return {
+        correct: true,
+        points: completedBoxes > 0 ? completedBoxes * 50 : 5,
+        // Regla clásica: cerrar una o dos cajas conserva el turno.
+        extraTurn: completedBoxes > 0,
+      };
     }
 
     if (this.gameType === "SLITHERLINK") {
@@ -449,7 +459,11 @@ export class GenericPuzzleEngine {
         target.ownerId = playerId;
         target.isRevealed = true;
       }
-      return { correct: true, points: 8 };
+      const elapsed = now - (this.lastSlitherMoveAt.get(playerId) ?? now);
+      this.lastSlitherMoveAt.set(playerId, now);
+      const speedMultiplier = elapsed <= 900 ? 3 : elapsed <= 1_800 ? 2 : 1;
+      target.meta.lastSpeedMultiplier = speedMultiplier;
+      return { correct: true, points: 8 * speedMultiplier };
     }
 
     if (this.gameType === "RUMMIKUB") {

@@ -137,9 +137,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("ABC", "Resuelve primero", "Cada letra correcta suma territorio y puntos."),
     )
     GameType.NONOGRAM -> listOf(
-        TutorialStep("3", "1. Lee las pistas de fila", "Un 3 significa: pinta exactamente tres casillas juntas en esa fila. El grupo nunca se corta."),
-        TutorialStep("↓", "2. Cruza con las columnas", "Las pistas superiores funcionan igual, pero de arriba hacia abajo. Cruza ambas para confirmar cada píxel."),
-        TutorialStep("1 1", "3. Separa grupos y marca X", "“1 1” son dos grupos de una casilla, separados por al menos un espacio. Marca con X lo que sabes que está vacío."),
+        TutorialStep("3", "1. Lee las pistas de fila", "A la izquierda verás pistas como «1, 3», alineadas junto al tablero. Cada número es un grupo de casillas pintadas."),
+        TutorialStep("↓", "2. Cruza con las columnas", "Las pistas apiladas sobre cada columna se leen de arriba hacia abajo; la última queda pegada a la cuadrícula."),
+        TutorialStep("1, 1", "3. Separa grupos y marca X", "«1, 1» son dos grupos de una casilla separados por al menos una vacía. Mantén pulsada una casilla para marcarla con X."),
         TutorialStep("♥", "4. Revela el dibujo", "Alterna entre pintar y marcar X. Cuando todas las pistas coinciden, aparecerá el mosaico oculto."),
     )
     GameType.DOTS_AND_BOXES -> listOf(
@@ -198,9 +198,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⚡", "Encadena enlaces", "Resuelve pares rápidamente para multiplicar tu dominio y energía."),
     )
     GameType.ABYSS_ARENA -> listOf(
-        TutorialStep("⚔", "Muévete y ataca", "Arrastra a la izquierda para moverte. Arrastra a la derecha para orientar tu arma y atacar."),
-        TutorialStep("10", "Todos contra todos", "Consigue 10 bajas antes que tus rivales. Si nadie llega, gana quien lidere al terminar tres minutos."),
-        TutorialStep("✦", "Domina el arsenal", "Explora el laberinto y recoge lanzas, arcos, martillos o curación. Las armas especiales duran 14 segundos."),
+        TutorialStep("↥", "Corre y salta", "Arrastra horizontalmente en la mitad izquierda. Desliza hacia arriba para saltar entre plataformas."),
+        TutorialStep("👹", "Derriben al jefe", "Todos los jugadores cooperan: mantén pulsada la mitad derecha para disparar al Guardián del Abismo."),
+        TutorialStep("♥", "Sobrevive al escenario", "Evita sus proyectiles y el vacío. Si caes, reaparecerás después de una breve espera."),
     )
 }
 

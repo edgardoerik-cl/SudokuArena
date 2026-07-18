@@ -185,15 +185,63 @@ function kakuro(random, difficulty) {
     const board = matrix(playable + 1, playable + 1, (row, col) => row === 0 || col === 0
         ? blockedCell({ clueCell: true, downSum: row === 0 && col > 0 ? rowSum : 0, rightSum: col === 0 && row > 0 ? rowSum : 0 })
         : cell(null, false, { runLength: playable }));
-    const anchorCount = difficulty === "EASY" ? 4 : difficulty === "MEDIUM" ? 3 : difficulty === "HARD" ? 2 : 1;
+    // Se parte de pocas pistas y un verificador por backtracking añade anclas
+    // hasta que la matriz admita una sola solución.
+    let anchorCount = difficulty === "EASY" ? 4 : difficulty === "MEDIUM" ? 3 : difficulty === "HARD" ? 2 : 1;
     const playableCells = random.shuffle(Array.from({ length: playable * playable }, (_, index) => ({
         row: Math.floor(index / playable) + 1,
         col: index % playable + 1
     })));
-    for (const { row, col } of playableCells.slice(0, anchorCount)) {
+    const anchors = new Map();
+    for (const position of playableCells) {
+        const safeVerificationThreshold = Math.max(anchorCount, playable * playable - playable);
+        if (anchors.size >= safeVerificationThreshold && countKakuroLatinSolutions(playable, rowSum, anchors, 2) === 1)
+            break;
+        anchors.set(`${position.row - 1}:${position.col - 1}`, Number(answers[position.row][position.col]));
+    }
+    anchorCount = anchors.size;
+    for (const key of anchors.keys()) {
+        const [sourceRow, sourceCol] = key.split(":").map(Number);
+        const row = sourceRow + 1;
+        const col = sourceCol + 1;
         board[row][col] = { ...cell(answers[row][col], true, { runLength: playable, given: true }), isBlocked: true };
     }
-    return { board, answers, meta: { instructions: `Cada grupo suma ${rowSum} sin repetir. Los números dorados son pistas iniciales.`, initialClues: anchorCount, difficulty } };
+    return { board, answers, meta: { instructions: `Cada grupo suma ${rowSum} sin repetir. Los números dorados forman una solución verificada.`, initialClues: anchorCount, verifiedUnique: true, difficulty } };
+}
+function countKakuroLatinSolutions(size, targetSum, anchors, limit) {
+    const grid = matrix(size, size, () => 0);
+    let solutions = 0;
+    const visit = (index) => {
+        if (solutions >= limit)
+            return;
+        if (index === size * size) {
+            solutions += 1;
+            return;
+        }
+        const row = Math.floor(index / size);
+        const col = index % size;
+        const fixed = anchors.get(`${row}:${col}`);
+        const candidates = fixed == null ? [1, 2, 3, 4, 5, 6, 7, 8, 9] : [fixed];
+        for (const value of candidates) {
+            if (grid[row].includes(value) || grid.some((line) => line[col] === value))
+                continue;
+            const rowPartial = grid[row].reduce((sum, digit) => sum + digit, 0) + value;
+            const colPartial = grid.reduce((sum, line) => sum + line[col], 0) + value;
+            if (rowPartial > targetSum || colPartial > targetSum)
+                continue;
+            if (col === size - 1 && rowPartial !== targetSum)
+                continue;
+            if (row === size - 1 && colPartial !== targetSum)
+                continue;
+            grid[row][col] = value;
+            visit(index + 1);
+            grid[row][col] = 0;
+            if (solutions >= limit)
+                return;
+        }
+    };
+    visit(0);
+    return solutions;
 }
 function mathdoku(random, difficulty) {
     const size = sizeFor(difficulty, 4, 5, 6, 7);
@@ -245,7 +293,11 @@ function logicTiles(random, difficulty) {
             const start = random.int(1, 14 - length);
             for (let col = 0; col < length; col += 1) {
                 answers[row][col] = `${color}:${start + col}`;
-                board[row][col].meta = { meldId: row, meldType: "RUN", meldLength: length };
+                board[row][col].meta = {
+                    meldId: row, meldType: "RUN", meldLength: length,
+                    validColors: [color],
+                    validNumbers: Array.from({ length }, (_, offset) => start + offset),
+                };
             }
         }
         else {
@@ -253,7 +305,11 @@ function logicTiles(random, difficulty) {
             const groupColors = random.shuffle([...colors]).slice(0, length);
             for (let col = 0; col < length; col += 1) {
                 answers[row][col] = `${groupColors[col]}:${number}`;
-                board[row][col].meta = { meldId: row, meldType: "GROUP", meldLength: length };
+                board[row][col].meta = {
+                    meldId: row, meldType: "GROUP", meldLength: length,
+                    validColors: groupColors,
+                    validNumbers: [number],
+                };
             }
         }
         for (let col = length; col < columns; col += 1)
@@ -306,7 +362,8 @@ function nurikabe(random, difficulty) {
     return { board, answers, meta: { instructions: "Pinta el río conectado; no formes bloques negros 2×2.", difficulty } };
 }
 function bridges(random, difficulty) {
-    const islandGrid = sizeFor(difficulty, 3, 4, 5, 6);
+    // Difícil/Experto generan redes densas de 13×13 y 15×15.
+    const islandGrid = sizeFor(difficulty, 4, 5, 7, 8);
     const size = islandGrid * 2 - 1;
     const answers = matrix(size, size, () => false);
     const board = matrix(size, size, () => cell(null, false, { bridge: true }));
@@ -345,7 +402,16 @@ function bridges(random, difficulty) {
         board[row][col].meta.validTargets = validTargets;
         board[row][col].meta.bridgeCount = validTargets.length;
     }
-    return { board, answers, meta: { instructions: "Une islas alineadas; los puentes no se cruzan.", difficulty } };
+    return {
+        board,
+        answers,
+        meta: {
+            instructions: "Une islas alineadas; los puentes no se cruzan. La red experta es 15×15.",
+            timeLimitSeconds: sizeFor(difficulty, 180, 150, 120, 90),
+            denseLayout: true,
+            difficulty,
+        },
+    };
 }
 function slitherlink(random, difficulty) {
     const size = sizeFor(difficulty, 5, 7, 9, 11);
@@ -380,16 +446,17 @@ function cryptarithm(random, difficulty) {
     const b = random.int(12, 99);
     const result = a + b;
     const digits = [...new Set(`${a}${b}${result}`.split("").map(Number))];
-    const vowels = ["A", "E"];
-    const letters = [...vowels, ...random.shuffle("BCDFGHIJKLMNPQRSTUVWXYZ".split(""))].slice(0, digits.length);
+    const anchors = ["A", "E", "O"];
+    const letters = [...anchors, ...random.shuffle("BCDFGHIJKLMNPQRSTUVWXYZ".split(""))].slice(0, digits.length);
     const map = new Map(digits.map((digit, index) => [digit, letters[index]]));
     const encode = (value) => [...String(value)].map((digit) => map.get(Number(digit))).join("");
     const equation = `${encode(a)} + ${encode(b)} = ${encode(result)}`;
     const answers = [letters.map((_, index) => digits[index])];
-    const revealCount = difficulty === "EASY" ? 3 : 2;
-    const vowelIndexes = letters.map((letter, index) => vowels.includes(letter) ? index : -1).filter((index) => index >= 0);
-    const extraIndexes = random.shuffle(letters.map((_, index) => index).filter((index) => !vowelIndexes.includes(index)));
-    const revealedIndexes = new Set([...vowelIndexes, ...extraIndexes].slice(0, revealCount));
+    // Al menos 35 % de las incógnitas y siempre A/E/O cuando estén presentes.
+    const revealCount = Math.max(3, Math.ceil(letters.length * .35));
+    const anchorIndexes = letters.map((letter, index) => anchors.includes(letter) ? index : -1).filter((index) => index >= 0);
+    const extraIndexes = random.shuffle(letters.map((_, index) => index).filter((index) => !anchorIndexes.includes(index)));
+    const revealedIndexes = new Set([...anchorIndexes, ...extraIndexes].slice(0, revealCount));
     const revealedValues = {};
     const board = [letters.map((letter, index) => {
             if (!revealedIndexes.has(index))

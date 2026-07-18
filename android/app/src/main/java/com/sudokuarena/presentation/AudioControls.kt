@@ -1,10 +1,13 @@
 package com.sudokuarena.presentation
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
@@ -17,6 +20,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
@@ -61,7 +72,11 @@ fun AudioControls(modifier: Modifier = Modifier, compact: Boolean = false) {
                     contentDescription =
                         "Cambiar género musical. Actual: ${audio.genre.trackTitle}, ${audio.genre.artist}"
                 },
-            ) { Text(if (audio.preparing) "…" else audio.genre.icon, fontSize = 18.sp) }
+            ) {
+                if (audio.preparing) Text("…", fontSize = 18.sp)
+                else if (audio.genre == MusicGenre.METAL) MetalHeadbangerIcon()
+                else Text(audio.genre.icon, fontSize = 18.sp)
+            }
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, modifier = Modifier.widthIn(min = 180.dp)) {
             MusicGenre.entries.forEach { genre ->
@@ -83,6 +98,33 @@ fun AudioControls(modifier: Modifier = Modifier, compact: Boolean = false) {
                 )
             }
         }
+    }
+}
+
+/** Icono vectorial animado: la cabellera oscila solo cuando suena Metal. */
+@Composable
+private fun MetalHeadbangerIcon() {
+    val phase by rememberInfiniteTransition(label = "headbanger").animateFloat(
+        initialValue = -1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(260), RepeatMode.Reverse),
+        label = "hairSwing",
+    )
+    Canvas(Modifier.size(28.dp).padding(2.dp)) {
+        val head = Offset(size.width * .5f, size.height * .34f)
+        drawCircle(Color(0xFFFFD2B3), size.minDimension * .16f, head)
+        drawArc(
+            color = Color(0xFF111827),
+            startAngle = 185f + phase * 18f,
+            sweepAngle = 225f,
+            useCenter = false,
+            topLeft = Offset(head.x - size.width * .25f + phase * 2f, head.y - size.height * .18f),
+            size = androidx.compose.ui.geometry.Size(size.width * .5f, size.height * .64f),
+            style = Stroke(size.minDimension * .13f, cap = StrokeCap.Round),
+        )
+        drawLine(Color(0xFF7C3AED), Offset(size.width * .5f, size.height * .50f), Offset(size.width * .5f, size.height * .80f), size.minDimension * .13f, StrokeCap.Round)
+        drawLine(Color(0xFF111827), Offset(size.width * .38f, size.height * .72f), Offset(size.width * .28f, size.height * .92f), 3f, StrokeCap.Round)
+        drawLine(Color(0xFF111827), Offset(size.width * .62f, size.height * .72f), Offset(size.width * .72f, size.height * .92f), 3f, StrokeCap.Round)
     }
 }
 

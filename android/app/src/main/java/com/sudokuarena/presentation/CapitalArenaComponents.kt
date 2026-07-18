@@ -165,40 +165,6 @@ fun CapitalArenaBoard(
             card = surpriseCard,
             modifier = Modifier.align(Alignment.Center).fillMaxWidth(.48f),
         )
-        val cornerAlignments = listOf(Alignment.TopStart, Alignment.TopEnd, Alignment.BottomStart, Alignment.BottomEnd)
-        players.values.sortedBy(Player::slot).take(4).forEachIndexed { index, player ->
-            val properties = owners.values.count { it == player.id }
-            CapitalCornerPlayer(
-                player = player,
-                balance = balances[player.id] ?: 0,
-                properties = properties,
-                active = player.id == activePlayerId,
-                modifier = Modifier.align(cornerAlignments[index]).padding(5.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun CapitalCornerPlayer(
-    player: Player,
-    balance: Int,
-    properties: Int,
-    active: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val color = parseCapitalColor(player.colorHex)
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        color = Color(0xEEFFFFFF),
-        border = BorderStroke(if (active) 3.dp else 1.dp, color),
-        shadowElevation = if (active) 12.dp else 4.dp,
-    ) {
-        Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
-            Text("${player.avatarId} ${player.name.take(11)}", color = color, fontWeight = FontWeight.Black, fontSize = 9.sp)
-            Text("$balance cr · $properties prop.", color = Color(0xFF102A56), fontWeight = FontWeight.Bold, fontSize = 8.sp)
-        }
     }
 }
 

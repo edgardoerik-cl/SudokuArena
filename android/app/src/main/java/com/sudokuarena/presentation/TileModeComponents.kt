@@ -2,6 +2,8 @@ package com.sudokuarena.presentation
 
 import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,6 +21,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -32,7 +39,7 @@ import com.sudokuarena.domain.PuzzleDifficulty
 
 /** Mapeo visual estable: el índice 0 representa el valor Sudoku 1 y así hasta 9. */
 object SudokuTilePalette {
-    val colors = listOf(
+    private val defaults = listOf(
         Color(0xFFFF3B30), // rojo
         Color(0xFF003F88), // azul marino
         Color(0xFF00A86B), // verde esmeralda
@@ -43,8 +50,15 @@ object SudokuTilePalette {
         Color(0xFFFFFFFF), // blanco puro
         Color(0xFF30343B), // gris carbón
     )
+    val colors = mutableStateListOf<Color>().apply { addAll(defaults) }
 
     fun colorFor(value: Int): Color = colors.getOrElse(value - 1) { Color.Gray }
+    fun assign(value: Int, color: Color) {
+        if (value in 1..9) colors[value - 1] = color
+    }
+    fun reset() {
+        defaults.forEachIndexed { index, color -> colors[index] = color }
+    }
 }
 
 @Composable
@@ -129,12 +143,65 @@ fun TileTypeSelector(
             }
         }
         if (selected == TileType.COLORS) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                SudokuTilePalette.colors.forEach { color -> ColorTile(color, Modifier.size(22.dp)) }
+            SudokuColorPaletteEditor()
+        }
+    }
+}
+
+private val SudokuPickerSwatches = listOf(
+    Color(0xFFE6194B), Color(0xFF3CB44B), Color(0xFFFFE119), Color(0xFF4363D8),
+    Color(0xFFF58231), Color(0xFF911EB4), Color(0xFF42D4F4), Color(0xFFF032E6),
+    Color(0xFFBFEF45), Color(0xFFFABED4), Color(0xFF469990), Color(0xFF9A6324),
+    Color.White, Color(0xFF808080), Color(0xFF111827),
+)
+
+/** Selector local: cada jugador puede personalizar la equivalencia 1–9. */
+@Composable
+fun SudokuColorPaletteEditor(modifier: Modifier = Modifier) {
+    var selectedNumber by remember { mutableStateOf(1) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "ASIGNA UN COLOR A CADA NÚMERO",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Black,
+        )
+        Text("Selecciona una ficha y luego un tono. La lógica continúa usando valores del 1 al 9.")
+        SudokuTilePalette.colors.chunked(3).forEachIndexed { row, colors ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                colors.forEachIndexed { column, color ->
+                    val number = row * 3 + column + 1
+                    Surface(
+                        shape = MaterialTheme.shapes.medium,
+                        color = if (selectedNumber == number) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                        border = BorderStroke(if (selectedNumber == number) 2.dp else 1.dp, MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.clickable { selectedNumber = number },
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(number.toString(), fontWeight = FontWeight.Black)
+                            ColorTile(color, Modifier.size(24.dp))
+                        }
+                    }
+                }
             }
+        }
+        SudokuPickerSwatches.chunked(8).forEach { colors ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                colors.forEach { color ->
+                    ColorTile(
+                        color,
+                        Modifier
+                            .size(30.dp)
+                            .clickable { SudokuTilePalette.assign(selectedNumber, color) },
+                    )
+                }
+            }
+        }
+        OutlinedButton(onClick = SudokuTilePalette::reset, modifier = Modifier.align(Alignment.End)) {
+            Text("Restablecer paleta")
         }
     }
 }

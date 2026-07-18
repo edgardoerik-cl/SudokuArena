@@ -92,6 +92,8 @@ fun GenericArenaScreen(
     var confirmExit by remember { mutableStateOf(false) }
     BackHandler { confirmExit = true }
     val generic = state.genericBoard
+    var assistedRummikubNumber by remember { mutableStateOf<Int?>(null) }
+    var assistedRummikubColor by remember { mutableStateOf("RED") }
     val boardPulse = remember { androidx.compose.animation.core.Animatable(1f) }
     LaunchedEffect(generic?.revision) {
         if ((generic?.revision ?: 0L) > 0L) {
@@ -143,12 +145,17 @@ fun GenericArenaScreen(
                                 onDirectMove = onMoveAt,
                                 secretKey = state.secretKey,
                                 secretCanGuess = state.secretRole != "CAPTAIN",
+                                rummikubNumber = assistedRummikubNumber,
+                                rummikubColor = assistedRummikubColor,
                                 modifier = Modifier.graphicsLayer {
                                     scaleX = boardPulse.value
                                     scaleY = boardPulse.value
                                     alpha = .78f + boardPulse.value * .22f
                                 },
                             )
+                            if (state.gameType == GameType.SLITHERLINK) {
+                                SlitherLinkParticles(generic.revision, Modifier.fillMaxSize())
+                            }
                         }
                     }
                 }
@@ -176,7 +183,12 @@ fun GenericArenaScreen(
                         }
                     }
                     PuzzleHints(generic)
-                    GenericMoveControls(state, state.canMakeGenericMove, onMove, onMoveAt, onSecretChat)
+                    GenericMoveControls(
+                        state, state.canMakeGenericMove, onMove, onMoveAt, onSecretChat,
+                        assistedRummikubNumber, assistedRummikubColor,
+                        onRummikubNumber = { assistedRummikubNumber = it },
+                        onRummikubColor = { assistedRummikubColor = it },
+                    )
                     if (!state.isSoloMode) {
                         ReactionMenu(onReaction)
                         GlobalGameChat(state, onGlobalChat)
@@ -207,6 +219,31 @@ fun GenericArenaScreen(
 }
 
 @Composable
+private fun SlitherLinkParticles(revision: Long, modifier: Modifier = Modifier) {
+    val burst = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(revision) {
+        if (revision > 0) {
+            burst.snapTo(0f)
+            burst.animateTo(1f, tween(480))
+        }
+    }
+    Canvas(modifier) {
+        if (burst.value >= 1f) return@Canvas
+        repeat(18) { index ->
+            val angle = index * 6.28318f / 18f
+            val distance = size.minDimension * .06f + size.minDimension * .28f * burst.value
+            val point = center + Offset(kotlin.math.cos(angle), kotlin.math.sin(angle)) * distance
+            drawCircle(
+                if (index % 2 == 0) Color(0xFF7C3AED) else Color(0xFF00E5FF),
+                radius = (7f * (1f - burst.value)).coerceAtLeast(1f),
+                center = point,
+                alpha = 1f - burst.value,
+            )
+        }
+    }
+}
+
+@Composable
 fun GenericPuzzleGrid(
     state: GenericBoardState,
     players: Map<String, Player>,
@@ -217,6 +254,8 @@ fun GenericPuzzleGrid(
     onDirectMove: (Int, Int, Any?) -> Unit,
     secretKey: List<String> = emptyList(),
     secretCanGuess: Boolean = true,
+    rummikubNumber: Int? = null,
+    rummikubColor: String = "RED",
     modifier: Modifier = Modifier,
 ) {
     if (state.gameType == GameType.CAPITAL_ARENA) {
@@ -232,6 +271,7 @@ fun GenericPuzzleGrid(
     var dragEnd by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var selectedDot by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var selectedBridgeIsland by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
+    var nexusStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     val illegalWater = remember(state.board, state.gameType) { if (state.gameType == GameType.NURIKABE) illegalWaterCells(state) else emptySet() }
     val warningAlpha by rememberInfiniteTransition(label = "nurikabeWarning").animateFloat(
         initialValue = .35f, targetValue = .9f,
@@ -371,9 +411,17 @@ fun GenericPuzzleGrid(
                     }
                     GameType.SECRET_CODE -> if (secretCanGuess) onDirectMove(row, col, mapOf("action" to "GUESS")) else onCellSelected(row, col)
                     GameType.NEXUS_ZERO -> {
-                        val first = selected
-                        if (first == null || first == CellPosition(row, col)) onCellSelected(row, col)
-                        else onDirectMove(first.row, first.column, mapOf("targetRow" to row, "targetCol" to col))
+                        val tapped = CellPosition(row, col)
+                        val first = nexusStart
+                        if (first == null || first == tapped) {
+                            nexusStart = tapped.takeUnless { first == tapped }
+                            nexusStart?.let { onCellSelected(it.row, it.column) }
+                        } else {
+                            // Estado local inmediato: no depende de esperar el eco Socket.io
+                            // entre el primer y el segundo toque.
+                            onDirectMove(first.row, first.column, mapOf("targetRow" to row, "targetCol" to col))
+                            nexusStart = null
+                        }
                     }
                     else -> onCellSelected(row, col)
                 }
@@ -417,11 +465,15 @@ fun GenericPuzzleGrid(
                     state.gameType == GameType.NURIKABE && cell.value == "RIVER" -> Color(0xFF2196F3).copy(alpha = .78f)
                     state.gameType == GameType.NURIKABE && cell.value == "ISLAND" -> Color(0xFF66BB6A).copy(alpha = .72f)
                     bridgeValid -> Color(0xFF00C853).copy(alpha = .32f)
+                    state.gameType == GameType.RUMMIKUB && cell.ownerId == null && rummikubNumber != null &&
+                        (cell.meta["validNumbers"] as? List<*>)?.any { (it as? Number)?.toInt() == rummikubNumber } == true &&
+                        (cell.meta["validColors"] as? List<*>)?.any { it?.toString() == rummikubColor } == true ->
+                        Color(0xFF00C853).copy(alpha = .34f)
                     state.gameType == GameType.SECRET_CODE && cell.meta["revealedColor"] != null -> secretColor(cell.meta["revealedColor"].toString()).copy(alpha = .82f)
                     state.gameType == GameType.SECRET_CODE && secretKey.size == 25 -> secretColor(secretKey[row * 5 + col]).copy(alpha = .42f)
                     state.gameType == GameType.BRIDGES && selectedBridgeIsland == CellPosition(row, col) -> Color(0xFF00A8FF).copy(alpha = .28f)
                     cell.meta["given"] == true -> Color(0xFFFFD54F).copy(alpha = .62f)
-                    selected == CellPosition(row, col) -> Color(0xFFFFF59D)
+                    (if (state.gameType == GameType.NEXUS_ZERO) nexusStart else selected) == CellPosition(row, col) -> Color(0xFFFFF59D)
                     ownerColor != null -> ownerColor.copy(alpha = 0.25f)
                     cell.isBlocked -> Color(0xFF263238)
                     else -> Color.Transparent
@@ -433,6 +485,10 @@ fun GenericPuzzleGrid(
                         "_col" to col,
                         "completed" to ("$row:$col" in completedBridgeIslands),
                     )
+                } else if (state.gameType == GameType.DOTS_AND_BOXES) {
+                    cell.meta + listOf("top", "right", "bottom", "left").associate { side ->
+                        "_${side}Color" to (cell.meta["${side}OwnerId"]?.toString()?.let(identityColors::get) ?: Color(0xFF00A8FF))
+                    }
                 } else cell.meta
                 renderGenericCell(state.gameType, cell.value, renderMeta, cell.isBlocked, origin, cellWidth, cellHeight, textMeasurer)
                 drawRect(Color(0xFFB0BEC5), origin, Size(cellWidth, cellHeight), style = Stroke(1.2f))
@@ -457,7 +513,8 @@ private fun NonogramPuzzleGrid(
     val textMeasurer = rememberTextMeasurer()
     val rowClues = nestedIntClues(state.meta["rowClues"], state.rows)
     val columnClues = nestedIntClues(state.meta["columnClues"], state.columns)
-    val leftUnits = (rowClues.maxOfOrNull(List<Int>::size) ?: 1).coerceAtLeast(1) * .72f + .35f
+    val maxRowLabel = rowClues.maxOfOrNull { clues -> clues.joinToString(", ").length } ?: 1
+    val leftUnits = (maxRowLabel * .34f).coerceIn(1.5f, 4.2f)
     val topUnits = (columnClues.maxOfOrNull(List<Int>::size) ?: 1).coerceAtLeast(1) * .72f + .35f
     Canvas(
         modifier
@@ -486,11 +543,15 @@ private fun NonogramPuzzleGrid(
         val cellSize = min(size.width / (state.columns + leftUnits), size.height / (state.rows + topUnits))
         val gridX = leftUnits * cellSize
         val gridY = topUnits * cellSize
+        drawRect(Color(0xFFEAF0FF), Offset(0f, gridY), Size(gridX, state.rows * cellSize))
+        drawRect(Color(0xFFEAF0FF), Offset(gridX, 0f), Size(state.columns * cellSize, gridY))
         rowClues.forEachIndexed { row, clues ->
-            clues.forEachIndexed { index, clue ->
-                val center = Offset(gridX - (clues.size - index - .5f) * cellSize * .72f, gridY + (row + .5f) * cellSize)
-                drawCenteredText(clue, center, cellSize, textMeasurer, Color(0xFF102A56))
-            }
+            val label = clues.joinToString(", ")
+            val layout = textMeasurer.measure(label, TextStyle(Color(0xFF102A56), (cellSize * .26f).coerceIn(8f, 14f).sp, FontWeight.Black))
+            drawText(
+                layout,
+                topLeft = Offset(gridX - layout.size.width - cellSize * .16f, gridY + (row + .5f) * cellSize - layout.size.height / 2f),
+            )
         }
         columnClues.forEachIndexed { col, clues ->
             clues.forEachIndexed { index, clue ->
@@ -575,10 +636,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
         GameType.NONOGRAM -> if (value == true) drawRect(Color(0xFF243B6B), origin + Offset(width * .16f, height * .16f), Size(width * .68f, height * .68f))
         GameType.DOTS_AND_BOXES -> {
             drawCircle(Color(0xFF102A56), min(width, height) * .08f, Offset(origin.x, origin.y))
-            if (meta["top"] == true) drawLine(Color(0xFF00A8FF), origin, Offset(origin.x + width, origin.y), 5f)
-            if (meta["left"] == true) drawLine(Color(0xFF00A8FF), origin, Offset(origin.x, origin.y + height), 5f)
-            if (meta["right"] == true) drawLine(Color(0xFF00A8FF), Offset(origin.x + width, origin.y), Offset(origin.x + width, origin.y + height), 5f)
-            if (meta["bottom"] == true) drawLine(Color(0xFF00A8FF), Offset(origin.x, origin.y + height), Offset(origin.x + width, origin.y + height), 5f)
+            if (meta["top"] == true) drawLine(meta["_topColor"] as? Color ?: Color(0xFF00A8FF), origin, Offset(origin.x + width, origin.y), 5f)
+            if (meta["left"] == true) drawLine(meta["_leftColor"] as? Color ?: Color(0xFF00A8FF), origin, Offset(origin.x, origin.y + height), 5f)
+            if (meta["right"] == true) drawLine(meta["_rightColor"] as? Color ?: Color(0xFF00A8FF), Offset(origin.x + width, origin.y), Offset(origin.x + width, origin.y + height), 5f)
+            if (meta["bottom"] == true) drawLine(meta["_bottomColor"] as? Color ?: Color(0xFF00A8FF), Offset(origin.x, origin.y + height), Offset(origin.x + width, origin.y + height), 5f)
         }
         GameType.RUMMIKUB -> {
             val tileColor = when (meta["tileColor"]) {
@@ -732,6 +793,10 @@ private fun GenericMoveControls(
     onMove: (Any?) -> Unit,
     onMoveAt: (Int, Int, Any?) -> Unit,
     onSecretChat: (String) -> Unit,
+    rummikubNumber: Int? = null,
+    rummikubColor: String = "RED",
+    onRummikubNumber: (Int?) -> Unit = {},
+    onRummikubColor: (String) -> Unit = {},
 ) {
     val gameType = state.gameType
     var text by remember(gameType) { mutableStateOf("") }
@@ -796,7 +861,6 @@ private fun GenericMoveControls(
             onAction = { action -> onMoveAt(10, 10, action) },
         )
         GameType.RUMMIKUB -> {
-            var tileColor by remember { mutableStateOf("RED") }
             val colors = listOf(
                 "RED" to Color(0xFFE53935),
                 "BLUE" to Color(0xFF1565C0),
@@ -804,16 +868,16 @@ private fun GenericMoveControls(
                 "ORANGE" to Color(0xFFFF8F00),
             )
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Elige color y número para completar la combinación", fontWeight = FontWeight.Bold)
+                Text("Modo asistido: elige una ficha; el tablero ilumina en verde dónde puede encajar.", fontWeight = FontWeight.Bold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     colors.forEach { (id, color) ->
                         Surface(
-                            modifier = Modifier.weight(1f).height(34.dp).clickable(enabled) { tileColor = id },
+                            modifier = Modifier.weight(1f).height(34.dp).clickable(enabled) { onRummikubColor(id) },
                             shape = RoundedCornerShape(9.dp),
                             color = color,
                             border = androidx.compose.foundation.BorderStroke(
-                                if (tileColor == id) 3.dp else 1.dp,
-                                if (tileColor == id) Color.White else color,
+                                if (rummikubColor == id) 3.dp else 1.dp,
+                                if (rummikubColor == id) Color.White else color,
                             ),
                         ) {}
                     }
@@ -822,14 +886,22 @@ private fun GenericMoveControls(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         numbers.forEach { number ->
                             Button(
-                                onClick = { onMove(mapOf("tile" to number, "color" to tileColor)) },
+                                onClick = { onRummikubNumber(number) },
                                 enabled = enabled,
                                 modifier = Modifier.weight(1f),
-                            ) { Text(number.toString(), maxLines = 1) }
+                            ) { Text(if (rummikubNumber == number) "✓$number" else number.toString(), maxLines = 1) }
                         }
                         repeat(7 - numbers.size) { Spacer(Modifier.weight(1f)) }
                     }
                 }
+                Button(
+                    onClick = {
+                        rummikubNumber?.let { onMove(mapOf("tile" to it, "color" to rummikubColor)) }
+                        onRummikubNumber(null)
+                    },
+                    enabled = enabled && rummikubNumber != null && state.selected != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Colocar en la casilla seleccionada") }
             }
         }
         else -> {

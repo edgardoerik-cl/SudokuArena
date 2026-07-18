@@ -328,7 +328,7 @@ class ArenaViewModel(
         val current = mutableState.value
         if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (!cell.isBlocked && (cell.ownerId == null || current.gameType in setOf(GameType.CROSS_LETTERS, GameType.NURIKABE))) {
+        if (!cell.isBlocked && (cell.ownerId == null || current.gameType in setOf(GameType.CROSS_LETTERS, GameType.NURIKABE, GameType.NEXUS_ZERO))) {
             mutableState.update { it.copy(selected = CellPosition(row, column), message = null) }
         }
     }
@@ -346,6 +346,9 @@ class ArenaViewModel(
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
         if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.SLITHERLINK, GameType.WORD_SEARCH))) return
         submitGenericMove(CellPosition(row, column), value)
+        if (current.gameType == GameType.NEXUS_ZERO) {
+            mutableState.update { it.copy(selected = null) }
+        }
     }
 
     private fun submitGenericMove(selected: CellPosition, value: Any?) {

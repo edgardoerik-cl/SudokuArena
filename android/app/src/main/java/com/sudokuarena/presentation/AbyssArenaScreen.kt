@@ -35,9 +35,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -55,8 +57,8 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
- * Arena PvP con render interpolado a 60 FPS. La física, las armas, el daño,
- * las bajas y las reapariciones siguen siendo autoritativas en Node.js.
+ * Side-scroller cooperativo con render interpolado. Gravedad, plataformas,
+ * proyectiles, daño y reapariciones son autoritativos en Node.js.
  */
 @Composable
 fun AbyssArenaScreen(
@@ -90,9 +92,10 @@ fun AbyssArenaScreen(
     Scaffold(
         topBar = {
             PinnedGameHeader(
-                title = "Multi Arena · Abismo PvP",
+                title = "Multi Arena · Abismo cooperativo",
                 subtitle = snapshot?.let {
-                    "Todos contra todos · primero en 10 bajas · ${formatAbyssTime(it.remainingMs)}"
+                    val boss = it.actors.firstOrNull { actor -> actor.kind == "BOSS" }
+                    "Jefe ${boss?.hp?.toInt() ?: 0}/${boss?.maxHp?.toInt() ?: 0} · ${formatAbyssTime(it.remainingMs)}"
                 },
                 state = state,
                 onTutorial = onOpenTutorial,
@@ -115,12 +118,13 @@ fun AbyssArenaScreen(
                 controls = {
                     PauseVoteBanner(state, onPauseResponse)
                     Text(
-                        "CLASIFICACIÓN",
+                        "ESCUADRÓN",
                         color = Color(0xFF102A56),
                         fontWeight = FontWeight.Black,
                     )
                     snapshot?.actors
-                        ?.sortedWith(compareByDescending<AbyssActor> { it.kills }.thenBy { it.deaths })
+                        ?.filter { it.kind == "PLAYER" }
+                        ?.sortedByDescending(AbyssActor::kills)
                         ?.forEachIndexed { index, actor ->
                             Surface(
                                 color = parseAbyssColor(actor.colorHex).copy(alpha = .14f),
@@ -128,7 +132,7 @@ fun AbyssArenaScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Text(
-                                    "${index + 1}. ${actor.name ?: "Jugador"}  ⚔ ${actor.kills}  ☠ ${actor.deaths}  · ${weaponLabel(actor.weapon)}",
+                                    "${index + 1}. ${actor.name ?: "Jugador"}  ✦ ${actor.kills} daño  · ${actor.hp.toInt()}♥",
                                     color = Color(0xFF102A56),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp,
@@ -137,7 +141,7 @@ fun AbyssArenaScreen(
                             }
                         }
                     Text(
-                        "Mitad izquierda: mover · mitad derecha: apuntar y atacar",
+                        "Izquierda: corre y desliza ↑ para saltar · Derecha: dispara",
                         color = Color(0xFF526078),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -183,7 +187,7 @@ private fun AbyssRoom(
             painter = painterResource(R.drawable.abyss_pvp_floor),
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = .18f },
         )
         Canvas(Modifier.fillMaxSize()) {
             drawRect(
@@ -193,11 +197,12 @@ private fun AbyssRoom(
                     radius = size.maxDimension * .68f,
                 ),
             )
+            // Los rectángulos recibidos son plataformas, no muros top-down.
             snapshot?.obstacles?.forEach { wall ->
                 val topLeft = Offset(wall.x * size.width, wall.y * size.height)
                 val wallSize = Size(wall.width * size.width, wall.height * size.height)
                 drawRoundRect(
-                    Brush.linearGradient(listOf(Color(0xFF52678F), Color(0xFF172542), Color(0xFF091226))),
+                    Brush.verticalGradient(listOf(Color(0xFF67E8F9), Color(0xFF172542), Color(0xFF091226))),
                     topLeft,
                     wallSize,
                 )
@@ -223,7 +228,8 @@ private fun AbyssRoom(
             snapshot?.actors?.forEach { actor ->
                 val position = displayPositions[actor.id] ?: Offset(actor.x, actor.y)
                 val point = Offset(position.x * size.width, position.y * size.height)
-                drawStickman(
+                if (actor.kind == "BOSS") drawAbyssBoss(actor, point, animation)
+                else drawStickman(
                     actor = actor,
                     center = point,
                     color = parseAbyssColor(actor.colorHex),
@@ -234,6 +240,9 @@ private fun AbyssRoom(
             }
             // Zonas de control discretas para que el tablero siga siendo legible.
             drawCircle(Color.White.copy(alpha = .09f), 49f, Offset(62f, size.height - 62f), style = Stroke(2.5f))
+            drawLine(Color.White.copy(alpha = .55f), Offset(62f, size.height - 82f), Offset(62f, size.height - 43f), 3f)
+            drawLine(Color.White.copy(alpha = .55f), Offset(48f, size.height - 57f), Offset(62f, size.height - 43f), 3f)
+            drawLine(Color.White.copy(alpha = .55f), Offset(76f, size.height - 57f), Offset(62f, size.height - 43f), 3f)
             drawCircle(Color(0xFF22D3EE).copy(alpha = .18f), 49f, Offset(size.width - 62f, size.height - 62f), style = Stroke(2.5f))
         }
         androidx.compose.foundation.layout.Row(Modifier.fillMaxSize()) {
@@ -270,6 +279,28 @@ private fun AbyssRoom(
             )
         }
     }
+}
+
+private fun DrawScope.drawAbyssBoss(actor: AbyssActor, center: Offset, phase: Float) {
+    val pulse = .92f + kotlin.math.sin(phase * .7f) * .08f
+    val radius = 38f * pulse
+    drawCircle(Color(0x33FF1744), radius * 1.35f, center)
+    drawCircle(Color(0xFF2B102F), radius, center)
+    drawCircle(Color(0xFFFF3D71), radius, center, style = Stroke(5f))
+    val horn = Path().apply {
+        moveTo(center.x - radius * .65f, center.y - radius * .55f)
+        lineTo(center.x - radius * 1.05f, center.y - radius * 1.15f)
+        lineTo(center.x - radius * .20f, center.y - radius * .80f)
+        moveTo(center.x + radius * .65f, center.y - radius * .55f)
+        lineTo(center.x + radius * 1.05f, center.y - radius * 1.15f)
+        lineTo(center.x + radius * .20f, center.y - radius * .80f)
+    }
+    drawPath(horn, Color(0xFFFFB4C3), style = Stroke(5f, cap = StrokeCap.Round))
+    drawCircle(Color(0xFFFFEB3B), 5f, center + Offset(-13f, -6f))
+    drawCircle(Color(0xFFFFEB3B), 5f, center + Offset(13f, -6f))
+    val ratio = (actor.hp / actor.maxHp).coerceIn(0f, 1f)
+    drawRoundRect(Color(0xCC090B16), center + Offset(-52f, -58f), Size(104f, 9f))
+    drawRoundRect(Color(0xFFFF3D71), center + Offset(-52f, -58f), Size(104f * ratio, 9f))
 }
 
 private fun DrawScope.drawStickman(

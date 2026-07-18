@@ -160,12 +160,13 @@ describe("motor genérico de puzzles", () => {
   it("inyecta pistas iniciales bloqueadas en Kakuro y Criptogramas", () => {
     const kakuro = createPuzzleBlueprint("KAKURO", { seed: "anchors", difficulty: "MEDIUM" });
     const kakuroGivens = kakuro.board.flat().filter((cell) => cell.meta.given === true);
-    assert.equal(kakuroGivens.length, 3);
+    assert.ok(kakuroGivens.length >= 3);
+    assert.equal(kakuro.meta.verifiedUnique, true);
     assert.ok(kakuroGivens.every((cell) => cell.isBlocked && cell.value !== null));
 
     const crypt = createPuzzleBlueprint("CRYPTARITHM", { seed: "deduction", difficulty: "HARD" });
     const cryptGivens = crypt.board.flat().filter((cell) => cell.meta.given === true);
-    assert.equal(cryptGivens.length, 2);
+    assert.ok(cryptGivens.length >= Math.ceil((crypt.meta.letters as string[]).length * .35));
     assert.ok(cryptGivens.every((cell) => cell.isBlocked && typeof cell.value === "number"));
   });
 
@@ -215,6 +216,21 @@ describe("motor genérico de puzzles", () => {
     assert.equal(engine.makeMove("p2", { requestId: "early", row: 0, col: 0, val: "right" }, players).accepted, false);
     assert.equal(engine.makeMove("p1", { requestId: "first", row: 0, col: 0, val: "right" }, players).accepted, true);
     assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p2");
+  });
+
+  it("Timbiriche conserva el turno al cerrar una caja y registra el color de cada arista", () => {
+    const players = new ArenaGame("dots-extra");
+    players.addPlayer("p1", "Uno"); players.addPlayer("p2", "Dos");
+    players.startMatch({ gameType: "DOTS_AND_BOXES", powersEnabled: true, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("DOTS_AND_BOXES", "dots-extra");
+    assert.equal(engine.makeMove("p1", { requestId: "top", row: 0, col: 0, val: "top" }, players).accepted, true);
+    assert.equal(engine.makeMove("p2", { requestId: "right", row: 0, col: 0, val: "right" }, players).accepted, true);
+    assert.equal(engine.makeMove("p1", { requestId: "bottom", row: 0, col: 0, val: "bottom" }, players).accepted, true);
+    assert.equal(engine.makeMove("p2", { requestId: "left", row: 0, col: 0, val: "left" }, players).accepted, true);
+    const state = engine.snapshot(players);
+    assert.equal(state.meta.currentPlayerTurn, "p2");
+    assert.equal(state.board[0]![0]!.ownerId, "p2");
+    assert.equal(state.board[0]![0]!.meta.leftOwnerId, "p2");
   });
 
   for (const turnGame of ["MINESWEEPER", "CROSSWORD"] as const) {

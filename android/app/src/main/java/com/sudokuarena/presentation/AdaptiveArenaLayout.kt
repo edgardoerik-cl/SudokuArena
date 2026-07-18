@@ -43,11 +43,11 @@ fun AdaptiveArenaLayout(
                 horizontalArrangement = Arrangement.spacedBy(gap),
             ) {
                 Box(
-                    Modifier.weight(.74f).fillMaxHeight(),
+                    Modifier.weight(.75f).fillMaxHeight(),
                     contentAlignment = Alignment.Center,
                 ) { board() }
                 ControlPanel(
-                    Modifier.weight(.26f).fillMaxHeight(),
+                    Modifier.weight(.25f).fillMaxHeight(),
                     controls,
                 )
             }

@@ -3,7 +3,7 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `5.0.0` incorpora una interfaz adaptable que cambia en tiempo real
+La versión `6.0.0` incorpora una interfaz adaptable que cambia en tiempo real
 entre orientación vertical y horizontal, chat global, Piedra/Papel/Tijeras para
 decidir el primer turno y diecinueve juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
@@ -34,10 +34,9 @@ Rock, Metal y Clásica— incluidas dentro del APK, con mute persistente, pista
 siguiente, selector de género y volumen ajustable. Autores y fuentes:
 [`docs/music-credits.md`](docs/music-credits.md).
 Capital Arena admite cuatro participantes, cartas de Suerte con movimiento,
-bonos, multas o cárcel, fichas neón reacomodables, información en cuatro esquinas y brillo de turno.
-Abismo Arena utiliza simulación PvP autoritativa a 20 Hz, snapshots volátiles por Socket.IO
-y render interpolado a 60 FPS; enfrenta hasta cuatro contendientes en laberintos con armas,
-reapariciones y objetivo de diez bajas.
+bonos, multas o cárcel, fichas neón reacomodables y un tablero horizontal al 75 % con estadísticas laterales.
+Abismo Arena utiliza simulación side-scroller cooperativa autoritativa a 20 Hz,
+gravedad, saltos, plataformas, proyectiles y un jefe compartido para hasta cuatro jugadores.
 
 ## Estructura
 
@@ -63,7 +62,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v5.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v6.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor
