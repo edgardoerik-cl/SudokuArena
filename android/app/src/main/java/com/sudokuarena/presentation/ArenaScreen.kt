@@ -234,15 +234,13 @@ fun ArenaScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Row(
+            AdaptiveArenaLayout(
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(if (state.isLocallyPaused || state.roomState?.phase == RoomPhase.PAUSED) 18.dp else 0.dp)
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+                    .blur(if (state.isLocallyPaused || state.roomState?.phase == RoomPhase.PAUSED) 18.dp else 0.dp),
+                board = {
                 BoxWithConstraints(
-                    Modifier.weight(.66f).fillMaxHeight(),
+                    Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     val boardSize = minOf(maxWidth, maxHeight)
@@ -264,15 +262,8 @@ fun ArenaScreen(
                         )
                     }
                 }
-                Column(
-                    modifier = Modifier
-                        .weight(.34f)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState())
-                        .padding(end = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
+                },
+                controls = {
                     PauseVoteBanner(state, onPauseResponse)
                     Text(
                         when {
@@ -313,7 +304,7 @@ fun ArenaScreen(
                         GlobalGameChat(state, onGlobalChat)
                     }
                 }
-            }
+            )
 
             if ((state.ownPlayer?.shieldUntil ?: 0) > state.serverNowMs) {
                 ShieldAuraOverlay(Modifier.zIndex(8f))

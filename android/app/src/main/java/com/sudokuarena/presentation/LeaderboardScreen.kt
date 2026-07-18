@@ -3,6 +3,7 @@ package com.sudokuarena.presentation
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +17,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -51,6 +54,7 @@ fun LeaderboardBottomSheet(
     var data by remember { mutableStateOf<GameLeaderboards?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableIntStateOf(0) }
+    var gameMenuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(reloadKey, selectedGame) {
         data = null
@@ -74,14 +78,23 @@ fun LeaderboardBottomSheet(
             Text("CUADRO DE HONOR", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
             Text("Clasificación independiente para cada arena")
             Spacer(Modifier.height(12.dp))
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                GameType.entries.chunked(2).forEach { games ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        games.forEach { game ->
-                            Button(onClick = { selectedGame = game }, modifier = Modifier.weight(1f)) {
-                                Text(if (selectedGame == game) "● ${shortGameTitle(game)}" else shortGameTitle(game))
-                            }
-                        }
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Button(onClick = { gameMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("${shortGameTitle(selectedGame)}  ▾")
+                }
+                DropdownMenu(
+                    expanded = gameMenuOpen,
+                    onDismissRequest = { gameMenuOpen = false },
+                    modifier = Modifier.fillMaxWidth(.82f),
+                ) {
+                    GameType.entries.forEach { game ->
+                        DropdownMenuItem(
+                            text = { Text("${if (selectedGame == game) "● " else ""}${shortGameTitle(game)}") },
+                            onClick = {
+                                selectedGame = game
+                                gameMenuOpen = false
+                            },
+                        )
                     }
                 }
             }

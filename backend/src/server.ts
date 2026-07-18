@@ -151,7 +151,14 @@ io.on("connection", (socket) => {
     }
     const gameType = payload?.gameType === undefined ? room.config.gameType : normalizeGameType(payload.gameType);
     if (!gameType) return emitRoomError(socket, "INVALID_GAME", "Tipo de juego no permitido");
-    room.config = { gameType, powersEnabled: payload.powersEnabled, teamMode, tileType, botDifficulty, puzzleDifficulty };
+    room.config = {
+      gameType,
+      powersEnabled: payload.powersEnabled,
+      teamMode: gameType === "ABYSS_ARENA" ? "FFA" : teamMode,
+      tileType,
+      botDifficulty,
+      puzzleDifficulty,
+    };
     emitRoomState(room);
   });
 
@@ -691,7 +698,7 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   room.abyssEngine = room.config.gameType === "ABYSS_ARENA"
     ? new AbyssEngine(
         `${room.code}-${room.startedAt}`,
-        room.game.snapshot().players.map(({ id, name, color }) => ({ id, name, colorHex: color })),
+        room.game.snapshot().players.map(({ id, name, color, isBot }) => ({ id, name, colorHex: color, isBot })),
       )
     : null;
   if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
@@ -1107,6 +1114,9 @@ function startAbyssLoop(room: RoomRuntime): void {
     room.abyssEngine.update((now - previous) / 1_000);
     previous = now;
     const snapshot = room.abyssEngine.snapshot(now);
+    snapshot.actors.forEach((actor) => {
+      room.game.setGenericScore(actor.id, actor.kills * 100 + Math.max(0, actor.kills - actor.deaths) * 20);
+    });
     io.to(room.code).volatile.emit("abyss:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
   }, 50);

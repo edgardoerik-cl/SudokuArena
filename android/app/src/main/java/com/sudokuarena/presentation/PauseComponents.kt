@@ -1,5 +1,6 @@
 package com.sudokuarena.presentation
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,19 +67,39 @@ fun PinnedGameHeader(
     onPause: () -> Unit,
     onExit: () -> Unit,
 ) {
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Surface(color = Color(0xFFF8FAFF), shadowElevation = 7.dp) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (landscape) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 1)
-                    subtitle?.let { Text(it, style = MaterialTheme.typography.labelMedium, maxLines = 1) }
+                    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black, maxLines = 1)
+                    subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
                 }
+                IconButton(onClick = onTutorial, modifier = Modifier.size(40.dp)) {
+                    Text("?", fontWeight = FontWeight.Black, fontSize = 19.sp)
+                }
+                AudioControls(compact = true)
+                PauseControl(state, onPause)
                 ExitControl(onExit)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onTutorial) { Text("?", fontWeight = FontWeight.Black, fontSize = 20.sp) }
-                AudioControls()
-                PauseControl(state, onPause)
+        } else {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 1)
+                        subtitle?.let { Text(it, style = MaterialTheme.typography.labelMedium, maxLines = 1) }
+                    }
+                    ExitControl(onExit)
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onTutorial) { Text("?", fontWeight = FontWeight.Black, fontSize = 20.sp) }
+                    AudioControls()
+                    PauseControl(state, onPause)
+                }
             }
         }
     }

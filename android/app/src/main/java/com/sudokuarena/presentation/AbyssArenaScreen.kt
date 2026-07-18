@@ -2,13 +2,17 @@ package com.sudokuarena.presentation
 
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,18 +33,30 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sudokuarena.R
+import com.sudokuarena.domain.AbyssActor
 import com.sudokuarena.domain.GameType
 import kotlinx.coroutines.isActive
+import kotlin.math.PI
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
- * Render 60 FPS con interpolación hacia snapshots autoritativos de 20 Hz.
- * Los controles sólo envían intención; el servidor conserva física, daño y colisiones.
+ * Arena PvP con render interpolado a 60 FPS. La física, las armas, el daño,
+ * las bajas y las reapariciones siguen siendo autoritativas en Node.js.
  */
 @Composable
 fun AbyssArenaScreen(
@@ -58,13 +74,14 @@ fun AbyssArenaScreen(
     BackHandler { confirmExit = true }
     val snapshot = state.abyssState
     val displayPositions = remember { mutableStateMapOf<String, Offset>() }
+
     LaunchedEffect(snapshot?.tick) {
         while (isActive && snapshot != null) {
             withFrameNanos {
                 snapshot.actors.forEach { actor ->
                     val target = Offset(actor.x, actor.y)
                     val current = displayPositions[actor.id] ?: target
-                    displayPositions[actor.id] = current + (target - current) * .28f
+                    displayPositions[actor.id] = current + (target - current) * .30f
                 }
             }
         }
@@ -73,8 +90,10 @@ fun AbyssArenaScreen(
     Scaffold(
         topBar = {
             PinnedGameHeader(
-                title = "Multi Arena · Abismo Arena",
-                subtitle = snapshot?.let { "Nivel ${it.level}/${it.maxLevel}${if (it.bossLevel) " · JEFE" else ""}" },
+                title = "Multi Arena · Abismo PvP",
+                subtitle = snapshot?.let {
+                    "Todos contra todos · primero en 10 bajas · ${formatAbyssTime(it.remainingMs)}"
+                },
                 state = state,
                 onTutorial = onOpenTutorial,
                 onPause = onRequestPause,
@@ -82,39 +101,57 @@ fun AbyssArenaScreen(
             )
         },
     ) { padding ->
-        Row(
-            Modifier.fillMaxSize().padding(padding).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            AbyssRoom(
-                state = state,
-                displayPositions = displayPositions,
-                onInput = onInput,
-                modifier = Modifier.weight(.76f).fillMaxHeight(),
-            )
-            Column(
-                Modifier.weight(.24f).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                PauseVoteBanner(state, onPauseResponse)
-                Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF101B3B)) {
-                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
-                        Text(if (snapshot?.bossLevel == true) "☠ CÁMARA DEL JEFE" else "ABISMO COOPERATIVO", color = Color(0xFF00E5FF))
-                        snapshot?.actors?.filter { it.kind == "PLAYER" }?.forEach {
-                            Text("${it.name ?: "Jugador"} · ${it.hp.toInt()}/${it.maxHp.toInt()} HP", color = parseAbyssColor(it.colorHex), fontSize = 12.sp)
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            AdaptiveArenaLayout(
+                modifier = Modifier.fillMaxSize(),
+                board = {
+                    AbyssRoom(
+                        state = state,
+                        displayPositions = displayPositions,
+                        onInput = onInput,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                },
+                controls = {
+                    PauseVoteBanner(state, onPauseResponse)
+                    Text(
+                        "CLASIFICACIÓN",
+                        color = Color(0xFF102A56),
+                        fontWeight = FontWeight.Black,
+                    )
+                    snapshot?.actors
+                        ?.sortedWith(compareByDescending<AbyssActor> { it.kills }.thenBy { it.deaths })
+                        ?.forEachIndexed { index, actor ->
+                            Surface(
+                                color = parseAbyssColor(actor.colorHex).copy(alpha = .14f),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    "${index + 1}. ${actor.name ?: "Jugador"}  ⚔ ${actor.kills}  ☠ ${actor.deaths}  · ${weaponLabel(actor.weapon)}",
+                                    color = Color(0xFF102A56),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                                )
+                            }
                         }
-                        Text("Izquierda: mover · Derecha: apuntar y disparar", color = Color.White, fontSize = 10.sp)
-                    }
-                }
-                GlobalGameChat(state, onGlobalChat)
+                    Text(
+                        "Mitad izquierda: mover · mitad derecha: apuntar y atacar",
+                        color = Color(0xFF526078),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    GlobalGameChat(state, onGlobalChat)
+                },
+            )
+            ConfirmExitDialog(confirmExit, onDismiss = { confirmExit = false }, onConfirm = onExit)
+            if (state.showTutorial) {
+                ArenaTutorialOverlay(state.isSoloMode, GameType.ABYSS_ARENA, onTutorialComplete)
             }
-        }
-        ConfirmExitDialog(confirmExit, onDismiss = { confirmExit = false }, onConfirm = onExit)
-        if (state.showTutorial) {
-            ArenaTutorialOverlay(state.isSoloMode, GameType.ABYSS_ARENA, onTutorialComplete)
-        }
-        if (state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) {
-            PauseLayer(state, onResume)
+            if (state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) {
+                PauseLayer(state, onResume)
+            }
         }
     }
 }
@@ -129,42 +166,77 @@ private fun AbyssRoom(
     val snapshot = state.abyssState
     var move by remember { mutableStateOf(Offset.Zero) }
     var aim by remember { mutableStateOf(Offset(0f, -1f)) }
-    var shooting by remember { mutableStateOf(false) }
-    fun send() = onInput(move.x, move.y, aim.x, aim.y, shooting)
+    var attacking by remember { mutableStateOf(false) }
+    val animation by rememberInfiniteTransition(label = "abyssSprites").animateFloat(
+        initialValue = 0f,
+        targetValue = (PI * 2).toFloat(),
+        animationSpec = infiniteRepeatable(tween(850, easing = LinearEasing), RepeatMode.Restart),
+        label = "abyssWalkCycle",
+    )
+    fun send() = onInput(move.x, move.y, aim.x, aim.y, attacking)
 
-    Box(modifier.background(Color(0xFF080B1A), RoundedCornerShape(16.dp))) {
+    Box(
+        modifier
+            .background(Color(0xFF080B1A), RoundedCornerShape(16.dp)),
+    ) {
+        Image(
+            painter = painterResource(R.drawable.abyss_pvp_floor),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
         Canvas(Modifier.fillMaxSize()) {
+            drawRect(
+                Brush.radialGradient(
+                    listOf(Color.Transparent, Color(0x77030818)),
+                    center = center,
+                    radius = size.maxDimension * .68f,
+                ),
+            )
             snapshot?.obstacles?.forEach { wall ->
+                val topLeft = Offset(wall.x * size.width, wall.y * size.height)
+                val wallSize = Size(wall.width * size.width, wall.height * size.height)
                 drawRoundRect(
-                    Color(0xFF263A60),
-                    Offset(wall.x * size.width, wall.y * size.height),
-                    Size(wall.width * size.width, wall.height * size.height),
+                    Brush.linearGradient(listOf(Color(0xFF52678F), Color(0xFF172542), Color(0xFF091226))),
+                    topLeft,
+                    wallSize,
+                )
+                drawRoundRect(
+                    Color(0xFF00C9FF).copy(alpha = .45f),
+                    topLeft,
+                    wallSize,
+                    style = Stroke(2.2f),
                 )
             }
             snapshot?.items?.forEach { item ->
-                val color = when (item.type) { "DAMAGE" -> Color(0xFFFF1744); "FIRE_RATE" -> Color(0xFF00E5FF); else -> Color(0xFF00E676) }
-                drawCircle(color, 9f, Offset(item.x * size.width, item.y * size.height))
+                drawWeaponPickup(
+                    type = item.type,
+                    center = Offset(item.x * size.width, item.y * size.height),
+                    pulse = .72f + sin(animation * 2f) * .12f,
+                )
             }
             snapshot?.projectiles?.forEach { shot ->
-                drawCircle(Color(0xFFB8F8FF), 6f, Offset(shot.x * size.width, shot.y * size.height))
+                val point = Offset(shot.x * size.width, shot.y * size.height)
+                drawCircle(Color(0xFFECFEFF).copy(alpha = .30f), 11f, point)
+                drawCircle(Color(0xFF67E8F9), 4.8f, point)
             }
             snapshot?.actors?.forEach { actor ->
-                val point = displayPositions[actor.id] ?: Offset(actor.x, actor.y)
-                val center = Offset(point.x * size.width, point.y * size.height)
-                val color = if (actor.kind == "PLAYER") parseAbyssColor(actor.colorHex)
-                else if (actor.kind == "BOSS") Color(0xFFFF1744) else Color(0xFF7C3AED)
-                val radius = if (actor.kind == "BOSS") 31f else 17f
-                drawCircle(color.copy(alpha = .23f), radius + 9f, center)
-                drawCircle(color, radius, center)
-                drawCircle(Color.White, radius, center, style = Stroke(2f))
-                val hpRatio = (actor.hp / actor.maxHp).coerceIn(0f, 1f)
-                drawRect(Color(0xFF182238), Offset(center.x - radius, center.y - radius - 9f), Size(radius * 2f, 4f))
-                drawRect(Color(0xFF00E676), Offset(center.x - radius, center.y - radius - 9f), Size(radius * 2f * hpRatio, 4f))
+                val position = displayPositions[actor.id] ?: Offset(actor.x, actor.y)
+                val point = Offset(position.x * size.width, position.y * size.height)
+                drawStickman(
+                    actor = actor,
+                    center = point,
+                    color = parseAbyssColor(actor.colorHex),
+                    phase = animation,
+                    now = snapshot.serverTime,
+                    isLocal = actor.id == state.playerId,
+                )
             }
-            drawCircle(Color.White.copy(alpha = .12f), 54f, Offset(72f, size.height - 72f), style = Stroke(3f))
-            drawCircle(Color(0xFF00E5FF).copy(alpha = .35f), 54f, Offset(size.width - 72f, size.height - 72f), style = Stroke(3f))
+            // Zonas de control discretas para que el tablero siga siendo legible.
+            drawCircle(Color.White.copy(alpha = .09f), 49f, Offset(62f, size.height - 62f), style = Stroke(2.5f))
+            drawCircle(Color(0xFF22D3EE).copy(alpha = .18f), 49f, Offset(size.width - 62f, size.height - 62f), style = Stroke(2.5f))
         }
-        Row(Modifier.fillMaxSize()) {
+        androidx.compose.foundation.layout.Row(Modifier.fillMaxSize()) {
             Box(
                 Modifier.weight(1f).fillMaxHeight().pointerInput(Unit) {
                     detectDragGestures(
@@ -176,26 +248,122 @@ private fun AbyssRoom(
                             send()
                         },
                         onDragEnd = { move = Offset.Zero; send() },
+                        onDragCancel = { move = Offset.Zero; send() },
                     )
                 },
             )
             Box(
                 Modifier.weight(1f).fillMaxHeight().pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { shooting = true; send() },
+                        onDragStart = { attacking = true; send() },
                         onDrag = { change, delta ->
                             change.consume()
                             val length = hypot(delta.x, delta.y).coerceAtLeast(1f)
                             aim = Offset(delta.x / length, delta.y / length)
-                            shooting = true
+                            attacking = true
                             send()
                         },
-                        onDragEnd = { shooting = false; send() },
+                        onDragEnd = { attacking = false; send() },
+                        onDragCancel = { attacking = false; send() },
                     )
                 },
             )
         }
     }
+}
+
+private fun DrawScope.drawStickman(
+    actor: AbyssActor,
+    center: Offset,
+    color: Color,
+    phase: Float,
+    now: Long,
+    isLocal: Boolean,
+) {
+    if (actor.hp <= 0f) {
+        val remaining = ((actor.respawnAt - now).coerceAtLeast(0) / 1_000L) + 1
+        drawCircle(color.copy(alpha = .18f), 22f, center, style = Stroke(4f))
+        return
+    }
+    val moving = hypot(actor.vx.toDouble(), actor.vy.toDouble()) > .02
+    val stride = if (moving) sin(phase) * 6f else 0f
+    val bob = kotlin.math.abs(sin(phase)) * 1.8f
+    val bodyCenter = center + Offset(0f, -bob)
+    val facingAngle = atan2(actor.facingY, actor.facingX)
+    val glow = if (isLocal) 12f else 7f
+
+    drawOval(Color.Black.copy(alpha = .38f), bodyCenter + Offset(-15f, 24f), Size(30f, 9f))
+    drawCircle(color.copy(alpha = .18f), 25f + glow, bodyCenter)
+    drawCircle(Color(0xFF101827), 8.5f, bodyCenter + Offset(0f, -17f))
+    drawCircle(color, 7f, bodyCenter + Offset(0f, -17f))
+    drawLine(color, bodyCenter + Offset(0f, -9f), bodyCenter + Offset(0f, 10f), 5.5f, StrokeCap.Round)
+    drawLine(color, bodyCenter + Offset(0f, -3f), bodyCenter + Offset(-10f - stride * .3f, 5f), 4.2f, StrokeCap.Round)
+    drawLine(color, bodyCenter + Offset(0f, -3f), bodyCenter + Offset(10f + stride * .3f, 4f), 4.2f, StrokeCap.Round)
+    drawLine(color, bodyCenter + Offset(0f, 9f), bodyCenter + Offset(-8f + stride, 23f), 4.5f, StrokeCap.Round)
+    drawLine(color, bodyCenter + Offset(0f, 9f), bodyCenter + Offset(8f - stride, 23f), 4.5f, StrokeCap.Round)
+
+    val weaponLength = when (actor.weapon) {
+        "SPEAR" -> 34f
+        "BOW" -> 27f
+        "HAMMER" -> 25f
+        else -> 28f
+    }
+    val attackOffset = if (actor.attacking) sin(phase * 2f) * .45f else 0f
+    val angle = facingAngle + attackOffset
+    val hand = bodyCenter + Offset(cos(facingAngle) * 8f, sin(facingAngle) * 8f)
+    val tip = hand + Offset(cos(angle) * weaponLength, sin(angle) * weaponLength)
+    val weaponColor = when (actor.weapon) {
+        "SPEAR" -> Color(0xFFFFB74D)
+        "BOW" -> Color(0xFF67E8F9)
+        "HAMMER" -> Color(0xFFE879F9)
+        else -> Color(0xFFF8FAFC)
+    }
+    drawLine(weaponColor, hand, tip, if (actor.weapon == "HAMMER") 6f else 3.5f, StrokeCap.Round)
+    if (actor.weapon == "HAMMER") drawCircle(weaponColor, 6f, tip)
+    if (actor.weapon == "BOW") drawArc(weaponColor, -70f, 140f, false, tip - Offset(8f, 8f), Size(16f, 16f), style = Stroke(2.5f))
+    if (actor.attacking && actor.weapon != "BOW") {
+        drawArc(color.copy(alpha = .55f), -55f, 110f, false, bodyCenter - Offset(34f, 34f), Size(68f, 68f), style = Stroke(4f))
+    }
+
+    val hpRatio = (actor.hp / actor.maxHp).coerceIn(0f, 1f)
+    drawRoundRect(Color(0xAA08101F), bodyCenter + Offset(-20f, -34f), Size(40f, 5f))
+    drawRoundRect(Color(0xFF22C55E), bodyCenter + Offset(-20f, -34f), Size(40f * hpRatio, 5f))
+    if (isLocal) drawCircle(Color.White.copy(alpha = .8f), 31f, bodyCenter, style = Stroke(2f))
+}
+
+private fun DrawScope.drawWeaponPickup(type: String, center: Offset, pulse: Float) {
+    val color = when (type) {
+        "SPEAR" -> Color(0xFFFFB74D)
+        "BOW" -> Color(0xFF22D3EE)
+        "HAMMER" -> Color(0xFFE879F9)
+        else -> Color(0xFF4ADE80)
+    }
+    drawCircle(color.copy(alpha = .16f), 18f * pulse, center)
+    drawCircle(color.copy(alpha = .72f), 11f * pulse, center, style = Stroke(2.5f))
+    when (type) {
+        "HEAL" -> {
+            drawLine(color, center + Offset(-6f, 0f), center + Offset(6f, 0f), 4f)
+            drawLine(color, center + Offset(0f, -6f), center + Offset(0f, 6f), 4f)
+        }
+        "HAMMER" -> {
+            drawLine(color, center + Offset(-6f, 7f), center + Offset(5f, -5f), 3f)
+            drawRoundRect(color, center + Offset(0f, -9f), Size(11f, 7f))
+        }
+        "BOW" -> drawArc(color, -70f, 140f, false, center - Offset(8f, 8f), Size(16f, 16f), style = Stroke(3f))
+        else -> drawLine(color, center + Offset(-8f, 8f), center + Offset(8f, -8f), 3f)
+    }
+}
+
+private fun weaponLabel(value: String): String = when (value) {
+    "SPEAR" -> "Lanza"
+    "BOW" -> "Arco"
+    "HAMMER" -> "Martillo"
+    else -> "Espada"
+}
+
+private fun formatAbyssTime(milliseconds: Long): String {
+    val seconds = (milliseconds.coerceAtLeast(0) / 1_000).toInt()
+    return "%d:%02d".format(seconds / 60, seconds % 60)
 }
 
 private fun parseAbyssColor(hex: String?): Color = runCatching {

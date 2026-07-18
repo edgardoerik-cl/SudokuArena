@@ -1,5 +1,6 @@
 package com.sudokuarena.presentation
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,6 +46,7 @@ import com.sudokuarena.R
 
 @Composable
 fun MultiArenaSplashScreen(onFinished: () -> Unit) {
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val alpha = remember { Animatable(0f) }
     val scale = remember { Animatable(.94f) }
     val reveal = remember { Animatable(0f) }
@@ -82,7 +85,10 @@ fun MultiArenaSplashScreen(onFinished: () -> Unit) {
     ) {
         Image(
             // Arte 16:9 compuesto específicamente para pantallas horizontales.
-            painter = painterResource(R.drawable.multi_arena_splash_landscape),
+            painter = painterResource(
+                if (landscape) R.drawable.multi_arena_splash_landscape
+                else R.drawable.multi_arena_splash_art,
+            ),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier

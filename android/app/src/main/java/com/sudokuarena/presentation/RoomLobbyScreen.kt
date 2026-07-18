@@ -1,6 +1,8 @@
 package com.sudokuarena.presentation
 
+import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,6 +16,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
@@ -21,9 +25,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TeamMode
@@ -47,17 +56,19 @@ fun RoomLobbyScreen(
     onExit: () -> Unit,
 ) {
     val room = state.roomState
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var gameMenuOpen by remember { mutableStateOf(false) }
     Surface {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(20.dp),
+                .padding(if (landscape) 12.dp else 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { AudioControls() }
-            ArenaLogo(Modifier.size(105.dp))
+            ArenaLogo(Modifier.size(if (landscape) 58.dp else 105.dp))
             Text("Sala ${room?.roomCode ?: "----"}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             if (room == null) {
                 CircularProgressIndicator()
@@ -101,16 +112,33 @@ fun RoomLobbyScreen(
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp)) {
                     Text("ARENA SELECCIONADA", style = MaterialTheme.typography.labelLarge)
-                    GameType.entries.chunked(2).forEach { games ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            games.forEach { game ->
-                                OutlinedButton(
-                                    onClick = { onGameTypeChanged(game) },
-                                    enabled = isHost,
-                                    modifier = Modifier.weight(1f),
-                                ) { Text(if (room.config.gameType == game) "✓ ${shortGameTitle(game)}" else shortGameTitle(game), maxLines = 1) }
+                    Box(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { gameMenuOpen = true },
+                            enabled = isHost,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("${shortGameTitle(room.config.gameType)}  ▾", fontWeight = FontWeight.Black)
+                        }
+                        DropdownMenu(
+                            expanded = gameMenuOpen,
+                            onDismissRequest = { gameMenuOpen = false },
+                            modifier = Modifier.fillMaxWidth(if (landscape) .48f else .86f),
+                        ) {
+                            GameType.entries.forEach { game ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "${if (room.config.gameType == game) "✓ " else ""}${shortGameTitle(game)}",
+                                            fontWeight = if (room.config.gameType == game) FontWeight.Black else FontWeight.Normal,
+                                        )
+                                    },
+                                    onClick = {
+                                        onGameTypeChanged(game)
+                                        gameMenuOpen = false
+                                    },
+                                )
                             }
-                            if (games.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -168,14 +196,18 @@ fun RoomLobbyScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("MODO DE EQUIPO", style = MaterialTheme.typography.labelLarge)
-                    TeamMode.entries.forEach { mode ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(
-                                selected = room.config.teamMode == mode,
-                                onClick = { onTeamModeChanged(mode) },
-                                enabled = isHost,
-                            )
-                            Text(teamModeLabel(mode))
+                    if (room.config.gameType == GameType.ABYSS_ARENA) {
+                        Text("Todos contra todos · PvP obligatorio", fontWeight = FontWeight.Black)
+                    } else {
+                        TeamMode.entries.forEach { mode ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = room.config.teamMode == mode,
+                                    onClick = { onTeamModeChanged(mode) },
+                                    enabled = isHost,
+                                )
+                                Text(teamModeLabel(mode))
+                            }
                         }
                     }
                 }

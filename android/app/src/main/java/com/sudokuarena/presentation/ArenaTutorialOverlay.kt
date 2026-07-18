@@ -1,5 +1,6 @@
 package com.sudokuarena.presentation
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.RepeatMode
@@ -19,9 +20,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +54,8 @@ fun ArenaTutorialOverlay(
     onFinished: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val configuration = LocalConfiguration.current
+    val landscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val steps = remember(isSoloMode, gameType) {
         buildList {
             addAll(gameTutorialSteps(gameType))
@@ -66,11 +73,16 @@ fun ArenaTutorialOverlay(
         contentAlignment = Alignment.Center,
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(24.dp),
+            modifier = Modifier
+                .fillMaxWidth(if (landscape) .76f else 1f)
+                .heightIn(max = (configuration.screenHeightDp - 20).dp)
+                .padding(if (landscape) 10.dp else 24.dp),
             shape = RoundedCornerShape(26.dp),
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(if (landscape) 16.dp else 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
@@ -186,9 +198,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⚡", "Encadena enlaces", "Resuelve pares rápidamente para multiplicar tu dominio y energía."),
     )
     GameType.ABYSS_ARENA -> listOf(
-        TutorialStep("◉", "Muévete y dispara", "Usa el lado izquierdo para moverte y arrastra a la derecha para apuntar y disparar."),
-        TutorialStep("20", "Desciende el Abismo", "Supera 20 cámaras procedurales. Cada quinto nivel contiene un jefe."),
-        TutorialStep("✦", "Comparte mejoras", "Recoge daño, cadencia y salud; coopera para mantener vivo al equipo."),
+        TutorialStep("⚔", "Muévete y ataca", "Arrastra a la izquierda para moverte. Arrastra a la derecha para orientar tu arma y atacar."),
+        TutorialStep("10", "Todos contra todos", "Consigue 10 bajas antes que tus rivales. Si nadie llega, gana quien lidere al terminar tres minutos."),
+        TutorialStep("✦", "Domina el arsenal", "Explora el laberinto y recoge lanzas, arcos, martillos o curación. Las armas especiales duran 14 segundos."),
     )
 }
 

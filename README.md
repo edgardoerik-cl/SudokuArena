@@ -3,7 +3,9 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `4.0.2` convierte toda la experiencia a formato horizontal, incorpora chat global, Piedra/Papel/Tijeras para decidir el primer turno y amplía la Multiarena a diecinueve juegos:
+La versión `5.0.0` incorpora una interfaz adaptable que cambia en tiempo real
+entre orientación vertical y horizontal, chat global, Piedra/Papel/Tijeras para
+decidir el primer turno y diecinueve juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
 Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink,
 Criptogramas, Letras Cruzadas, Código Secreto, Capital Arena, Nexo Cero y Abismo Arena. Todos comparten salas, colores de conquista,
@@ -33,8 +35,9 @@ siguiente, selector de género y volumen ajustable. Autores y fuentes:
 [`docs/music-credits.md`](docs/music-credits.md).
 Capital Arena admite cuatro participantes, cartas de Suerte con movimiento,
 bonos, multas o cárcel, fichas neón reacomodables, información en cuatro esquinas y brillo de turno.
-Abismo Arena utiliza simulación autoritativa a 20 Hz, snapshots volátiles por Socket.IO
-y render interpolado a 60 FPS; contiene 20 cámaras procedurales y un jefe cada cinco niveles.
+Abismo Arena utiliza simulación PvP autoritativa a 20 Hz, snapshots volátiles por Socket.IO
+y render interpolado a 60 FPS; enfrenta hasta cuatro contendientes en laberintos con armas,
+reapariciones y objetivo de diez bajas.
 
 ## Estructura
 
@@ -60,7 +63,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v4.0.2-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v5.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

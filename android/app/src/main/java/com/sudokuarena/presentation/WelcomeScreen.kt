@@ -1,5 +1,6 @@
 package com.sudokuarena.presentation
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -29,6 +30,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -79,19 +83,33 @@ fun WelcomeScreen(
     var showHonor by remember { mutableStateOf(false) }
     var savedAvatar by remember(initialAvatar) { mutableStateOf(initialAvatar) }
     val hasProfile = savedNickname.isNotBlank()
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     Box(
         modifier = Modifier
             .fillMaxSize(),
     ) {
         AnimatedArenaBackground()
-        ArenaBrandHeader(Modifier.align(Alignment.TopCenter).padding(top = 28.dp))
+        ArenaBrandHeader(
+            modifier = Modifier
+                .align(if (landscape) Alignment.CenterStart else Alignment.TopCenter)
+                .padding(
+                    start = if (landscape) 34.dp else 0.dp,
+                    top = if (landscape) 0.dp else 24.dp,
+                ),
+            compact = landscape,
+        )
         if (!hasProfile) {
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .fillMaxWidth()
-                    .padding(horizontal = 22.dp, vertical = 90.dp),
+                    .padding(
+                        start = if (landscape) 300.dp else 22.dp,
+                        end = 22.dp,
+                        top = if (landscape) 20.dp else 90.dp,
+                        bottom = if (landscape) 20.dp else 90.dp,
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -120,21 +138,30 @@ fun WelcomeScreen(
             // Tras crear el perfil, el centro queda reservado únicamente a los modos.
             Column(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
+                    .align(if (landscape) Alignment.CenterEnd else Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(start = 18.dp, end = 18.dp, top = 185.dp, bottom = 88.dp)
+                    .padding(
+                        start = if (landscape) 285.dp else 18.dp,
+                        end = 18.dp,
+                        top = if (landscape) 14.dp else 185.dp,
+                        bottom = if (landscape) 68.dp else 88.dp,
+                    )
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
-                GameArenaSelector(selectedGameType, onGameSelected)
+                if (landscape) {
+                    CompactGameSelector(selectedGameType, onGameSelected)
+                } else {
+                    GameArenaSelector(selectedGameType, onGameSelected)
+                }
                 NeonArenaButton(
-                    text = if (selectedGameType == GameType.ABYSS_ARENA) "Abismo · Cooperativo online" else "Modo Solitario",
+                    text = if (selectedGameType == GameType.ABYSS_ARENA) "Abismo · PvP online" else "Modo Solitario",
                     onClick = onSoloMode,
                     enabled = selectedGameType != GameType.ABYSS_ARENA,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp),
+                        .height(if (landscape) 48.dp else 58.dp),
                 )
                 NeonArenaButton(
                     text = "Modo Multijugador",
@@ -142,7 +169,7 @@ fun WelcomeScreen(
                     secondary = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp),
+                        .height(if (landscape) 48.dp else 58.dp),
                 )
                 NeonArenaButton(
                     text = "Reto Diario · +350 XP",
@@ -150,7 +177,7 @@ fun WelcomeScreen(
                     secondary = true,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp),
+                        .height(if (landscape) 48.dp else 58.dp),
                 )
                 Text(
                     "NIVEL ${initialXp / 500 + 1}  ·  $initialXp XP",
@@ -197,15 +224,15 @@ fun WelcomeScreen(
 }
 
 @Composable
-private fun ArenaBrandHeader(modifier: Modifier = Modifier) {
+private fun ArenaBrandHeader(modifier: Modifier = Modifier, compact: Boolean = false) {
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ArenaLogo(Modifier.size(132.dp))
+        ArenaLogo(Modifier.size(if (compact) 108.dp else 132.dp))
         Text(
             "MULTI ARENA",
-            style = MaterialTheme.typography.headlineLarge.copy(
+            style = (if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.headlineLarge).copy(
                 shadow = Shadow(Color(0x990057D9), blurRadius = 18f),
             ),
             fontWeight = FontWeight.Black,
@@ -326,6 +353,45 @@ private fun GameArenaSelector(selected: GameType, onSelected: (GameType) -> Unit
     }
 }
 
+/** Selector compacto para no desperdiciar altura en teléfonos horizontales. */
+@Composable
+private fun CompactGameSelector(selected: GameType, onSelected: (GameType) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Text(
+                "${gameGlyph(selected)}  ${gameMenuName(selected)}  ▾",
+                fontWeight = FontWeight.Black,
+                fontSize = 17.sp,
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth(.62f),
+        ) {
+            GameType.entries.forEach { game ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            "${gameGlyph(game)}  ${gameMenuName(game)}${if (game == selected) "  ✓" else ""}",
+                            fontWeight = if (game == selected) FontWeight.Black else FontWeight.Medium,
+                        )
+                    },
+                    onClick = {
+                        onSelected(game)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
 private fun gameGlyph(game: GameType): String = when (game) {
     GameType.SUDOKU -> "9"; GameType.MINESWEEPER -> "✹"; GameType.WORD_SEARCH -> "A↗"; GameType.CROSSWORD -> "✚"
     GameType.NONOGRAM -> "▦"; GameType.DOTS_AND_BOXES -> "□"; GameType.KAKURO -> "Σ"; GameType.MATHDOKU -> "×"
@@ -427,6 +493,7 @@ fun MultiplayerEntryScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

@@ -12,13 +12,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -48,63 +51,100 @@ fun RpsStartScreen(state: ArenaUiState, onChoose: (String) -> Unit, onExit: () -
             impact.animateTo(1f, tween(180))
         }
     }
-    Box(
-        Modifier.fillMaxSize().background(Color(0xFF07152E)).padding(20.dp),
+
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(Color(0xFF07152E)).padding(14.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(.9f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("DUELO DE INICIO", color = Color(0xFF00E5FF), fontSize = 28.sp, fontWeight = FontWeight.Black)
-                Text("Ronda ${state.rpsRound} · el ganador obtiene el primer turno", color = Color.White)
-                val seconds = ((state.rpsEndsAt - state.serverNowMs + 999) / 1_000).coerceAtLeast(0)
-                Text(if (state.rpsChoices.isEmpty()) "$seconds" else "¡REVELAR!", color = Color(0xFFFFD740), fontSize = 42.sp, fontWeight = FontWeight.Black)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    listOf("ROCK" to "✊", "PAPER" to "✋", "SCISSORS" to "✌").forEach { (id, icon) ->
-                        Button(onClick = { onChoose(id) }, enabled = state.rpsChoice == null, modifier = Modifier.size(86.dp)) {
-                            Text(icon, fontSize = 34.sp)
-                        }
-                    }
-                }
-                state.rpsChoice?.let { Text("Elección bloqueada: ${rpsIcon(it)}", color = Color(0xFFA7F3D0), fontWeight = FontWeight.Bold) }
-            }
-            Surface(
-                modifier = Modifier.weight(1.1f),
-                shape = RoundedCornerShape(22.dp),
-                color = Color(0xFF102A56),
+        val landscape = maxWidth > maxHeight
+        if (landscape) {
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    AnimatedContent(
-                        targetState = state.rpsChoices,
-                        transitionSpec = { (scaleIn() + fadeIn()) togetherWith (scaleOut() + fadeOut()) },
-                        label = "rpsReveal",
-                    ) { choices ->
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            state.players.forEach { player ->
-                                Surface(color = Color(android.graphics.Color.parseColor(player.colorHex)).copy(alpha = .22f), shape = RoundedCornerShape(12.dp)) {
-                                    Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        AvatarBadge(player.avatarId, Color(android.graphics.Color.parseColor(player.colorHex)), 34.dp)
-                                        Text(player.name, Modifier.weight(1f).padding(start = 8.dp), color = Color.White, fontWeight = FontWeight.Black)
-                                        Text(
-                                            choices[player.id]?.let(::rpsIcon) ?: "❔",
-                                            fontSize = 34.sp,
-                                            modifier = Modifier.graphicsLayer { scaleX = impact.value; scaleY = impact.value },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (state.rpsTie) Text("EMPATE · nueva ronda automática", color = Color(0xFFFFD740), fontWeight = FontWeight.Black)
-                    state.rpsWinnerId?.let { winner ->
-                        Text("GANA ${state.players.firstOrNull { it.id == winner }?.name.orEmpty()}", color = Color(0xFF69F0AE), fontSize = 20.sp, fontWeight = FontWeight.Black)
-                    }
-                }
+                RpsChoicePanel(state, onChoose, Modifier.weight(.9f))
+                RpsRosterPanel(state, impact.value, Modifier.weight(1.1f))
+            }
+        } else {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                RpsChoicePanel(state, onChoose, Modifier.fillMaxWidth())
+                RpsRosterPanel(state, impact.value, Modifier.fillMaxWidth())
             }
         }
         ConfirmExitDialog(confirmExit, onDismiss = { confirmExit = false }, onConfirm = onExit)
     }
 }
 
+@Composable
+private fun RpsChoicePanel(state: ArenaUiState, onChoose: (String) -> Unit, modifier: Modifier) {
+    Column(
+        modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text("DUELO DE INICIO", color = Color(0xFF00E5FF), fontSize = 25.sp, fontWeight = FontWeight.Black)
+        Text("Ronda ${state.rpsRound} · el ganador obtiene el primer turno", color = Color.White)
+        val seconds = ((state.rpsEndsAt - state.serverNowMs + 999) / 1_000).coerceAtLeast(0)
+        Text(if (state.rpsChoices.isEmpty()) "$seconds" else "¡REVELAR!", color = Color(0xFFFFD740), fontSize = 38.sp, fontWeight = FontWeight.Black)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf("ROCK" to "✊", "PAPER" to "✋", "SCISSORS" to "✌").forEach { (id, icon) ->
+                Button(
+                    onClick = { onChoose(id) },
+                    enabled = state.rpsChoice == null,
+                    modifier = Modifier.weight(1f).aspectRatio(1.35f),
+                ) { Text(icon, fontSize = 30.sp) }
+            }
+        }
+        state.rpsChoice?.let { Text("Elección bloqueada: ${rpsIcon(it)}", color = Color(0xFFA7F3D0), fontWeight = FontWeight.Bold) }
+    }
+}
+
+@Composable
+private fun RpsRosterPanel(state: ArenaUiState, impact: Float, modifier: Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        color = Color(0xFF102A56),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AnimatedContent(
+                targetState = state.rpsChoices,
+                transitionSpec = { (scaleIn() + fadeIn()) togetherWith (scaleOut() + fadeOut()) },
+                label = "rpsReveal",
+            ) { choices ->
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    state.players.forEach { player ->
+                        val color = Color(android.graphics.Color.parseColor(player.colorHex))
+                        Surface(color = color.copy(alpha = .22f), shape = RoundedCornerShape(12.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AvatarBadge(player.avatarId, color, 32.dp)
+                                Text(player.name, Modifier.weight(1f).padding(start = 8.dp), color = Color.White, fontWeight = FontWeight.Black)
+                                Text(
+                                    choices[player.id]?.let(::rpsIcon) ?: "❔",
+                                    fontSize = 30.sp,
+                                    modifier = Modifier.graphicsLayer { scaleX = impact; scaleY = impact },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (state.rpsTie) Text("EMPATE · nueva ronda automática", color = Color(0xFFFFD740), fontWeight = FontWeight.Black)
+            state.rpsWinnerId?.let { winner ->
+                Text("GANA ${state.players.firstOrNull { it.id == winner }?.name.orEmpty()}", color = Color(0xFF69F0AE), fontSize = 19.sp, fontWeight = FontWeight.Black)
+            }
+        }
+    }
+}
+
 private fun rpsIcon(choice: String): String = when (choice) {
-    "ROCK" -> "✊"; "PAPER" -> "✋"; "SCISSORS" -> "✌"; else -> "❔"
+    "ROCK" -> "✊"
+    "PAPER" -> "✋"
+    "SCISSORS" -> "✌"
+    else -> "❔"
 }

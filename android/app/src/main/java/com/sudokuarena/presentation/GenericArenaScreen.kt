@@ -116,14 +116,12 @@ fun GenericArenaScreen(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            Row(
+            AdaptiveArenaLayout(
                 Modifier.fillMaxSize()
-                    .blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp)
-                    .padding(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
+                    .blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp),
+                board = {
                 BoxWithConstraints(
-                    Modifier.weight(.66f).fillMaxHeight(),
+                    Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (generic == null) {
@@ -154,11 +152,8 @@ fun GenericArenaScreen(
                         }
                     }
                 }
-                Column(
-                    Modifier.weight(.34f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
+                },
+                controls = {
                     if (!state.isSoloMode && state.roomState?.pauseRequesterId != null &&
                         state.roomState.phase in setOf(com.sudokuarena.domain.RoomPhase.PLAYING, com.sudokuarena.domain.RoomPhase.SUDDEN_DEATH)
                     ) PauseVoteBanner(state, onPauseResponse)
@@ -189,7 +184,7 @@ fun GenericArenaScreen(
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
                 }
                 }
-            }
+            )
 
             if ((state.ownPlayer?.shieldUntil ?: 0L) > state.serverNowMs) ShieldAuraOverlay(Modifier.zIndex(8f))
             if (state.fogSwipesRemaining > 0) {

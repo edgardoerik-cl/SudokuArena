@@ -1,5 +1,6 @@
 package com.sudokuarena.presentation
 
+import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sudokuarena.domain.TileType
@@ -53,27 +57,39 @@ fun SoloSetupScreen(
     onStart: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Surface {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(if (landscape) 14.dp else 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             Text("${gameTitle(gameType).uppercase()} · SOLITARIO", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("La partida se ejecuta localmente y puede pausarse.", modifier = Modifier.padding(vertical = 14.dp))
             Text("DIFICULTAD", style = MaterialTheme.typography.labelLarge)
-            PuzzleDifficulty.entries.forEach { level ->
+            val difficultyContent: @Composable (PuzzleDifficulty) -> Unit = { level ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = difficulty == level, onClick = { onDifficultyChanged(level) })
-                    Text(when (level) {
-                        PuzzleDifficulty.EASY -> "Fácil"
-                        PuzzleDifficulty.MEDIUM -> "Medio"
-                        PuzzleDifficulty.HARD -> "Difícil"
-                        PuzzleDifficulty.EXPERT -> "Experto"
-                    })
+                    Text(
+                        when (level) {
+                            PuzzleDifficulty.EASY -> "Fácil"
+                            PuzzleDifficulty.MEDIUM -> "Medio"
+                            PuzzleDifficulty.HARD -> "Difícil"
+                            PuzzleDifficulty.EXPERT -> "Experto"
+                        },
+                    )
                 }
+            }
+            if (landscape) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) { PuzzleDifficulty.entries.forEach { difficultyContent(it) } }
+            } else {
+                PuzzleDifficulty.entries.forEach { difficultyContent(it) }
             }
             if (gameType == GameType.SUDOKU) {
                 Card(Modifier.fillMaxWidth()) {
