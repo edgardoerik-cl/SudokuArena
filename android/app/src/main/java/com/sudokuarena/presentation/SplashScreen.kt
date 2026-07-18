@@ -45,20 +45,34 @@ import com.sudokuarena.R
 @Composable
 fun MultiArenaSplashScreen(onFinished: () -> Unit) {
     val alpha = remember { Animatable(0f) }
-    val scale = remember { Animatable(1.08f) }
+    val scale = remember { Animatable(.94f) }
+    val reveal = remember { Animatable(0f) }
     val pulseTransition = rememberInfiniteTransition(label = "neonPulse")
     val pulse by pulseTransition.animateFloat(
-        initialValue = 0.35f,
+        initialValue = 0.28f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
         label = "neonPulseValue",
+    )
+    val parallaxX by pulseTransition.animateFloat(
+        initialValue = -12f,
+        targetValue = 12f,
+        animationSpec = infiniteRepeatable(tween(5_400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "splashParallaxX",
+    )
+    val scanLine by pulseTransition.animateFloat(
+        initialValue = -.12f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(tween(2_900, easing = FastOutSlowInEasing)),
+        label = "splashScanLine",
     )
     LaunchedEffect(Unit) {
         coroutineScope {
-            launch { alpha.animateTo(1f, tween(1_500)) }
-            launch { scale.animateTo(1f, tween(2_800, easing = FastOutSlowInEasing)) }
+            launch { alpha.animateTo(1f, tween(850, easing = FastOutSlowInEasing)) }
+            launch { scale.animateTo(1f, tween(2_750, easing = FastOutSlowInEasing)) }
+            launch { reveal.animateTo(1f, tween(2_150, easing = FastOutSlowInEasing)) }
         }
-        delay(200)
+        delay(280)
         onFinished()
     }
 
@@ -67,7 +81,8 @@ fun MultiArenaSplashScreen(onFinished: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Image(
-            painter = painterResource(R.drawable.multi_arena_splash_art),
+            // Arte 16:9 compuesto específicamente para pantallas horizontales.
+            painter = painterResource(R.drawable.multi_arena_splash_landscape),
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -76,6 +91,7 @@ fun MultiArenaSplashScreen(onFinished: () -> Unit) {
                     this.alpha = alpha.value
                     scaleX = scale.value
                     scaleY = scale.value
+                    translationX = parallaxX
                 },
         )
         Box(
@@ -86,6 +102,41 @@ fun MultiArenaSplashScreen(onFinished: () -> Unit) {
                         listOf(Color.Black.copy(alpha = 0.22f), Color.Transparent, Color(0xDD070918)),
                     ),
                 ),
+        )
+        // Partículas y barrido de luz de bajo coste: no bloquean ningún toque.
+        Canvas(Modifier.fillMaxSize()) {
+            val scanY = size.height * scanLine
+            drawRect(
+                brush = Brush.verticalGradient(
+                    listOf(Color.Transparent, Color(0x6600D9FF), Color.Transparent),
+                    startY = scanY - size.height * .07f,
+                    endY = scanY + size.height * .07f,
+                ),
+                topLeft = Offset.Zero,
+                size = size,
+            )
+            repeat(16) { index ->
+                val x = size.width * ((index * 37 % 97) / 100f)
+                val y = size.height * ((index * 53 % 89) / 100f)
+                val radius = 1.5f + (index % 3)
+                val color = if (index % 2 == 0) Color(0xFF22D3EE) else Color(0xFFC084FC)
+                drawCircle(color.copy(alpha = (.18f + pulse * .35f) * reveal.value), radius, Offset(x, y))
+            }
+        }
+        Text(
+            "MULTI ARENA",
+            color = Color.White.copy(alpha = reveal.value),
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 5.sp,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 25.dp)
+                .graphicsLayer {
+                    scaleX = .92f + reveal.value * .08f
+                    scaleY = scaleX
+                    shadowElevation = 18f + pulse * 14f
+                },
         )
         Text(
             "CONECTANDO MULTI ARENA${if (pulse > 0.67f) "…" else ""}",
