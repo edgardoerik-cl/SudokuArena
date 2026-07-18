@@ -15,6 +15,8 @@ export const GAME_TYPES = [
     "CRYPTARITHM",
     "CROSS_LETTERS",
     "SECRET_CODE",
-    "CAPITAL_ARENA"
+    "CAPITAL_ARENA",
+    "NEXUS_ZERO",
+    "ABYSS_ARENA"
 ];
 //# sourceMappingURL=types.js.map

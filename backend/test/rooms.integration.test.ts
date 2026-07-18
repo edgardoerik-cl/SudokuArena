@@ -21,6 +21,7 @@ before(async () => {
       PORT: String(port),
       MATCH_DURATION_MS: "2500",
       SUDDEN_DEATH_DURATION_MS: "500",
+      RPS_ENABLED: "false",
       LEADERBOARD_FILE: leaderboardFile
     },
     stdio: "ignore"

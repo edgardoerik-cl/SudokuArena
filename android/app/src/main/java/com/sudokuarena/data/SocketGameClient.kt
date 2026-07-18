@@ -6,6 +6,7 @@ import com.sudokuarena.domain.BoardEventType
 import com.sudokuarena.domain.ConqueredSection
 import com.sudokuarena.domain.GameRealtimeGateway
 import com.sudokuarena.domain.GameSnapshot
+import com.sudokuarena.domain.GameChatMessage
 import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.RealtimeEvent
 import com.sudokuarena.domain.RoomConfig
@@ -19,6 +20,11 @@ import com.sudokuarena.domain.GameType
 import com.sudokuarena.domain.PuzzleDifficulty
 import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.GenericCell
+import com.sudokuarena.domain.AbyssActor
+import com.sudokuarena.domain.AbyssItem
+import com.sudokuarena.domain.AbyssObstacle
+import com.sudokuarena.domain.AbyssProjectile
+import com.sudokuarena.domain.AbyssState
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.WebSocket
@@ -96,6 +102,7 @@ class SocketGameClient(
         } }
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
         socket.on("generic:state") { args -> parseSafely(args) { RealtimeEvent.GenericStateUpdated(parseGenericState(it)) } }
+        socket.on("abyss:state") { args -> parseSafely(args) { RealtimeEvent.AbyssStateUpdated(parseAbyssState(it)) } }
         socket.on("letters:rack") { args -> parseSafely(args) { payload ->
             RealtimeEvent.LetterRackUpdated(
                 letters = payload.optJSONArray("letters")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
@@ -118,6 +125,29 @@ class SocketGameClient(
         } }
         socket.on("secret:chat-locked") { args -> parseSafely(args) { payload ->
             RealtimeEvent.SecretChatLocked(payload.optLong("blockedUntil"))
+        } }
+        socket.on("global:chat-message") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.GlobalChatReceived(
+                GameChatMessage(
+                    id = payload.getString("id"),
+                    playerId = payload.getString("playerId"),
+                    message = payload.getString("message"),
+                    sentAt = payload.optLong("sentAt", System.currentTimeMillis()),
+                ),
+            )
+        } }
+        socket.on("rps:started") { args -> parseSafely(args) { payload ->
+            RealtimeEvent.RpsStarted(payload.optInt("round", 1), payload.optLong("endsAt"))
+        } }
+        socket.on("rps:result") { args -> parseSafely(args) { payload ->
+            val choices = payload.optJSONObject("choices")?.toKotlinMap()
+                ?.mapValues { it.value.toString() }.orEmpty()
+            RealtimeEvent.RpsResult(
+                round = payload.optInt("round", 1),
+                choices = choices,
+                winnerId = payload.nullableString("winnerId"),
+                tie = payload.optBoolean("tie"),
+            )
         } }
         socket.on("generic:move-accepted") { args -> parseSafely(args) { payload ->
             RealtimeEvent.GenericMoveAccepted(
@@ -313,6 +343,34 @@ class SocketGameClient(
         socket.emit("secret:chat-send", JSONObject().put("message", message))
     }
 
+    override fun sendGlobalChat(message: String) {
+        socket.emit("global:chat-send", JSONObject().put("message", message))
+    }
+
+    override fun sendAbyssInput(
+        sequence: Long,
+        moveX: Float,
+        moveY: Float,
+        aimX: Float,
+        aimY: Float,
+        shooting: Boolean,
+    ) {
+        socket.emit(
+            "abyss:input",
+            JSONObject()
+                .put("sequence", sequence)
+                .put("moveX", moveX)
+                .put("moveY", moveY)
+                .put("aimX", aimX)
+                .put("aimY", aimY)
+                .put("shooting", shooting),
+        )
+    }
+
+    override fun chooseRps(choice: String) {
+        socket.emit("rps:choose", JSONObject().put("choice", choice))
+    }
+
     override fun requestPause() { socket.emit("pause:request") }
 
     override fun respondPause(accepted: Boolean) {
@@ -444,6 +502,47 @@ private fun parseGenericState(json: JSONObject): GenericBoardState {
         board = board,
         completed = json.optBoolean("completed", false),
         meta = json.optJSONObject("meta")?.toKotlinMap().orEmpty(),
+    )
+}
+
+private fun parseAbyssState(json: JSONObject): AbyssState {
+    fun number(value: JSONObject, key: String) = value.optDouble(key, 0.0).toFloat()
+    val actors = json.optJSONArray("actors")?.mapObjects { raw ->
+        val item = raw as JSONObject
+        AbyssActor(
+            id = item.optString("id"),
+            kind = item.optString("kind"),
+            x = number(item, "x"),
+            y = number(item, "y"),
+            hp = number(item, "hp"),
+            maxHp = number(item, "maxHp"),
+            colorHex = item.nullableString("colorHex"),
+            name = item.nullableString("name"),
+        )
+    }.orEmpty()
+    val projectiles = json.optJSONArray("projectiles")?.mapObjects { raw ->
+        val item = raw as JSONObject
+        AbyssProjectile(item.optString("id"), number(item, "x"), number(item, "y"))
+    }.orEmpty()
+    val items = json.optJSONArray("items")?.mapObjects { raw ->
+        val item = raw as JSONObject
+        AbyssItem(item.optString("id"), number(item, "x"), number(item, "y"), item.optString("type"))
+    }.orEmpty()
+    val obstacles = json.optJSONObject("room")?.optJSONArray("obstacles")?.mapObjects { raw ->
+        val item = raw as JSONObject
+        AbyssObstacle(number(item, "x"), number(item, "y"), number(item, "width"), number(item, "height"))
+    }.orEmpty()
+    return AbyssState(
+        serverTime = json.optLong("serverTime"),
+        tick = json.optLong("tick"),
+        level = json.optInt("level", 1),
+        maxLevel = json.optInt("maxLevel", 20),
+        bossLevel = json.optBoolean("bossLevel"),
+        completed = json.optBoolean("completed"),
+        actors = actors,
+        projectiles = projectiles,
+        items = items,
+        obstacles = obstacles,
     )
 }
 

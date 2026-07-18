@@ -68,9 +68,16 @@ fun CapitalArenaBoard(
     val textMeasurer = rememberTextMeasurer()
     val spaces = remember(state.gameId) { capitalSpaces(state) }
     val positions = state.meta.stringIntMap("positions")
+    val balances = state.meta.stringIntMap("balances")
     val owners = state.meta.stringStringMap("propertyOwners")
     val levels = state.meta.stringIntMap("propertyLevels")
     val surpriseCard = state.meta["surpriseCard"] as? Map<*, *>
+    val activePlayerId = state.meta["currentPlayerTurn"]?.toString()
+    val activeGlow by rememberInfiniteTransition(label = "capitalActiveGlow").animateFloat(
+        initialValue = .35f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
+        label = "capitalActiveCell",
+    )
     val tokenAnimations = remember(state.gameId, players.keys) {
         players.keys.associateWith { playerId -> Animatable((positions[playerId] ?: 0).toFloat()) }
     }
@@ -122,6 +129,24 @@ fun CapitalArenaBoard(
                 Color(0xFF101B3B), Offset(unit * 1.25f, unit * 1.25f),
                 Size(unit * 8.5f, unit * 8.5f), cornerRadius = androidx.compose.ui.geometry.CornerRadius(28f),
             )
+            activePlayerId?.let { activeId ->
+                val activePosition = positions[activeId] ?: 0
+                val activeColor = players[activeId]?.colorHex?.let(::parseCapitalColor) ?: Color(0xFF00E5FF)
+                val activeCell = capitalCellOffset(activePosition, unit)
+                drawRoundRect(
+                    activeColor.copy(alpha = .18f + activeGlow * .32f),
+                    activeCell - Offset(4f, 4f),
+                    Size(unit + 8f, unit + 8f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(12f),
+                )
+                drawRoundRect(
+                    activeColor,
+                    activeCell,
+                    Size(unit, unit),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(9f),
+                    style = Stroke(2.5f + activeGlow * 3f),
+                )
+            }
 
             tokenAnimations.entries.forEach { (playerId, animation) ->
                 val finalPosition = positions[playerId] ?: 0
@@ -140,6 +165,40 @@ fun CapitalArenaBoard(
             card = surpriseCard,
             modifier = Modifier.align(Alignment.Center).fillMaxWidth(.48f),
         )
+        val cornerAlignments = listOf(Alignment.TopStart, Alignment.TopEnd, Alignment.BottomStart, Alignment.BottomEnd)
+        players.values.sortedBy(Player::slot).take(4).forEachIndexed { index, player ->
+            val properties = owners.values.count { it == player.id }
+            CapitalCornerPlayer(
+                player = player,
+                balance = balances[player.id] ?: 0,
+                properties = properties,
+                active = player.id == activePlayerId,
+                modifier = Modifier.align(cornerAlignments[index]).padding(5.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CapitalCornerPlayer(
+    player: Player,
+    balance: Int,
+    properties: Int,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val color = parseCapitalColor(player.colorHex)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xEEFFFFFF),
+        border = BorderStroke(if (active) 3.dp else 1.dp, color),
+        shadowElevation = if (active) 12.dp else 4.dp,
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+            Text("${player.avatarId} ${player.name.take(11)}", color = color, fontWeight = FontWeight.Black, fontSize = 9.sp)
+            Text("$balance cr · $properties prop.", color = Color(0xFF102A56), fontWeight = FontWeight.Bold, fontSize = 8.sp)
+        }
     }
 }
 

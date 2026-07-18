@@ -129,8 +129,9 @@ fun WelcomeScreen(
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
                 GameArenaSelector(selectedGameType, onGameSelected)
                 NeonArenaButton(
-                    text = "Modo Solitario",
+                    text = if (selectedGameType == GameType.ABYSS_ARENA) "Abismo · Cooperativo online" else "Modo Solitario",
                     onClick = onSoloMode,
+                    enabled = selectedGameType != GameType.ABYSS_ARENA,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(58.dp),
@@ -333,6 +334,8 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.CROSS_LETTERS -> "AÑ"
     GameType.SECRET_CODE -> "🔐"
     GameType.CAPITAL_ARENA -> "💰"
+    GameType.NEXUS_ZERO -> "±0"
+    GameType.ABYSS_ARENA -> "☄"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
@@ -343,6 +346,8 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"
+    GameType.NEXUS_ZERO -> "Nexo Cero"
+    GameType.ABYSS_ARENA -> "Abismo Arena"
 }
 
 @Composable

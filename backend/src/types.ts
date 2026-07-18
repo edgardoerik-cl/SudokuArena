@@ -13,7 +13,7 @@ export type TeamMode = "DUEL" | "FFA" | "TWO_V_ONE" | "TWO_V_TWO" | "THREE_V_ONE
 export type TileType = "NUMBERS" | "COLORS";
 export type BotDifficulty = "EASY" | "MEDIUM" | "HARD";
 export type PlayerRole = "PLAYER" | "TEAMMATE" | "BOSS" | "RAIDER";
-export type RoomPhase = "LOBBY" | "PLAYING" | "PAUSED" | "SUDDEN_DEATH" | "FINISHED";
+export type RoomPhase = "LOBBY" | "RPS" | "PLAYING" | "PAUSED" | "SUDDEN_DEATH" | "FINISHED";
 export type BotPersona = "CALCULATOR" | "TRICKSTER" | "GUARDIAN";
 export type ActivePower = "FOG" | "REFLECT" | "REVEAL";
 

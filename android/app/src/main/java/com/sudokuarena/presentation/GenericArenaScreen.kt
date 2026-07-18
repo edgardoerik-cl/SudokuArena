@@ -1,6 +1,7 @@
 package com.sudokuarena.presentation
 
 import android.graphics.Color as AndroidColor
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -8,20 +9,24 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -80,9 +85,12 @@ fun GenericArenaScreen(
     onOpenTutorial: () -> Unit,
     onReaction: (String) -> Unit,
     onSecretChat: (String) -> Unit,
+    onGlobalChat: (String) -> Unit,
     onNewSoloGame: () -> Unit,
     onExit: () -> Unit,
 ) {
+    var confirmExit by remember { mutableStateOf(false) }
+    BackHandler { confirmExit = true }
     val generic = state.genericBoard
     val boardPulse = remember { androidx.compose.animation.core.Animatable(1f) }
     LaunchedEffect(generic?.revision) {
@@ -103,27 +111,63 @@ fun GenericArenaScreen(
                 state = state,
                 onTutorial = onOpenTutorial,
                 onPause = onRequestPause,
-                onExit = onExit,
+                onExit = { confirmExit = true },
             )
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                Modifier.fillMaxSize().blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp).verticalScroll(rememberScrollState()).padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+            Row(
+                Modifier.fillMaxSize()
+                    .blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp)
+                    .padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                if (!state.isSoloMode && state.roomState?.pauseRequesterId != null &&
-                    state.roomState.phase in setOf(com.sudokuarena.domain.RoomPhase.PLAYING, com.sudokuarena.domain.RoomPhase.SUDDEN_DEATH)
-                ) PauseVoteBanner(state, onPauseResponse)
-                Scoreboard(state)
-                if (state.roomState?.config?.powersEnabled == true) {
-                    PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
+                BoxWithConstraints(
+                    Modifier.weight(.66f).fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (generic == null) {
+                        Text("Preparando matriz compartida…")
+                    } else {
+                        val boardRatio = if (state.gameType == GameType.NONOGRAM) {
+                            (generic.columns + 3.1f) / (generic.rows + 3.1f)
+                        } else generic.columns.toFloat() / generic.rows.toFloat()
+                        val boardWidth = minOf(maxWidth, maxHeight * boardRatio)
+                        val boardHeight = boardWidth / boardRatio
+                        Box(Modifier.size(boardWidth, boardHeight), contentAlignment = Alignment.Center) {
+                            GenericPuzzleGrid(
+                                state = generic,
+                                players = state.players.associateBy(Player::id),
+                                selected = state.selected,
+                                enabled = state.canInteractGeneric,
+                                onCellSelected = onCellSelected,
+                                onWordSelection = onWordSelection,
+                                onDirectMove = onMoveAt,
+                                secretKey = state.secretKey,
+                                secretCanGuess = state.secretRole != "CAPTAIN",
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = boardPulse.value
+                                    scaleY = boardPulse.value
+                                    alpha = .78f + boardPulse.value * .22f
+                                },
+                            )
+                        }
+                    }
                 }
-                if (generic == null) {
-                    Text("Preparando matriz compartida…")
-                } else {
-                    if (state.gameType == GameType.SECRET_CODE) SecretRoleHeader(state)
+                Column(
+                    Modifier.weight(.34f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    if (!state.isSoloMode && state.roomState?.pauseRequesterId != null &&
+                        state.roomState.phase in setOf(com.sudokuarena.domain.RoomPhase.PLAYING, com.sudokuarena.domain.RoomPhase.SUDDEN_DEATH)
+                    ) PauseVoteBanner(state, onPauseResponse)
+                    Scoreboard(state)
+                    if (state.roomState?.config?.powersEnabled == true) {
+                        PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
+                    }
+                    if (generic != null) {
+                        if (state.gameType == GameType.SECRET_CODE) SecretRoleHeader(state)
                     val waitingTurn = !state.isSoloMode && state.genericTurnPlayerId != null && state.genericTurnPlayerId != state.playerId
                     if (waitingTurn) {
                         Surface(
@@ -136,26 +180,14 @@ fun GenericArenaScreen(
                             )
                         }
                     }
-                    GenericPuzzleGrid(
-                        state = generic,
-                        players = state.players.associateBy(Player::id),
-                        selected = state.selected,
-                        enabled = state.canInteractGeneric,
-                        onCellSelected = onCellSelected,
-                        onWordSelection = onWordSelection,
-                        onDirectMove = onMoveAt,
-                        secretKey = state.secretKey,
-                        secretCanGuess = state.secretRole != "CAPTAIN",
-                        modifier = Modifier.graphicsLayer {
-                            scaleX = boardPulse.value
-                            scaleY = boardPulse.value
-                            alpha = .78f + boardPulse.value * .22f
-                        },
-                    )
                     PuzzleHints(generic)
                     GenericMoveControls(state, state.canMakeGenericMove, onMove, onMoveAt, onSecretChat)
-                    if (!state.isSoloMode) ReactionMenu(onReaction)
+                    if (!state.isSoloMode) {
+                        ReactionMenu(onReaction)
+                        GlobalGameChat(state, onGlobalChat)
+                    }
                     state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) }
+                }
                 }
             }
 
@@ -174,6 +206,7 @@ fun GenericArenaScreen(
             if (state.showTutorial) {
                 ArenaTutorialOverlay(state.isSoloMode, state.gameType, onTutorialComplete, Modifier.zIndex(60f))
             }
+            ConfirmExitDialog(confirmExit, onDismiss = { confirmExit = false }, onConfirm = onExit)
         }
     }
 }
@@ -279,15 +312,30 @@ fun GenericPuzzleGrid(
             }
         }
     } else if (state.gameType == GameType.SLITHERLINK) {
-        Modifier.pointerInput(state.board, enabled) {
+        fun edgeAt(offset: Offset, canvasSize: androidx.compose.ui.unit.IntSize): Triple<Int, Int, String> {
+            val width = canvasSize.width.toFloat() / state.columns
+            val height = canvasSize.height.toFloat() / state.rows
+            val row = floor(offset.y / height).toInt().coerceIn(0, state.rows - 1)
+            val col = floor(offset.x / width).toInt().coerceIn(0, state.columns - 1)
+            val localX = offset.x - col * width
+            val localY = offset.y - row * height
+            val side = listOf("left" to localX, "right" to width - localX, "top" to localY, "bottom" to height - localY)
+                .minBy { it.second }.first
+            return Triple(row, col, side)
+        }
+        Modifier
+            .pointerInput(state.board, enabled) {
+                detectTapGestures { offset ->
+                    if (!enabled) return@detectTapGestures
+                    val (row, col, side) = edgeAt(offset, size)
+                    if (state.board[row][col].meta[side] != true) onDirectMove(row, col, side)
+                }
+            }
+            .pointerInput(state.board, enabled) {
             var lastEdge: String? = null
             fun drawAt(offset: Offset) {
                 if (!enabled) return
-                val width = size.width / state.columns; val height = size.height / state.rows
-                val row = floor(offset.y / height).toInt().coerceIn(0, state.rows - 1)
-                val col = floor(offset.x / width).toInt().coerceIn(0, state.columns - 1)
-                val localX = offset.x - col * width; val localY = offset.y - row * height
-                val side = listOf("left" to localX, "right" to width - localX, "top" to localY, "bottom" to height - localY).minBy { it.second }.first
+                val (row, col, side) = edgeAt(offset, size)
                 val edge = "$row:$col:$side"
                 if (edge != lastEdge && state.board[row][col].meta[side] != true) {
                     lastEdge = edge
@@ -327,6 +375,11 @@ fun GenericPuzzleGrid(
                         onDirectMove(row, col, side)
                     }
                     GameType.SECRET_CODE -> if (secretCanGuess) onDirectMove(row, col, mapOf("action" to "GUESS")) else onCellSelected(row, col)
+                    GameType.NEXUS_ZERO -> {
+                        val first = selected
+                        if (first == null || first == CellPosition(row, col)) onCellSelected(row, col)
+                        else onDirectMove(first.row, first.column, mapOf("targetRow" to row, "targetCol" to col))
+                    }
                     else -> onCellSelected(row, col)
                 }
             }
@@ -388,6 +441,10 @@ fun GenericPuzzleGrid(
                 } else cell.meta
                 renderGenericCell(state.gameType, cell.value, renderMeta, cell.isBlocked, origin, cellWidth, cellHeight, textMeasurer)
                 drawRect(Color(0xFFB0BEC5), origin, Size(cellWidth, cellHeight), style = Stroke(1.2f))
+                if (state.gameType == GameType.CRYPTARITHM && cell.meta["given"] == true) {
+                    drawRect(Color(0x6600E5FF), origin - Offset(2f, 2f), Size(cellWidth + 4f, cellHeight + 4f), style = Stroke(5f))
+                    drawRect(Color(0xFF00A8FF), origin, Size(cellWidth, cellHeight), style = Stroke(2.5f))
+                }
                 if (ownerColor != null) drawRect(ownerColor, origin, Size(cellWidth, cellHeight), style = Stroke(2.4f))
             }
         }
@@ -456,6 +513,14 @@ private fun NonogramPuzzleGrid(
             }
             drawRect(Color(0xFF90A4AE), origin, Size(cellSize, cellSize), style = Stroke(if ((row + 1) % 5 == 0 || (col + 1) % 5 == 0) 2.2f else 1f))
         } }
+        for (col in 5 until state.columns step 5) {
+            val x = gridX + col * cellSize
+            drawLine(Color(0xFF102A56), Offset(x, gridY), Offset(x, gridY + state.rows * cellSize), 3.5f)
+        }
+        for (row in 5 until state.rows step 5) {
+            val y = gridY + row * cellSize
+            drawLine(Color(0xFF102A56), Offset(gridX, y), Offset(gridX + state.columns * cellSize, y), 3.5f)
+        }
         drawRect(Color(0xFF102A56), Offset(gridX, gridY), Size(state.columns * cellSize, state.rows * cellSize), style = Stroke(2.5f))
     }
 }
@@ -487,6 +552,7 @@ private fun PuzzleHints(state: GenericBoardState) {
         GameType.BRIDGES -> Text("Toca los segmentos entre islas para construir la red.")
         GameType.SLITHERLINK -> Text("Toca cerca de un borde para añadirlo al lazo.")
         GameType.CRYPTARITHM -> Text(state.meta["equation"]?.toString().orEmpty(), fontWeight = FontWeight.Black)
+        GameType.NEXUS_ZERO -> Text("Toca una carga y después una vecina opuesta. Deben sumar exactamente cero.", fontWeight = FontWeight.Black)
         GameType.CROSS_LETTERS -> {
             val active = state.meta["activePlayerId"]?.toString()
             Text("Turno: ${active?.take(8) ?: "preparando…"} · selecciona la casilla inicial", fontWeight = FontWeight.Bold)
@@ -524,13 +590,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
                 "RED" -> Color(0xFFE53935); "BLUE" -> Color(0xFF1E88E5); "GREEN" -> Color(0xFF00A651); else -> Color(0xFFFF8F00)
             }
             drawRoundRect(tileColor.copy(alpha = .18f), origin + Offset(2f, 2f), Size(width - 4f, height - 4f))
-            // La solución vive únicamente en el motor autoritativo. Mientras no haya
-            // una jugada aceptada, la celda muestra una incógnita, nunca el resultado.
             drawCenteredText(value ?: "?", center, width, textMeasurer, tileColor)
-            meta["rule"]?.toString()?.takeIf(String::isNotEmpty)?.let { rule ->
-                // También protege partidas antiguas cuyo meta aún contenía "= 7".
-                val safeRule = rule.replace(Regex("(=|→)\\s*\\d+"), "$1 ?")
-                val layout = textMeasurer.measure(safeRule, TextStyle(color = Color(0xFF263238), fontSize = 7.sp, fontWeight = FontWeight.Bold))
+            meta["meldType"]?.toString()?.let { type ->
+                val label = if (type == "RUN") "ESCALERA" else "GRUPO"
+                val layout = textMeasurer.measure(label, TextStyle(color = Color(0xFF263238), fontSize = 6.sp, fontWeight = FontWeight.Bold))
                 drawText(layout, topLeft = origin + Offset(2f, 1f))
             }
         }
@@ -558,6 +621,13 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
         GameType.CRYPTARITHM -> {
             val letter = meta["cryptLetter"]?.toString().orEmpty()
             drawCenteredText(if (value?.toString() == letter) letter else "$letter=$value", center, width, textMeasurer, Color(0xFF102A56))
+        }
+        GameType.NEXUS_ZERO -> {
+            val charge = (value as? Number)?.toInt() ?: 0
+            val color = if (charge >= 0) Color(0xFF00A8FF) else Color(0xFFE91E63)
+            drawCircle(color.copy(alpha = .20f), min(width, height) * .39f, center)
+            drawCircle(color, min(width, height) * .35f, center, style = Stroke(2.5f))
+            drawCenteredText(if (charge > 0) "+$charge" else charge, center, width, textMeasurer, color)
         }
         GameType.CROSS_LETTERS -> {
             val bonus = meta["bonus"]?.toString().orEmpty()
@@ -672,7 +742,7 @@ private fun GenericMoveControls(
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
         GameType.MINESWEEPER, GameType.NONOGRAM, GameType.HITORI, GameType.DOTS_AND_BOXES,
-        GameType.NURIKABE, GameType.BRIDGES, GameType.SLITHERLINK -> Unit
+        GameType.NURIKABE, GameType.BRIDGES, GameType.SLITHERLINK, GameType.NEXUS_ZERO -> Unit
         GameType.WORD_SEARCH -> Text("Arrastra desde la primera hasta la última letra de una palabra.")
         GameType.CROSSWORD -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(text, { text = it.uppercase().take(1) }, label = { Text("Letra") }, modifier = Modifier.weight(1f))
@@ -730,6 +800,43 @@ private fun GenericMoveControls(
             enabled = state.canInteractGeneric,
             onAction = { action -> onMoveAt(10, 10, action) },
         )
+        GameType.RUMMIKUB -> {
+            var tileColor by remember { mutableStateOf("RED") }
+            val colors = listOf(
+                "RED" to Color(0xFFE53935),
+                "BLUE" to Color(0xFF1565C0),
+                "GREEN" to Color(0xFF00875A),
+                "ORANGE" to Color(0xFFFF8F00),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Elige color y número para completar la combinación", fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    colors.forEach { (id, color) ->
+                        Surface(
+                            modifier = Modifier.weight(1f).height(34.dp).clickable(enabled) { tileColor = id },
+                            shape = RoundedCornerShape(9.dp),
+                            color = color,
+                            border = androidx.compose.foundation.BorderStroke(
+                                if (tileColor == id) 3.dp else 1.dp,
+                                if (tileColor == id) Color.White else color,
+                            ),
+                        ) {}
+                    }
+                }
+                (1..13).chunked(7).forEach { numbers ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        numbers.forEach { number ->
+                            Button(
+                                onClick = { onMove(mapOf("tile" to number, "color" to tileColor)) },
+                                enabled = enabled,
+                                modifier = Modifier.weight(1f),
+                            ) { Text(number.toString(), maxLines = 1) }
+                        }
+                        repeat(7 - numbers.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
         else -> {
             val values = when (gameType) {
                 GameType.CRYPTARITHM -> 0..9
@@ -808,6 +915,8 @@ fun gameTitle(type: GameType): String = when (type) {
     GameType.CROSS_LETTERS -> "Multi Arena · Letras Cruzadas"
     GameType.SECRET_CODE -> "Multi Arena · Código Secreto"
     GameType.CAPITAL_ARENA -> "Multi Arena · Capital Arena"
+    GameType.NEXUS_ZERO -> "Multi Arena · Nexo Cero"
+    GameType.ABYSS_ARENA -> "Multi Arena · Abismo Arena"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

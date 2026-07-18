@@ -20,8 +20,40 @@ export function createPuzzleBlueprint(gameType, options = {}) {
         case "CROSS_LETTERS": return crossLetters(random, difficulty);
         case "SECRET_CODE": return secretCode(random, difficulty);
         case "CAPITAL_ARENA": return capitalArena(random, difficulty);
+        case "NEXUS_ZERO": return nexusZero(random, difficulty);
+        case "ABYSS_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, difficulty } };
         case "SUDOKU": return latinPuzzle(random, 9);
     }
+}
+/**
+ * Nexo Cero: cada pareja ortogonal contiene cargas opuestas. El jugador enlaza
+ * dos nodos cuya suma sea cero; ambos quedan conquistados simultáneamente.
+ */
+function nexusZero(random, difficulty) {
+    const rows = sizeFor(difficulty, 4, 6, 6, 8);
+    const columns = 6;
+    const board = matrix(rows, columns, () => cell(null, true));
+    const answers = matrix(rows, columns, () => null);
+    for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < columns; col += 2) {
+            const charge = random.int(1, 9) * (random.next() < .5 ? -1 : 1);
+            const reverse = random.next() < .5;
+            board[row][col].value = reverse ? -charge : charge;
+            board[row][col + 1].value = reverse ? charge : -charge;
+            answers[row][col] = `${row}:${col + 1}`;
+            answers[row][col + 1] = `${row}:${col}`;
+            board[row][col].meta = { charge: true };
+            board[row][col + 1].meta = { charge: true };
+        }
+    }
+    return {
+        board,
+        answers,
+        meta: {
+            instructions: "Nexo Cero: enlaza dos cargas vecinas que sumen 0. Encadena rápido para dominar la matriz.",
+            difficulty,
+        },
+    };
 }
 function sizeFor(difficulty, easy, medium, hard, expert) {
     return difficulty === "EASY" ? easy : difficulty === "HARD" ? hard : difficulty === "EXPERT" ? expert : medium;
@@ -201,16 +233,41 @@ function hitori(random, difficulty) {
 }
 function logicTiles(random, difficulty) {
     const rows = sizeFor(difficulty, 4, 5, 6, 7);
-    const columns = sizeFor(difficulty, 5, 6, 7, 8);
-    const operations = difficulty === "EASY" ? ["SUM"] : ["SUM", "AND", "OR", "XOR"];
-    const challenges = matrix(rows, columns, () => logicChallenge(random, operations));
-    const answers = challenges.map((row) => row.map((challenge) => challenge.answer));
-    const board = challenges.map((row) => row.map((challenge) => cell(null, false, {
-        tileColor: random.pick(["RED", "BLUE", "GREEN", "ORANGE"]),
-        operation: challenge.operation,
-        rule: challenge.rule
-    })));
-    return { board, answers, meta: { operations, instructions: "Coloca la ficha que satisface la regla algebraica o lógica de la casilla.", difficulty } };
+    const columns = 5;
+    const colors = ["RED", "BLUE", "GREEN", "ORANGE"];
+    const board = matrix(rows, columns, () => cell(null, false));
+    const answers = matrix(rows, columns, () => null);
+    for (let row = 0; row < rows; row += 1) {
+        const isRun = row % 2 === 0;
+        const length = random.int(3, 4);
+        if (isRun) {
+            const color = random.pick(colors);
+            const start = random.int(1, 14 - length);
+            for (let col = 0; col < length; col += 1) {
+                answers[row][col] = `${color}:${start + col}`;
+                board[row][col].meta = { meldId: row, meldType: "RUN", meldLength: length };
+            }
+        }
+        else {
+            const number = random.int(1, 13);
+            const groupColors = random.shuffle([...colors]).slice(0, length);
+            for (let col = 0; col < length; col += 1) {
+                answers[row][col] = `${groupColors[col]}:${number}`;
+                board[row][col].meta = { meldId: row, meldType: "GROUP", meldLength: length };
+            }
+        }
+        for (let col = length; col < columns; col += 1)
+            board[row][col] = blockedCell({ meldId: row });
+    }
+    return {
+        board,
+        answers,
+        meta: {
+            colors,
+            instructions: "Completa grupos del mismo número con colores distintos y escaleras consecutivas del mismo color.",
+            difficulty,
+        },
+    };
 }
 function logicChallenge(random, operations) {
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -323,13 +380,16 @@ function cryptarithm(random, difficulty) {
     const b = random.int(12, 99);
     const result = a + b;
     const digits = [...new Set(`${a}${b}${result}`.split("").map(Number))];
-    const letters = random.shuffle("ABCDEFGHIJKLMNPQRSTUVWXYZ".split("")).slice(0, digits.length);
+    const vowels = ["A", "E"];
+    const letters = [...vowels, ...random.shuffle("BCDFGHIJKLMNPQRSTUVWXYZ".split(""))].slice(0, digits.length);
     const map = new Map(digits.map((digit, index) => [digit, letters[index]]));
     const encode = (value) => [...String(value)].map((digit) => map.get(Number(digit))).join("");
     const equation = `${encode(a)} + ${encode(b)} = ${encode(result)}`;
     const answers = [letters.map((_, index) => digits[index])];
     const revealCount = difficulty === "EASY" ? 3 : 2;
-    const revealedIndexes = new Set(random.shuffle(letters.map((_, index) => index)).slice(0, revealCount));
+    const vowelIndexes = letters.map((letter, index) => vowels.includes(letter) ? index : -1).filter((index) => index >= 0);
+    const extraIndexes = random.shuffle(letters.map((_, index) => index).filter((index) => !vowelIndexes.includes(index)));
+    const revealedIndexes = new Set([...vowelIndexes, ...extraIndexes].slice(0, revealCount));
     const revealedValues = {};
     const board = [letters.map((letter, index) => {
             if (!revealedIndexes.has(index))

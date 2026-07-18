@@ -2,6 +2,7 @@ package com.sudokuarena.presentation
 
 import android.graphics.Color as AndroidColor
 import android.os.SystemClock
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -18,11 +19,13 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -111,6 +114,26 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         return
     }
 
+    if (!state.isSoloMode && roomState?.phase == RoomPhase.RPS) {
+        RpsStartScreen(state, viewModel::chooseRps, onExit)
+        return
+    }
+
+    if (state.gameType == GameType.ABYSS_ARENA) {
+        AbyssArenaScreen(
+            state,
+            viewModel::sendAbyssInput,
+            viewModel::sendGlobalChat,
+            viewModel::requestPause,
+            viewModel::respondPause,
+            viewModel::resumePausedGame,
+            viewModel::completeTutorial,
+            viewModel::openTutorial,
+            onExit,
+        )
+        return
+    }
+
     if (state.gameType != GameType.SUDOKU) {
         GenericArenaScreen(
             state = state,
@@ -130,6 +153,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onOpenTutorial = viewModel::openTutorial,
             onReaction = viewModel::sendReaction,
             onSecretChat = viewModel::sendSecretChat,
+            onGlobalChat = viewModel::sendGlobalChat,
             onNewSoloGame = viewModel::newSoloGame,
             onExit = onExit,
         )
@@ -144,6 +168,7 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
             onUseReflect = viewModel::useReflect,
             onUseReveal = viewModel::useReveal,
         onReaction = viewModel::sendReaction,
+        onGlobalChat = viewModel::sendGlobalChat,
         onFogSwipe = viewModel::cleanFogSwipe,
         onNewSoloGame = viewModel::newSoloGame,
         onTutorialComplete = viewModel::completeTutorial,
@@ -165,6 +190,7 @@ fun ArenaScreen(
     onUseReflect: () -> Unit,
     onUseReveal: () -> Unit,
     onReaction: (String) -> Unit,
+    onGlobalChat: (String) -> Unit,
     onFogSwipe: () -> Unit,
     onNewSoloGame: () -> Unit,
     onTutorialComplete: () -> Unit,
@@ -175,6 +201,8 @@ fun ArenaScreen(
     onResume: () -> Unit,
     onExit: () -> Unit,
 ) {
+    var confirmExit by remember { mutableStateOf(false) }
+    BackHandler { confirmExit = true }
     val shake = remember { Animatable(0f) }
     val boardPulse = remember { Animatable(1f) }
     LaunchedEffect(state.penaltyRemainingMs > 0) {
@@ -197,7 +225,7 @@ fun ArenaScreen(
                 state = state,
                 onTutorial = onOpenTutorial,
                 onPause = onRequestPause,
-                onExit = onExit,
+                onExit = { confirmExit = true },
             )
         },
     ) { padding ->
@@ -206,73 +234,85 @@ fun ArenaScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .blur(if (state.isLocallyPaused || state.roomState?.phase == RoomPhase.PAUSED) 18.dp else 0.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+                    .padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                PauseVoteBanner(state, onPauseResponse)
-                Text(
-                    when {
-                        state.roomState?.suddenDeath == true -> "MUERTE SÚBITA · la próxima jugada correcta gana"
-                        state.isSoloMode -> "Solitario · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.soloElapsedMs)} · ${state.soloErrors} errores"
-                        state.connected && state.roomCode != null -> "Sala ${state.roomCode} · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.matchRemainingMs)}"
-                        else -> "Conectando…"
-                    },
-                    color = if (state.connected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
-                )
-                if (!state.isSoloMode) BoardEventBanner(state)
-                Spacer(Modifier.height(8.dp))
-                Scoreboard(state)
-                if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
-                    Spacer(Modifier.height(8.dp))
-                    PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
+                BoxWithConstraints(
+                    Modifier.weight(.66f).fillMaxHeight(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val boardSize = minOf(maxWidth, maxHeight)
+                    Box(Modifier.size(boardSize), contentAlignment = Alignment.Center) {
+                        SudokuBoard(
+                            board = state.board,
+                            isColorMode = state.isColorMode,
+                            players = state.players.associateBy { it.id },
+                            selected = state.selected,
+                            enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
+                            onCellSelected = onCellSelected,
+                            modifier = Modifier
+                                .offset { IntOffset(shake.value.roundToInt(), 0) }
+                                .graphicsLayer {
+                                    scaleX = boardPulse.value
+                                    scaleY = boardPulse.value
+                                    alpha = .78f + boardPulse.value * .22f
+                                },
+                        )
+                    }
                 }
-                Spacer(Modifier.height(8.dp))
-                SudokuBoard(
-                    board = state.board,
-                    isColorMode = state.isColorMode,
-                    players = state.players.associateBy { it.id },
-                    selected = state.selected,
-                    enabled = state.penaltyRemainingMs == 0L && state.fogSwipesRemaining == 0,
-                    onCellSelected = onCellSelected,
+                Column(
                     modifier = Modifier
-                        .offset { IntOffset(shake.value.roundToInt(), 0) }
-                        .graphicsLayer {
-                            scaleX = boardPulse.value
-                            scaleY = boardPulse.value
-                            alpha = .78f + boardPulse.value * .22f
-                        },
-                )
-                Spacer(Modifier.height(8.dp))
-                state.conquestMessage?.let {
-                    Text(it, color = Color(0xFF1565C0), style = MaterialTheme.typography.titleSmall)
-                }
-                state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                if (state.penaltyRemainingMs > 0) {
-                    Text(
-                        "Bloqueado ${(state.penaltyRemainingMs + 999) / 1000} s",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                } else {
+                        .weight(.34f)
+                        .fillMaxHeight()
+                        .verticalScroll(rememberScrollState())
+                        .padding(end = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    PauseVoteBanner(state, onPauseResponse)
                     Text(
                         when {
-                            !state.isSoloMode && state.players.size < 2 -> "Comparte el código ${state.roomCode.orEmpty()} y espera un rival"
-                            state.selected != null -> "Casilla ${state.selected.row + 1}, ${state.selected.column + 1}"
-                            else -> "Selecciona una casilla"
+                            state.roomState?.suddenDeath == true -> "MUERTE SÚBITA · próximo acierto gana"
+                            state.isSoloMode -> "Solitario · ${if (state.isColorMode) "Colores" else "Números"} · ${formatDuration(state.soloElapsedMs)}"
+                            state.connected && state.roomCode != null -> "Sala ${state.roomCode} · ${formatDuration(state.matchRemainingMs)}"
+                            else -> "Conectando…"
                         },
+                        color = if (state.connected || state.isSoloMode) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
                     )
+                    if (!state.isSoloMode) BoardEventBanner(state)
+                    Scoreboard(state)
+                    if (!state.isSoloMode && state.roomState?.config?.powersEnabled == true) {
+                        PowerPanel(state, onUseFog, onUseReflect, onUseReveal)
+                    }
+                    state.conquestMessage?.let {
+                        Text(it, color = Color(0xFF1565C0), style = MaterialTheme.typography.titleSmall)
+                    }
+                    state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    if (state.penaltyRemainingMs > 0) {
+                        Text(
+                            "Bloqueado ${(state.penaltyRemainingMs + 999) / 1000} s",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    } else {
+                        Text(
+                            when {
+                                !state.isSoloMode && state.players.size < 2 -> "Comparte ${state.roomCode.orEmpty()} y espera rival"
+                                state.selected != null -> "Casilla ${state.selected.row + 1}, ${state.selected.column + 1}"
+                                else -> "Selecciona una casilla"
+                            },
+                        )
+                    }
+                    TilePad(enabled = state.canPlay, isColorMode = state.isColorMode, onTile = onNumber)
+                    if (!state.isSoloMode) {
+                        ReactionMenu(onReaction)
+                        GlobalGameChat(state, onGlobalChat)
+                    }
                 }
-                Spacer(Modifier.height(8.dp))
-                if (!state.isSoloMode) {
-                    ReactionMenu(onReaction)
-                    Spacer(Modifier.height(8.dp))
-                }
-                TilePad(enabled = state.canPlay, isColorMode = state.isColorMode, onTile = onNumber)
             }
 
             if ((state.ownPlayer?.shieldUntil ?: 0) > state.serverNowMs) {
@@ -320,6 +360,7 @@ fun ArenaScreen(
             if (state.isLocallyPaused || state.roomState?.phase == RoomPhase.PAUSED) {
                 PauseLayer(state, onResume, Modifier.zIndex(50f))
             }
+            ConfirmExitDialog(confirmExit, onDismiss = { confirmExit = false }, onConfirm = onExit)
         }
     }
 }

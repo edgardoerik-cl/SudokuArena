@@ -11,6 +11,7 @@ import {
   createRandomSolution
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
+import { AbyssEngine, type AbyssInput } from "./action/abyssEngine.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import { GenericPuzzleEngine } from "./puzzles/engine.js";
 import { GAME_TYPES, type GameType, type GenericMove, type PuzzleDifficulty } from "./puzzles/types.js";
@@ -51,6 +52,8 @@ interface RoomRuntime {
   rematchVotes: Set<string>;
   suddenDeath: boolean;
   genericEngine: GenericPuzzleEngine | null;
+  abyssEngine: AbyssEngine | null;
+  abyssTick: NodeJS.Timeout | null;
   pauseRequesterId: string | null;
   pauseVotes: Set<string>;
   pauseNoVotes: Set<string>;
@@ -61,6 +64,10 @@ interface RoomRuntime {
   resumeTimer: NodeJS.Timeout | null;
   totalPausedMs: number;
   secretChatBlockedUntil: Map<string, number>;
+  rpsChoices: Map<string, "ROCK" | "PAPER" | "SCISSORS">;
+  rpsRound: number;
+  rpsTimer: NodeJS.Timeout | null;
+  rpsIsRematch: boolean;
 }
 
 const port = Number(process.env.PORT ?? 3000);
@@ -73,6 +80,7 @@ const requestedSuddenDeathDuration = Number(process.env.SUDDEN_DEATH_DURATION_MS
 const suddenDeathDurationMs = Number.isFinite(requestedSuddenDeathDuration) && requestedSuddenDeathDuration > 0
   ? requestedSuddenDeathDuration
   : SUDDEN_DEATH_DURATION_MS;
+const rpsEnabled = process.env.RPS_ENABLED !== "false";
 const rooms = new Map<string, RoomRuntime>();
 const disconnectTimers = new Map<string, NodeJS.Timeout>();
 const leaderboard = new LeaderboardStore();
@@ -101,6 +109,7 @@ io.on("connection", (socket) => {
   socket.data.playerId = playerId;
   socket.join(playerId);
   let lastReactionAt = 0;
+  let lastGlobalChatAt = 0;
 
   socket.on("room:create", () => {
     if (socket.data.roomCode) return emitRoomError(socket, "ALREADY_IN_ROOM", "Ya estás dentro de una sala");
@@ -172,7 +181,17 @@ io.on("connection", (socket) => {
     if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     const minimumError = validatePlayerCount(room);
     if (minimumError) return emitRoomError(socket, "INVALID_PLAYER_COUNT", minimumError);
-    startMatch(room);
+    if (rpsEnabled) startRps(room);
+    else startMatch(room);
+  });
+
+  socket.on("rps:choose", (payload: { choice?: unknown }) => {
+    const room = roomFor(socket);
+    if (!room || room.phase !== "RPS") return;
+    const choice = normalizeRpsChoice(payload?.choice);
+    if (!choice || !room.game.hasPlayer(playerId)) return;
+    room.rpsChoices.set(playerId, choice);
+    io.to(room.code).emit("rps:progress", { chosen: room.rpsChoices.size, total: room.game.playerCount });
   });
 
   socket.on("room:rematch", () => {
@@ -182,11 +201,15 @@ io.on("connection", (socket) => {
     room.rematchVotes.add(playerId);
     const humans = room.game.snapshot().players.filter((player) => !player.isBot);
     if (humans.length <= 1) {
-      startMatch(room, true);
+      if (rpsEnabled) startRps(room, true);
+      else startMatch(room, true);
       return;
     }
     emitRoomState(room);
-    if (humans.every((player) => room.rematchVotes.has(player.id))) startMatch(room, true);
+    if (humans.every((player) => room.rematchVotes.has(player.id))) {
+      if (rpsEnabled) startRps(room, true);
+      else startMatch(room, true);
+    }
   });
 
   socket.on("pause:request", () => {
@@ -254,6 +277,12 @@ io.on("connection", (socket) => {
       return;
     }
     processGenericMove(room, playerId, payload, socket);
+  });
+
+  socket.on("abyss:input", (payload: Partial<AbyssInput>) => {
+    const room = roomFor(socket);
+    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "ABYSS_ARENA" || !room.abyssEngine) return;
+    room.abyssEngine.applyInput(playerId, payload);
   });
 
   socket.on("use_power", (payload: PowerProposal) => {
@@ -336,6 +365,26 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("global:chat-send", (payload: { message?: unknown }) => {
+    const room = roomFor(socket);
+    if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
+    const now = Date.now();
+    if (now - lastGlobalChatAt < 650) return;
+    const message = String(payload?.message ?? "")
+      .replace(/[\u0000-\u001F\u007F]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160);
+    if (!message) return;
+    lastGlobalChatAt = now;
+    io.to(room.code).emit("global:chat-message", {
+      id: randomUUID(),
+      playerId,
+      message,
+      sentAt: now,
+    });
+  });
+
   socket.on("secret:chat-send", (payload: { message?: unknown }) => {
     const room = roomFor(socket);
     if (!room || room.config.gameType !== "SECRET_CODE" || !room.genericEngine) return;
@@ -387,6 +436,8 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     rematchVotes: new Set(),
     suddenDeath: false,
     genericEngine: null,
+    abyssEngine: null,
+    abyssTick: null,
     pauseRequesterId: null,
     pauseVotes: new Set(),
     pauseNoVotes: new Set(),
@@ -396,7 +447,11 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     resumeCountdownEndsAt: null,
     resumeTimer: null,
     totalPausedMs: 0,
-    secretChatBlockedUntil: new Map()
+    secretChatBlockedUntil: new Map(),
+    rpsChoices: new Map(),
+    rpsRound: 0,
+    rpsTimer: null,
+    rpsIsRematch: false,
   };
   rooms.set(code, room);
   return room;
@@ -445,6 +500,8 @@ function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
+    if (room.rpsTimer) clearTimeout(room.rpsTimer);
+    if (room.abyssTick) clearInterval(room.abyssTick);
     clearBotTimers(room);
     rooms.delete(room.code);
     return;
@@ -541,6 +598,10 @@ function normalizePuzzleDifficulty(value: unknown): PuzzleDifficulty | null {
   return value === "EASY" || value === "MEDIUM" || value === "HARD" || value === "EXPERT" ? value : null;
 }
 
+function normalizeRpsChoice(value: unknown): "ROCK" | "PAPER" | "SCISSORS" | null {
+  return value === "ROCK" || value === "PAPER" || value === "SCISSORS" ? value : null;
+}
+
 function validatePlayerCount(room: RoomRuntime): string | null {
   const count = room.game.playerCount;
   if (room.config.teamMode === "DUEL" && count !== 2) return "El modo 1 vs 1 requiere exactamente 2 jugadores";
@@ -551,7 +612,66 @@ function validatePlayerCount(room: RoomRuntime): string | null {
   return null;
 }
 
-function startMatch(room: RoomRuntime, rematch = false): void {
+function startRps(room: RoomRuntime, rematch = false): void {
+  if (room.rpsTimer) clearTimeout(room.rpsTimer);
+  room.phase = "RPS";
+  room.rpsRound += 1;
+  room.rpsIsRematch = rematch;
+  room.rpsChoices.clear();
+  const choices = ["ROCK", "PAPER", "SCISSORS"] as const;
+  for (const player of room.game.snapshot().players) {
+    if (player.isBot) room.rpsChoices.set(player.id, choices[Math.floor(Math.random() * choices.length)]!);
+  }
+  const endsAt = Date.now() + 3_000;
+  room.startedAt = null;
+  room.endsAt = endsAt;
+  emitRoomState(room);
+  io.to(room.code).emit("rps:started", { round: room.rpsRound, endsAt });
+  room.rpsTimer = setTimeout(() => resolveRps(room), 3_000);
+}
+
+function resolveRps(room: RoomRuntime): void {
+  if (room.phase !== "RPS") return;
+  if (room.rpsTimer) clearTimeout(room.rpsTimer);
+  room.rpsTimer = null;
+  const choices = ["ROCK", "PAPER", "SCISSORS"] as const;
+  for (const player of room.game.snapshot().players) {
+    if (!room.rpsChoices.has(player.id)) {
+      room.rpsChoices.set(player.id, choices[Math.floor(Math.random() * choices.length)]!);
+    }
+  }
+  const beats: Record<string, string> = { ROCK: "SCISSORS", PAPER: "ROCK", SCISSORS: "PAPER" };
+  const scores = new Map<string, number>();
+  for (const [playerId, choice] of room.rpsChoices) {
+    let score = 0;
+    for (const [otherId, otherChoice] of room.rpsChoices) {
+      if (otherId !== playerId && beats[choice] === otherChoice) score += 1;
+    }
+    scores.set(playerId, score);
+  }
+  const best = Math.max(...scores.values());
+  const winners = [...scores.entries()].filter(([, score]) => score === best).map(([id]) => id);
+  const winnerId = winners.length === 1 ? winners[0]! : null;
+  io.to(room.code).emit("rps:result", {
+    round: room.rpsRound,
+    choices: Object.fromEntries(room.rpsChoices),
+    winnerId,
+    tie: winnerId === null,
+  });
+  if (winnerId) {
+    setTimeout(() => {
+      if (rooms.get(room.code) === room && room.phase === "RPS") {
+        startMatch(room, room.rpsIsRematch, winnerId);
+      }
+    }, 1_800);
+  } else {
+    setTimeout(() => {
+      if (rooms.get(room.code) === room && room.phase === "RPS") startRps(room, room.rpsIsRematch);
+    }, 1_500);
+  }
+}
+
+function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: string): void {
   room.phase = "PLAYING";
   room.suddenDeath = false;
   room.rematchVotes.clear();
@@ -562,16 +682,24 @@ function startMatch(room: RoomRuntime, rematch = false): void {
   room.endsAt = room.startedAt + matchDurationMs;
   if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
   else room.game.startMatch(room.config, resolveBossPlayerId(room));
-  room.genericEngine = room.config.gameType === "SUDOKU"
+  room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "ABYSS_ARENA"
     ? null
     : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
         seed: `${room.code}-${room.startedAt}`,
         difficulty: room.config.puzzleDifficulty
       });
+  room.abyssEngine = room.config.gameType === "ABYSS_ARENA"
+    ? new AbyssEngine(
+        `${room.code}-${room.startedAt}`,
+        room.game.snapshot().players.map(({ id, name, color }) => ({ id, name, colorHex: color })),
+      )
+    : null;
+  if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
   emitRoomState(room);
   emitState(room);
   emitGenericState(room);
   io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
+  if (room.abyssEngine) startAbyssLoop(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
@@ -591,6 +719,10 @@ function finishMatch(room: RoomRuntime, force = false): void {
   room.suddenDeath = false;
   room.endsAt = Date.now();
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
+  if (room.rpsTimer) clearTimeout(room.rpsTimer);
+  if (room.abyssTick) clearInterval(room.abyssTick);
+  room.abyssTick = null;
+  room.rpsTimer = null;
   room.boardEventTimeout = null;
   clearBotTimers(room);
   room.game.endBoardEvent();
@@ -754,6 +886,19 @@ function scheduleBotAction(room: RoomRuntime, botId: string): void {
   runtime.timer = setTimeout(() => {
     runtime.timer = null;
     if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH")) return;
+    if (room.abyssEngine) {
+      const angle = Math.random() * Math.PI * 2;
+      room.abyssEngine.applyInput(botId, {
+        sequence: Date.now(),
+        moveX: Math.cos(angle) * .65,
+        moveY: Math.sin(angle) * .65,
+        aimX: Math.cos(angle + Math.PI),
+        aimY: Math.sin(angle + Math.PI),
+        shooting: true,
+      });
+      scheduleBotAction(room, botId);
+      return;
+    }
     if (!runBotSupportPower(room, botId, runtime)) {
       runBotPower(room, botId);
       if (room.genericEngine) {
@@ -922,6 +1067,8 @@ function maybeActivatePause(room: RoomRuntime): void {
   if (room.matchTimeout) clearTimeout(room.matchTimeout);
   room.matchTimeout = null;
   clearBotTimers(room);
+  if (room.abyssTick) clearInterval(room.abyssTick);
+  room.abyssTick = null;
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   room.boardEventTimeout = null;
   room.game.endBoardEvent();
@@ -946,8 +1093,23 @@ function resumeRoom(room: RoomRuntime): void {
   room.totalPausedMs += room.pausedAt ? Date.now() - room.pausedAt : 0;
   clearPauseState(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
+  if (room.abyssEngine) startAbyssLoop(room);
   emitRoomState(room);
   io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
+}
+
+function startAbyssLoop(room: RoomRuntime): void {
+  if (!room.abyssEngine || room.abyssTick) return;
+  let previous = Date.now();
+  room.abyssTick = setInterval(() => {
+    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.abyssEngine) return;
+    const now = Date.now();
+    room.abyssEngine.update((now - previous) / 1_000);
+    previous = now;
+    const snapshot = room.abyssEngine.snapshot(now);
+    io.to(room.code).volatile.emit("abyss:state", snapshot);
+    if (snapshot.completed) finishMatch(room, true);
+  }, 50);
 }
 
 function clearPauseState(room: RoomRuntime): void {
@@ -1090,6 +1252,7 @@ function shutdown(): void {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
+    if (room.abyssTick) clearInterval(room.abyssTick);
     clearBotTimers(room);
   }
   io.close(() => process.exit(0));

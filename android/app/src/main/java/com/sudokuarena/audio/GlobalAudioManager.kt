@@ -27,6 +27,7 @@ enum class MusicGenre(val label: String, val icon: String, val slug: String) {
 data class AudioUiState(
     val enabled: Boolean = true,
     val genre: MusicGenre = MusicGenre.PHONK,
+    val volume: Float = .35f,
     val preparing: Boolean = false,
 )
 
@@ -39,6 +40,7 @@ object GlobalAudioManager {
     private const val PREFS = "multi_arena_audio"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_GENRE = "genre"
+    private const val KEY_VOLUME = "volume"
     private var appContext: Context? = null
     private var player: MediaPlayer? = null
     private var toneGenerator: ToneGenerator? = null
@@ -58,6 +60,7 @@ object GlobalAudioManager {
         mutableState.value = AudioUiState(
             enabled = preferences.getBoolean(KEY_ENABLED, true),
             genre = genre,
+            volume = preferences.getFloat(KEY_VOLUME, .35f).coerceIn(0f, 1f),
         )
         toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 55)
     }
@@ -102,6 +105,14 @@ object GlobalAudioManager {
         if (mutableState.value.enabled && foreground) prepareTrack(genre)
     }
 
+    @Synchronized
+    fun setVolume(volume: Float) {
+        val safe = volume.coerceIn(0f, 1f)
+        mutableState.value = mutableState.value.copy(volume = safe)
+        player?.setVolume(safe, safe)
+        persist()
+    }
+
     fun play(sound: GameSound) {
         if (!mutableState.value.enabled) return
         val tone = when (sound) {
@@ -117,6 +128,7 @@ object GlobalAudioManager {
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()
             ?.putBoolean(KEY_ENABLED, current.enabled)
             ?.putString(KEY_GENRE, current.genre.name)
+            ?.putFloat(KEY_VOLUME, current.volume)
             ?.apply()
     }
 
@@ -138,7 +150,8 @@ object GlobalAudioManager {
                     )
                     setDataSource(loop.absolutePath)
                     isLooping = true
-                    setVolume(.27f, .27f)
+                    val volume = mutableState.value.volume
+                    setVolume(volume, volume)
                     prepare()
                 }
             }.onSuccess { ready ->

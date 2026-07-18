@@ -44,9 +44,11 @@ describe("motor genérico de puzzles", () => {
 
     const rummikub = createPuzzleBlueprint("RUMMIKUB", { seed: "hidden-results", difficulty: "EXPERT" });
     rummikub.board.forEach((row, y) => row.forEach((cell, x) => {
+      if (cell.isBlocked) return;
       assert.equal(cell.value, null);
-      assert.match(String(cell.meta.rule), /\?$/);
-      assert.ok(!String(cell.meta.rule).endsWith(String(rummikub.answers[y]![x])));
+      assert.ok(["RUN", "GROUP"].includes(String(cell.meta.meldType)));
+      assert.equal(cell.meta.rule, undefined);
+      assert.match(String(rummikub.answers[y]![x]), /^(RED|BLUE|GREEN|ORANGE):(1[0-3]|[1-9])$/);
     }));
   });
 

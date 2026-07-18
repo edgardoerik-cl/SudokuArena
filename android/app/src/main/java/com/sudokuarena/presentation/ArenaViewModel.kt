@@ -8,6 +8,7 @@ import com.sudokuarena.domain.BoardCell
 import com.sudokuarena.domain.ConqueredSection
 import com.sudokuarena.domain.GameRealtimeGateway
 import com.sudokuarena.domain.GameSnapshot
+import com.sudokuarena.domain.GameChatMessage
 import com.sudokuarena.domain.Player
 import com.sudokuarena.domain.PlayerRecordStore
 import com.sudokuarena.domain.RealtimeEvent
@@ -21,6 +22,7 @@ import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.GameType
 import com.sudokuarena.domain.PuzzleDifficulty
 import com.sudokuarena.domain.GenericBoardState
+import com.sudokuarena.domain.AbyssState
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
@@ -94,6 +96,14 @@ data class ArenaUiState(
     val secretClueCount: Int = 0,
     val secretChat: List<SecretChatUi> = emptyList(),
     val secretChatBlockedUntil: Long = 0,
+    val globalChat: List<GameChatMessage> = emptyList(),
+    val rpsRound: Int = 0,
+    val rpsEndsAt: Long = 0,
+    val rpsChoice: String? = null,
+    val rpsChoices: Map<String, String> = emptyMap(),
+    val rpsWinnerId: String? = null,
+    val rpsTie: Boolean = false,
+    val abyssState: AbyssState? = null,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -298,6 +308,20 @@ class ArenaViewModel(
 
     fun sendSecretChat(message: String) {
         if (message.isNotBlank()) gateway?.sendSecretChat(message.trim())
+    }
+
+    fun sendGlobalChat(message: String) {
+        if (!isSoloMode && message.isNotBlank()) gateway?.sendGlobalChat(message.trim())
+    }
+
+    fun sendAbyssInput(moveX: Float, moveY: Float, aimX: Float, aimY: Float, shooting: Boolean) {
+        gateway?.sendAbyssInput(System.nanoTime(), moveX, moveY, aimX, aimY, shooting)
+    }
+
+    fun chooseRps(choice: String) {
+        if (choice !in setOf("ROCK", "PAPER", "SCISSORS") || mutableState.value.rpsChoice != null) return
+        mutableState.update { it.copy(rpsChoice = choice) }
+        gateway?.chooseRps(choice)
     }
 
     fun selectGeneric(row: Int, column: Int) {
@@ -705,6 +729,28 @@ class ArenaViewModel(
             }
             is RealtimeEvent.SecretChatLocked -> mutableState.update {
                 it.copy(secretChatBlockedUntil = event.blockedUntil, message = "Chat bloqueado 10 segundos por mencionar una palabra del tablero")
+            }
+            is RealtimeEvent.GlobalChatReceived -> mutableState.update {
+                it.copy(globalChat = (it.globalChat + event.message).takeLast(40))
+            }
+            is RealtimeEvent.RpsStarted -> mutableState.update {
+                it.copy(
+                    rpsRound = event.round,
+                    rpsEndsAt = event.endsAt,
+                    rpsChoice = null,
+                    rpsChoices = emptyMap(),
+                    rpsWinnerId = null,
+                    rpsTie = false,
+                )
+            }
+            is RealtimeEvent.RpsResult -> mutableState.update {
+                it.copy(rpsChoices = event.choices, rpsWinnerId = event.winnerId, rpsTie = event.tie)
+            }
+            is RealtimeEvent.AbyssStateUpdated -> mutableState.update {
+                it.copy(
+                    abyssState = event.state,
+                    message = if (event.state.bossLevel) "JEFE · NIVEL ${event.state.level}" else it.message,
+                )
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }

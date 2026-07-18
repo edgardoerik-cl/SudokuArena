@@ -111,6 +111,35 @@ class LocalPuzzleEngine(
         }
         if (gameType == GameType.DOTS_AND_BOXES) return dotsMove(row, col, value, cell)
         if (gameType == GameType.SLITHERLINK) return slitherMove(row, col, value, cell)
+        if (gameType == GameType.RUMMIKUB) {
+            val payload = value as? Map<*, *> ?: return incorrect()
+            val tile = payload["tile"]?.toString()?.toIntOrNull() ?: return incorrect()
+            val color = payload["color"]?.toString()?.uppercase() ?: return incorrect()
+            if ("$color:$tile" != blueprint.answers[row][col]) return incorrect()
+            replace(
+                row,
+                col,
+                cell.copy(
+                    value = tile,
+                    isRevealed = true,
+                    ownerId = OWNER,
+                    meta = cell.meta + ("tileColor" to color),
+                ),
+            )
+            val meldComplete = board[row].filterNot { it.isBlocked }.all { it.ownerId != null }
+            return accept(if (meldComplete) 35 else 10)
+        }
+        if (gameType == GameType.NEXUS_ZERO) {
+            val payload = value as? Map<*, *> ?: return incorrect()
+            val targetRow = payload["targetRow"]?.toString()?.toIntOrNull() ?: return incorrect()
+            val targetCol = payload["targetCol"]?.toString()?.toIntOrNull() ?: return incorrect()
+            val target = board.getOrNull(targetRow)?.getOrNull(targetCol) ?: return incorrect()
+            if (target.ownerId != null || kotlin.math.abs(row - targetRow) + kotlin.math.abs(col - targetCol) != 1) return incorrect()
+            if ((cell.value as? Number)?.toInt()?.plus((target.value as? Number)?.toInt() ?: 99) != 0) return incorrect()
+            replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
+            replace(targetRow, targetCol, target.copy(ownerId = OWNER, isRevealed = true))
+            return accept(24)
+        }
 
         val expected = blueprint.answers[row][col]
         val normalized = when (expected) {
@@ -124,7 +153,7 @@ class LocalPuzzleEngine(
             value = if (gameType == GameType.HITORI) cell.value else expected,
             isRevealed = true, isBlocked = gameType == GameType.HITORI, ownerId = OWNER,
         ))
-        return accept(if (gameType == GameType.RUMMIKUB) 15 else 10)
+        return accept(10)
     }
 
     private fun dotsMove(row: Int, col: Int, value: Any?, cell: GenericCell): LocalPuzzleMoveResult {
@@ -187,7 +216,9 @@ class LocalPuzzleEngine(
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
         GameType.RUMMIKUB -> logicTiles(); GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges(); GameType.SLITHERLINK -> slitherlink()
         GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
-        GameType.CAPITAL_ARENA -> capitalArena(); GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
+        GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
+        GameType.ABYSS_ARENA -> result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
+        GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }
 
     private fun mines(): Blueprint { val size = size(8,10,12,14); val count=(size*size*when(difficulty){PuzzleDifficulty.EASY->.10;PuzzleDifficulty.MEDIUM->.14;PuzzleDifficulty.HARD->.18;PuzzleDifficulty.EXPERT->.22}).toInt(); val mines=(0 until size*size).shuffled(random).take(count).toSet(); return result(matrix(size,size){_,_->GenericCell()}, matrix(size,size){r,c->r*size+c in mines}, mapOf("mineCount" to count)) }
@@ -268,15 +299,34 @@ class LocalPuzzleEngine(
     private fun mathdoku(): Blueprint { val size=size(4,5,6,7); val symbols=(1..size).shuffled(random); val answers=matrix<Any?>(size,size){r,c->symbols[(r+c)%size]}; val board=matrix(size,size){r,c->val start=c-c%2;val target=(answers[r][start] as Int)+(answers[r][minOf(size-1,start+1)] as Int);GenericCell(meta=mapOf("cageId" to "$r:$start","cageLabel" to if(c==start)"$target+" else "","cageStart" to(c==start),"cageEnd" to(c==minOf(size-1,start+1))))}; return result(board,answers,mapOf("instructions" to "Usa 1 a $size y cumple las jaulas.")) }
     private fun hitori(): Blueprint { val size=size(5,6,7,8); val black=mutableSetOf<String>(); for(index in(0 until size*size).shuffled(random)){val r=index/size;val c=index%size;if(black.size>=size(4,6,9,12))break;if(listOf("${r-1}:$c","${r+1}:$c","$r:${c-1}","$r:${c+1}").none{it in black})black+="$r:$c"}; val values=matrix(size,size){r,c->((r+c)%size)+1}.map{it.toMutableList()};black.forEach{val(r,c)=it.split(':').map(String::toInt);values[r][c]=values[r][(c+1)%size]};val answers=matrix<Any?>(size,size){r,c->"$r:$c" in black};return result(values.map{row->row.map{GenericCell(value=it,isRevealed=true)}},answers,mapOf("instructions" to "Apaga duplicados sin tocar negras por sus lados.")) }
     private fun logicTiles(): Blueprint {
-        val rows = size(4, 5, 6, 7); val cols = size(5, 6, 7, 8)
-        val operations = if (difficulty == PuzzleDifficulty.EASY) listOf("SUM") else listOf("SUM", "AND", "OR", "XOR")
-        val challenges = matrix(rows, cols) { _, _ -> logicChallenge(operations) }
-        val answers = challenges.map { row -> row.map { it.first as Any? } }
         val colors = listOf("RED", "BLUE", "GREEN", "ORANGE")
-        val board = challenges.mapIndexed { row, cells -> cells.map { (_, rule) ->
-            GenericCell(meta = mapOf("tileColor" to colors[row % colors.size], "rule" to rule))
-        } }
-        return result(board, answers, mapOf("instructions" to "Deduce la ficha que completa cada operación; la respuesta permanece oculta."))
+        val rows = size(4, 5, 6, 7)
+        val cols = 5
+        val answers = MutableList(rows) { MutableList<Any?>(cols) { null } }
+        val board = MutableList(rows) { MutableList(cols) { blocked() } }
+        repeat(rows) { row ->
+            val meldLength = if (difficulty == PuzzleDifficulty.EASY) 3 else random.nextInt(3, 5)
+            if (row % 2 == 0) {
+                val color = colors.random(random)
+                val start = random.nextInt(1, 15 - meldLength)
+                repeat(meldLength) { col ->
+                    val tile = start + col
+                    answers[row][col] = "$color:$tile"
+                    board[row][col] = GenericCell(meta = mapOf("meldId" to row, "meldType" to "RUN", "meldLength" to meldLength))
+                }
+            } else {
+                val tile = random.nextInt(1, 14)
+                colors.shuffled(random).take(meldLength).forEachIndexed { col, color ->
+                    answers[row][col] = "$color:$tile"
+                    board[row][col] = GenericCell(meta = mapOf("meldId" to row, "meldType" to "GROUP", "meldLength" to meldLength))
+                }
+            }
+        }
+        return result(
+            board.map { it.toList() },
+            answers.map { it.toList() },
+            mapOf("instructions" to "Completa escaleras del mismo color o grupos del mismo número con colores distintos."),
+        )
     }
 
     private fun logicChallenge(operations: List<String>): Pair<Int, String> {
@@ -338,7 +388,8 @@ class LocalPuzzleEngine(
         val second = random.nextInt(12, 100)
         val total = first + second
         val digits = ("$first$second$total").map(Char::digitToInt).distinct()
-        val letters = "ABCDEFGHIJKLMNPQRSTUVWXYZ".toList().shuffled(random).take(digits.size)
+        val vowels = listOf('A', 'E')
+        val letters = (vowels + "BCDFGHIJKLMNPQRSTUVWXYZ".toList().shuffled(random)).take(digits.size)
         val digitLetters = digits.zip(letters).toMap()
 
         fun encode(value: Int): String = value.toString()
@@ -346,7 +397,9 @@ class LocalPuzzleEngine(
             .joinToString("")
 
         val answers: List<List<Any?>> = listOf(digits.map { it })
-        val revealed = letters.indices.shuffled(random).take(if (difficulty == PuzzleDifficulty.EASY) 3 else 2).toSet()
+        val revealCount = if (difficulty == PuzzleDifficulty.EASY) 3 else 2
+        val vowelIndexes = letters.indices.filter { letters[it] in vowels }
+        val revealed = (vowelIndexes + letters.indices.filterNot(vowelIndexes::contains).shuffled(random)).take(revealCount).toSet()
         val board = listOf(
             letters.mapIndexed { index, letter ->
                 GenericCell(
@@ -364,6 +417,28 @@ class LocalPuzzleEngine(
                 "equation" to "${encode(first)} + ${encode(second)} = ${encode(total)}",
                 "instructions" to "Cada letra representa un dígito diferente. Las equivalencias doradas son pistas iniciales.",
             ),
+        )
+    }
+
+    private fun nexusZero(): Blueprint {
+        val rows = size(4, 6, 6, 8)
+        val cols = 6
+        val board = MutableList(rows) { MutableList(cols) { GenericCell(isRevealed = true, meta = mapOf("charge" to true)) } }
+        val answers = MutableList(rows) { MutableList<Any?>(cols) { null } }
+        repeat(rows) { row ->
+            for (col in 0 until cols step 2) {
+                val charge = random.nextInt(1, 10) * if (random.nextBoolean()) 1 else -1
+                val reverse = random.nextBoolean()
+                board[row][col] = board[row][col].copy(value = if (reverse) -charge else charge)
+                board[row][col + 1] = board[row][col + 1].copy(value = if (reverse) charge else -charge)
+                answers[row][col] = "$row:${col + 1}"
+                answers[row][col + 1] = "$row:$col"
+            }
+        }
+        return result(
+            board.map { it.toList() },
+            answers.map { it.toList() },
+            mapOf("instructions" to "Nexo Cero: enlaza dos cargas vecinas que sumen 0."),
         )
     }
 

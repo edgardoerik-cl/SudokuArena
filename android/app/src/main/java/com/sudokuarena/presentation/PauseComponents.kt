@@ -19,12 +19,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -40,6 +42,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sudokuarena.domain.RoomPhase
+
+@Composable
+fun ConfirmExitDialog(visible: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    if (!visible) return
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Rendirse y salir?") },
+        text = { Text("La partida continuará para los demás jugadores y perderás tu progreso actual.") },
+        confirmButton = { Button(onClick = onConfirm) { Text("Sí, salir") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Seguir jugando") } },
+    )
+}
 
 /** Barra fija: Salir conserva su slot aun en pantallas angostas. */
 @Composable

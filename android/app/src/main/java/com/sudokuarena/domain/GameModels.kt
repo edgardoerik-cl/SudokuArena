@@ -40,8 +40,9 @@ enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
     NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM, CROSS_LETTERS, SECRET_CODE, CAPITAL_ARENA,
+    NEXUS_ZERO, ABYSS_ARENA,
 }
-enum class RoomPhase { LOBBY, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
+enum class RoomPhase { LOBBY, RPS, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
 data class RoomConfig(
     val gameType: GameType = GameType.SUDOKU,
@@ -72,6 +73,33 @@ data class GenericBoardState(
     val meta: Map<String, Any?> = emptyMap(),
 )
 
+data class AbyssActor(
+    val id: String,
+    val kind: String,
+    val x: Float,
+    val y: Float,
+    val hp: Float,
+    val maxHp: Float,
+    val colorHex: String? = null,
+    val name: String? = null,
+)
+
+data class AbyssProjectile(val id: String, val x: Float, val y: Float)
+data class AbyssItem(val id: String, val x: Float, val y: Float, val type: String)
+data class AbyssObstacle(val x: Float, val y: Float, val width: Float, val height: Float)
+data class AbyssState(
+    val serverTime: Long,
+    val tick: Long,
+    val level: Int,
+    val maxLevel: Int,
+    val bossLevel: Boolean,
+    val completed: Boolean,
+    val actors: List<AbyssActor>,
+    val projectiles: List<AbyssProjectile>,
+    val items: List<AbyssItem>,
+    val obstacles: List<AbyssObstacle>,
+)
+
 data class RoomState(
     val roomCode: String,
     val hostPlayerId: String,
@@ -98,6 +126,13 @@ data class MatchResultEntry(
     val role: String,
     val isBot: Boolean = false,
     val maxCombo: Int = 0,
+)
+
+data class GameChatMessage(
+    val id: String,
+    val playerId: String,
+    val message: String,
+    val sentAt: Long,
 )
 
 enum class BoardEventType { MIRROR_HOUR, GOLDEN_CELLS }
@@ -176,6 +211,10 @@ sealed interface RealtimeEvent {
     ) : RealtimeEvent
     data class SecretChatMessage(val playerId: String, val message: String, val penalized: Boolean) : RealtimeEvent
     data class SecretChatLocked(val blockedUntil: Long) : RealtimeEvent
+    data class GlobalChatReceived(val message: GameChatMessage) : RealtimeEvent
+    data class RpsStarted(val round: Int, val endsAt: Long) : RealtimeEvent
+    data class RpsResult(val round: Int, val choices: Map<String, String>, val winnerId: String?, val tie: Boolean) : RealtimeEvent
+    data class AbyssStateUpdated(val state: AbyssState) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 
@@ -202,6 +241,9 @@ interface GameRealtimeGateway {
     )
     fun sendReaction(emojiId: String)
     fun sendSecretChat(message: String)
+    fun sendGlobalChat(message: String)
+    fun chooseRps(choice: String)
+    fun sendAbyssInput(sequence: Long, moveX: Float, moveY: Float, aimX: Float, aimY: Float, shooting: Boolean)
     fun requestPause()
     fun respondPause(accepted: Boolean)
     fun resumePausedGame()

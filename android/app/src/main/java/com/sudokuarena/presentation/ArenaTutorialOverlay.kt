@@ -147,8 +147,8 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⛓", "Mantén conectado", "Las casillas apagadas no deben tocarse por sus lados."),
     )
     GameType.RUMMIKUB -> listOf(
-        TutorialStep("A∧B", "Lee la regla", "Cada casilla muestra una condición algebraica o lógica AND, OR o XOR."),
-        TutorialStep("123", "Elige la ficha", "Coloca el valor que hace verdadera la regla de la casilla."),
+        TutorialStep("7·7·7", "Forma grupos", "Combina el mismo número en tres o cuatro colores diferentes."),
+        TutorialStep("5·6·7", "Forma escaleras", "Combina al menos tres números consecutivos del mismo color."),
     )
     GameType.NURIKABE -> listOf(
         TutorialStep("●≈", "Separa islas", "Los números indican el tamaño exacto de cada isla blanca."),
@@ -180,6 +180,15 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("🎲", "Lanza dos dados", "En tu turno avanza por la arena y resuelve la casilla donde aterrizas."),
         TutorialStep("🏙", "Compra y mejora", "Adquiere propiedades libres y aumenta su nivel para cobrar rentas mayores."),
         TutorialStep("⚡", "Administra tu capital", "Cobra al pasar por Salida, evita la quiebra y termina con el patrimonio más alto."),
+    )
+    GameType.NEXUS_ZERO -> listOf(
+        TutorialStep("+4 −4", "Neutraliza cargas", "Toca dos nodos vecinos cuyos valores sumen exactamente cero."),
+        TutorialStep("⚡", "Encadena enlaces", "Resuelve pares rápidamente para multiplicar tu dominio y energía."),
+    )
+    GameType.ABYSS_ARENA -> listOf(
+        TutorialStep("◉", "Muévete y dispara", "Usa el lado izquierdo para moverte y arrastra a la derecha para apuntar y disparar."),
+        TutorialStep("20", "Desciende el Abismo", "Supera 20 cámaras procedurales. Cada quinto nivel contiene un jefe."),
+        TutorialStep("✦", "Comparte mejoras", "Recoge daño, cadencia y salud; coopera para mantener vivo al equipo."),
     )
 }
 

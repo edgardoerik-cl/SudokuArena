@@ -1,10 +1,14 @@
 package com.sudokuarena.presentation
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +31,7 @@ import com.sudokuarena.audio.MusicGenre
 fun AudioControls(modifier: Modifier = Modifier, compact: Boolean = false) {
     val audio by GlobalAudioManager.state.collectAsState()
     var menuOpen by remember { mutableStateOf(false) }
+    var volumeOpen by remember { mutableStateOf(false) }
     Row(modifier) {
         AudioCircleButton(
             text = if (audio.enabled) "🎵" else "🔇",
@@ -35,6 +40,19 @@ fun AudioControls(modifier: Modifier = Modifier, compact: Boolean = false) {
         )
         if (!compact) {
             AudioCircleButton("⏭", "Siguiente canción", GlobalAudioManager::nextTrack)
+            androidx.compose.foundation.layout.Box {
+                AudioCircleButton("🔊", "Ajustar volumen") { volumeOpen = true }
+                DropdownMenu(expanded = volumeOpen, onDismissRequest = { volumeOpen = false }) {
+                    Column(Modifier.width(230.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        Text("Volumen ${(audio.volume * 100).toInt()} %")
+                        Slider(
+                            value = audio.volume,
+                            onValueChange = GlobalAudioManager::setVolume,
+                            valueRange = 0f..1f,
+                        )
+                    }
+                }
+            }
         }
         Surface(shape = androidx.compose.foundation.shape.CircleShape, color = Color(0xFFF8FAFF), shadowElevation = 4.dp) {
             IconButton(

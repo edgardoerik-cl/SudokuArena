@@ -72,6 +72,11 @@ export class GenericPuzzleEngine {
     this.meta = blueprint.meta;
   }
 
+  setFirstPlayer(playerId: string, now = Date.now()): void {
+    this.activePlayerId = playerId;
+    this.turnEndsAt = now + Number(this.meta.turnSeconds ?? 60) * 1_000;
+  }
+
   snapshot(game: ArenaGame, now = Date.now()): GenericBoardState {
     if (this.gameType === "CROSS_LETTERS") this.syncLetterPlayers(game, now);
     if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) this.syncTurnPlayers(game);
@@ -245,6 +250,39 @@ export class GenericPuzzleEngine {
         val: { word: correct ? placement.word : `${placement.word}X`, endRow: placement.endRow, endCol: placement.endCol }
       };
     }
+    if (this.gameType === "RUMMIKUB") {
+      const target = this.board.flatMap((row, rowIndex) =>
+        row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex }))
+      ).find(({ cell, row, col }) => !cell.isBlocked && cell.ownerId === null && this.answers[row]?.[col] !== null);
+      if (!target) return null;
+      const [color, rawTile] = String(this.answers[target.row]![target.col]).split(":");
+      const tile = Number(rawTile);
+      return {
+        requestId: `rummikub-bot-${randomUUID()}`,
+        row: target.row,
+        col: target.col,
+        val: { color, tile: Math.random() <= accuracy ? tile : ((tile % 13) + 1) },
+      };
+    }
+    if (this.gameType === "NEXUS_ZERO") {
+      for (let row = 0; row < this.board.length; row += 1) {
+        for (let col = 0; col < this.board[row]!.length; col += 1) {
+          if (this.board[row]![col]!.ownerId !== null) continue;
+          const [targetRow, targetCol] = String(this.answers[row]![col]).split(":").map(Number);
+          if (this.board[targetRow!]?.[targetCol!]?.ownerId === null) {
+            return {
+              requestId: `nexus-bot-${randomUUID()}`,
+              row,
+              col,
+              val: Math.random() <= accuracy
+                ? { targetRow, targetCol }
+                : { targetRow: row, targetCol: (col + 2) % this.board[row]!.length },
+            };
+          }
+        }
+      }
+      return null;
+    }
     const candidates: Array<{ row: number; col: number }> = [];
     for (let row = 0; row < this.board.length; row += 1) {
       for (let col = 0; col < this.board[row]!.length; col += 1) {
@@ -285,6 +323,16 @@ export class GenericPuzzleEngine {
   revealMove(row: number, col: number): GenericMove | null {
     if (this.gameType === "CAPITAL_ARENA") return null;
     if (!this.board[row]?.[col] || this.board[row]![col]!.ownerId !== null) return null;
+    if (this.gameType === "NEXUS_ZERO") {
+      const [targetRow, targetCol] = String(this.answers[row]![col]).split(":").map(Number);
+      if (!this.board[targetRow!]?.[targetCol!] || this.board[targetRow!]![targetCol!]!.ownerId !== null) return null;
+      return {
+        requestId: `nexus-reveal-${randomUUID()}`,
+        row,
+        col,
+        val: { targetRow, targetCol },
+      };
+    }
     let target = { row, col };
     if (this.gameType === "MINESWEEPER" && this.answers[row]![col] === true) {
       const safe = this.findFirstSafeCell();
@@ -407,16 +455,33 @@ export class GenericPuzzleEngine {
     if (this.gameType === "RUMMIKUB") {
       const payload = typeof move.val === "object" && move.val !== null ? move.val as Record<string, unknown> : { tile: move.val };
       const tile = Number(payload.tile);
-      const operation = String(payload.operation ?? "PLACE").toUpperCase();
-      if (!Number.isInteger(tile) || tile < 1 || tile > 13 || !["PLACE", "MOVE", "GROUP", "RUN"].includes(operation)) {
+      const color = String(payload.color ?? "").toUpperCase();
+      if (!Number.isInteger(tile) || tile < 1 || tile > 13 || !["RED", "BLUE", "GREEN", "ORANGE"].includes(color)) {
         return { correct: false };
       }
-      if (operation === "PLACE" && tile !== this.answers[move.row]![move.col]) return { correct: false };
+      if (`${color}:${tile}` !== this.answers[move.row]![move.col]) return { correct: false };
       cell.value = tile;
       cell.ownerId = playerId;
       cell.isRevealed = true;
-      cell.meta.lastOperation = operation;
-      return { correct: true, points: operation === "PLACE" ? 10 : 5 };
+      cell.meta.tileColor = color;
+      const meldLength = Number(cell.meta.meldLength ?? 3);
+      const completedMeld = this.board[move.row]!.slice(0, meldLength).every((target) => target.ownerId !== null);
+      return { correct: true, points: completedMeld ? 35 : 10 };
+    }
+    if (this.gameType === "NEXUS_ZERO") {
+      const payload = typeof move.val === "object" && move.val !== null ? move.val as Record<string, unknown> : {};
+      const targetRow = Number(payload.targetRow);
+      const targetCol = Number(payload.targetCol);
+      const target = this.board[targetRow]?.[targetCol];
+      if (!target || target.ownerId !== null) return { correct: false };
+      const orthogonal = Math.abs(move.row - targetRow) + Math.abs(move.col - targetCol) === 1;
+      const sum = Number(cell.value) + Number(target.value);
+      if (!orthogonal || sum !== 0) return { correct: false };
+      cell.ownerId = playerId;
+      target.ownerId = playerId;
+      cell.isRevealed = true;
+      target.isRevealed = true;
+      return { correct: true, points: 24 };
     }
 
     const expected = this.answers[move.row]![move.col]!;
