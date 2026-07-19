@@ -11,8 +11,9 @@
   temporizadores; ningún evento se transmite a otras salas.
 
 La configuración online acepta `gameType`: `SUDOKU`, `MINESWEEPER`,
-`WORD_SEARCH`, `CROSSWORD`, `NONOGRAM`, `DOTS_AND_BOXES`, `KAKURO`,
-`MATHDOKU`, `HITORI` o `RUMMIKUB`. Todos cuentan con práctica solitaria offline.
+`WORD_SEARCH`, `CROSSWORD`, `TIC_TAC_TOE`, `DOTS_AND_BOXES`, `KAKURO`,
+`MATHDOKU`, `HITORI`, `CHESS_TACTICS`, `TETRIS_ARENA`, `PACMAN_ARENA`
+o `CHECKERS`. Los modos de acción y estrategia compleja usan servidor autoritativo.
 
 ## Motor matricial genérico
 

@@ -3,14 +3,14 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `7.0.0` incorpora carruseles alfabéticos animados, favoritos persistentes con DataStore
+La versión `8.0.0` incorpora carruseles alfabéticos con portadas locales, favoritos persistentes con DataStore
 y una interfaz adaptable que cambia en tiempo real
 entre orientación vertical y horizontal, chat global, Piedra/Papel/Tijeras para
 decidir el primer turno y veintiún juegos:
-Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
-Kakuro, Mathdoku, Hitori, Rummikub Arcade Match, Nurikabe, Bridges, Conecta Puntos Neón,
-El Ahorcado, Flechas en Fuga, Salto Rítmico, Letras Cruzadas, Código Secreto,
-Capital Arena, Nexo Cero y Abismo Arena. Todos comparten salas, colores de conquista,
+Sudoku, Buscaminas, Sopa de Letras, Crucigramas, El Gato, Timbiriche,
+Kakuro, Mathdoku, Hitori, Chess Tactics RPG, Nurikabe, Bridges, Tetris Arena,
+El Ahorcado, Flechas en Fuga, Pac-Man Arena, Letras Cruzadas, Código Secreto,
+Capital Arena, Nexo Cero y Damas Clásicas. Todos comparten salas, colores de conquista,
 Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
 
 Los tableros se generan desde una semilla distinta y admiten dificultad
@@ -37,9 +37,9 @@ siguiente, selector de género y volumen ajustable. Autores y fuentes:
 [`docs/music-credits.md`](docs/music-credits.md).
 Capital Arena admite cuatro participantes, cartas de Suerte con movimiento,
 bonos, multas o cárcel, fichas neón reacomodables y un tablero horizontal al 75 % con estadísticas laterales.
-Abismo Arena 3D usa una matriz autoritativa y raycasting DDA en Compose para
-proyectar pasillos en primera persona. Salto Rítmico sincroniza plataformas a
-128 BPM, cámara vertical y tres vidas mediante un loop de servidor a 20 Hz.
+Tetris Arena usa el randomizador 7-bag y envía líneas basura por combos.
+Pac-Man Arena sincroniza un tilemap autoritativo y cuatro fantasmas con estados
+Chase, Scatter y Frightened, interpolados a 60 FPS en Compose.
 
 ## Estructura
 
@@ -65,7 +65,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v7.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

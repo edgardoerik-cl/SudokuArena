@@ -22,7 +22,6 @@ import com.sudokuarena.domain.MatchResultEntry
 import com.sudokuarena.domain.GameType
 import com.sudokuarena.domain.PuzzleDifficulty
 import com.sudokuarena.domain.GenericBoardState
-import com.sudokuarena.domain.AbyssState
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
@@ -103,8 +102,8 @@ data class ArenaUiState(
     val rpsChoices: Map<String, String> = emptyMap(),
     val rpsWinnerId: String? = null,
     val rpsTie: Boolean = false,
-    val abyssState: AbyssState? = null,
-    val rhythmState: com.sudokuarena.domain.RhythmState? = null,
+    val tetrisState: com.sudokuarena.domain.TetrisArenaState? = null,
+    val pacmanState: com.sudokuarena.domain.PacmanArenaState? = null,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -315,12 +314,12 @@ class ArenaViewModel(
         if (!isSoloMode && message.isNotBlank()) gateway?.sendGlobalChat(message.trim())
     }
 
-    fun sendAbyssInput(moveX: Float, moveY: Float, aimX: Float, aimY: Float, shooting: Boolean) {
-        gateway?.sendAbyssInput(System.nanoTime(), moveX, moveY, aimX, aimY, shooting)
+    fun sendTetrisInput(action: String) {
+        gateway?.sendTetrisInput(action)
     }
 
-    fun sendRhythmInput(moveX: Float) {
-        gateway?.sendRhythmInput(System.nanoTime(), moveX)
+    fun sendPacmanInput(direction: String) {
+        gateway?.sendPacmanInput(direction)
     }
 
     fun chooseRps(choice: String) {
@@ -349,7 +348,7 @@ class ArenaViewModel(
         val current = mutableState.value
         if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.SLITHERLINK, GameType.WORD_SEARCH))) return
+        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.TETRIS_ARENA, GameType.WORD_SEARCH))) return
         submitGenericMove(CellPosition(row, column), value)
         if (current.gameType == GameType.NEXUS_ZERO) {
             mutableState.update { it.copy(selected = null) }
@@ -754,14 +753,11 @@ class ArenaViewModel(
             is RealtimeEvent.RpsResult -> mutableState.update {
                 it.copy(rpsChoices = event.choices, rpsWinnerId = event.winnerId, rpsTie = event.tie)
             }
-            is RealtimeEvent.AbyssStateUpdated -> mutableState.update {
-                it.copy(
-                    abyssState = event.state,
-                    message = if (event.state.bossLevel) "JEFE · NIVEL ${event.state.level}" else it.message,
-                )
+            is RealtimeEvent.TetrisStateUpdated -> mutableState.update {
+                it.copy(tetrisState = event.state, serverNowMs = event.state.serverTime)
             }
-            is RealtimeEvent.RhythmStateUpdated -> mutableState.update {
-                it.copy(rhythmState = event.state, serverNowMs = event.state.serverTime)
+            is RealtimeEvent.PacmanStateUpdated -> mutableState.update {
+                it.copy(pacmanState = event.state, serverNowMs = event.state.serverTime)
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }

@@ -11,8 +11,7 @@ import {
   createRandomSolution
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
-import { AbyssEngine, type AbyssInput } from "./action/abyssEngine.js";
-import { RhythmEngine, type RhythmInput } from "./action/rhythmEngine.js";
+import { PacmanArenaEngine, TetrisArenaEngine, type PacmanDirection, type TetrisAction } from "./action/arcadeEngines.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import { GenericPuzzleEngine } from "./puzzles/engine.js";
 import { GAME_TYPES, type GameType, type GenericMove, type PuzzleDifficulty } from "./puzzles/types.js";
@@ -53,10 +52,10 @@ interface RoomRuntime {
   rematchVotes: Set<string>;
   suddenDeath: boolean;
   genericEngine: GenericPuzzleEngine | null;
-  abyssEngine: AbyssEngine | null;
-  abyssTick: NodeJS.Timeout | null;
-  rhythmEngine: RhythmEngine | null;
-  rhythmTick: NodeJS.Timeout | null;
+  tetrisEngine: TetrisArenaEngine | null;
+  tetrisTick: NodeJS.Timeout | null;
+  pacmanEngine: PacmanArenaEngine | null;
+  pacmanTick: NodeJS.Timeout | null;
   pauseRequesterId: string | null;
   pauseVotes: Set<string>;
   pauseNoVotes: Set<string>;
@@ -157,7 +156,7 @@ io.on("connection", (socket) => {
     room.config = {
       gameType,
       powersEnabled: payload.powersEnabled,
-      teamMode: gameType === "ABYSS_ARENA" || gameType === "RHYTHM_JUMP" ? "FFA" : teamMode,
+      teamMode: gameType === "TETRIS_ARENA" || gameType === "PACMAN_ARENA" ? "FFA" : teamMode,
       tileType,
       botDifficulty,
       puzzleDifficulty,
@@ -289,16 +288,16 @@ io.on("connection", (socket) => {
     processGenericMove(room, playerId, payload, socket);
   });
 
-  socket.on("abyss:input", (payload: Partial<AbyssInput>) => {
+  socket.on("tetris:input", (payload: { action?: TetrisAction }) => {
     const room = roomFor(socket);
-    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "ABYSS_ARENA" || !room.abyssEngine) return;
-    room.abyssEngine.applyInput(playerId, payload);
+    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "TETRIS_ARENA" || !room.tetrisEngine || !payload?.action) return;
+    room.tetrisEngine.input(playerId, payload.action);
   });
 
-  socket.on("rhythm:input", (payload: Partial<RhythmInput>) => {
+  socket.on("pacman:input", (payload: { direction?: PacmanDirection }) => {
     const room = roomFor(socket);
-    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "RHYTHM_JUMP" || !room.rhythmEngine) return;
-    room.rhythmEngine.applyInput(playerId, payload);
+    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "PACMAN_ARENA" || !room.pacmanEngine || !payload?.direction) return;
+    room.pacmanEngine.input(playerId, payload.direction);
   });
 
   socket.on("use_power", (payload: PowerProposal) => {
@@ -452,10 +451,10 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     rematchVotes: new Set(),
     suddenDeath: false,
     genericEngine: null,
-    abyssEngine: null,
-    abyssTick: null,
-    rhythmEngine: null,
-    rhythmTick: null,
+    tetrisEngine: null,
+    tetrisTick: null,
+    pacmanEngine: null,
+    pacmanTick: null,
     pauseRequesterId: null,
     pauseVotes: new Set(),
     pauseNoVotes: new Set(),
@@ -519,8 +518,8 @@ function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
     if (room.rpsTimer) clearTimeout(room.rpsTimer);
-    if (room.abyssTick) clearInterval(room.abyssTick);
-    if (room.rhythmTick) clearInterval(room.rhythmTick);
+    if (room.tetrisTick) clearInterval(room.tetrisTick);
+    if (room.pacmanTick) clearInterval(room.pacmanTick);
     clearBotTimers(room);
     rooms.delete(room.code);
     return;
@@ -701,31 +700,23 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   room.endsAt = room.startedAt + matchDurationMs;
   if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
   else room.game.startMatch(room.config, resolveBossPlayerId(room));
-  room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "ABYSS_ARENA" || room.config.gameType === "RHYTHM_JUMP"
+  room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "TETRIS_ARENA" || room.config.gameType === "PACMAN_ARENA"
     ? null
     : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
         seed: `${room.code}-${room.startedAt}`,
         difficulty: room.config.puzzleDifficulty
       });
-  room.abyssEngine = room.config.gameType === "ABYSS_ARENA"
-    ? new AbyssEngine(
-        `${room.code}-${room.startedAt}`,
-        room.game.snapshot().players.map(({ id, name, color, isBot }) => ({ id, name, colorHex: color, isBot })),
-      )
-    : null;
-  room.rhythmEngine = room.config.gameType === "RHYTHM_JUMP"
-    ? new RhythmEngine(
-        `${room.code}-${room.startedAt}`,
-        room.game.snapshot().players.map(({ id, name, color, isBot }) => ({ id, name, colorHex: color, isBot })),
-      )
-    : null;
+  room.tetrisEngine = room.config.gameType === "TETRIS_ARENA" ? new TetrisArenaEngine() : null;
+  room.pacmanEngine = room.config.gameType === "PACMAN_ARENA" ? new PacmanArenaEngine() : null;
+  room.tetrisEngine?.syncPlayers(room.game.snapshot().players);
+  room.pacmanEngine?.syncPlayers(room.game.snapshot().players);
   if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
   emitRoomState(room);
   emitState(room);
   emitGenericState(room);
   io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
-  if (room.abyssEngine) startAbyssLoop(room);
-  if (room.rhythmEngine) startRhythmLoop(room);
+  if (room.tetrisEngine) startTetrisLoop(room);
+  if (room.pacmanEngine) startPacmanLoop(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
@@ -746,10 +737,10 @@ function finishMatch(room: RoomRuntime, force = false): void {
   room.endsAt = Date.now();
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   if (room.rpsTimer) clearTimeout(room.rpsTimer);
-  if (room.abyssTick) clearInterval(room.abyssTick);
-  room.abyssTick = null;
-  if (room.rhythmTick) clearInterval(room.rhythmTick);
-  room.rhythmTick = null;
+  if (room.tetrisTick) clearInterval(room.tetrisTick);
+  room.tetrisTick = null;
+  if (room.pacmanTick) clearInterval(room.pacmanTick);
+  room.pacmanTick = null;
   room.rpsTimer = null;
   room.boardEventTimeout = null;
   clearBotTimers(room);
@@ -914,16 +905,15 @@ function scheduleBotAction(room: RoomRuntime, botId: string): void {
   runtime.timer = setTimeout(() => {
     runtime.timer = null;
     if (rooms.get(room.code) !== room || (room.phase !== "PLAYING" && room.phase !== "SUDDEN_DEATH")) return;
-    if (room.abyssEngine) {
-      const angle = Math.random() * Math.PI * 2;
-      room.abyssEngine.applyInput(botId, {
-        sequence: Date.now(),
-        moveX: Math.cos(angle) * .65,
-        moveY: Math.sin(angle) * .65,
-        aimX: Math.cos(angle + Math.PI),
-        aimY: Math.sin(angle + Math.PI),
-        shooting: true,
-      });
+    if (room.tetrisEngine) {
+      const action = (["LEFT", "RIGHT", "ROTATE", "SOFT_DROP", "HARD_DROP"] as TetrisAction[])[Math.floor(Math.random() * 5)]!;
+      room.tetrisEngine.input(botId, action);
+      scheduleBotAction(room, botId);
+      return;
+    }
+    if (room.pacmanEngine) {
+      const direction = (["UP", "RIGHT", "DOWN", "LEFT"] as PacmanDirection[])[Math.floor(Math.random() * 4)]!;
+      room.pacmanEngine.input(botId, direction);
       scheduleBotAction(room, botId);
       return;
     }
@@ -1095,10 +1085,10 @@ function maybeActivatePause(room: RoomRuntime): void {
   if (room.matchTimeout) clearTimeout(room.matchTimeout);
   room.matchTimeout = null;
   clearBotTimers(room);
-  if (room.abyssTick) clearInterval(room.abyssTick);
-  room.abyssTick = null;
-  if (room.rhythmTick) clearInterval(room.rhythmTick);
-  room.rhythmTick = null;
+  if (room.tetrisTick) clearInterval(room.tetrisTick);
+  room.tetrisTick = null;
+  if (room.pacmanTick) clearInterval(room.pacmanTick);
+  room.pacmanTick = null;
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   room.boardEventTimeout = null;
   room.game.endBoardEvent();
@@ -1123,42 +1113,34 @@ function resumeRoom(room: RoomRuntime): void {
   room.totalPausedMs += room.pausedAt ? Date.now() - room.pausedAt : 0;
   clearPauseState(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
-  if (room.abyssEngine) startAbyssLoop(room);
-  if (room.rhythmEngine) startRhythmLoop(room);
+  if (room.tetrisEngine) startTetrisLoop(room);
+  if (room.pacmanEngine) startPacmanLoop(room);
   emitRoomState(room);
   io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
 }
 
-function startAbyssLoop(room: RoomRuntime): void {
-  if (!room.abyssEngine || room.abyssTick) return;
-  let previous = Date.now();
-  room.abyssTick = setInterval(() => {
-    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.abyssEngine) return;
-    const now = Date.now();
-    room.abyssEngine.update((now - previous) / 1_000);
-    previous = now;
-    const snapshot = room.abyssEngine.snapshot(now);
-    snapshot.actors.forEach((actor) => {
-      room.game.setGenericScore(actor.id, actor.kills * 100 + Math.max(0, actor.kills - actor.deaths) * 20);
-    });
-    io.to(room.code).volatile.emit("abyss:state", snapshot);
+function startTetrisLoop(room: RoomRuntime): void {
+  if (!room.tetrisEngine || room.tetrisTick) return;
+  room.tetrisTick = setInterval(() => {
+    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.tetrisEngine) return;
+    room.tetrisEngine.tick();
+    const snapshot = room.tetrisEngine.snapshot();
+    snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
+    io.to(room.code).volatile.emit("tetris:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
-  }, 50);
+  }, 100);
 }
 
-function startRhythmLoop(room: RoomRuntime): void {
-  if (!room.rhythmEngine || room.rhythmTick) return;
-  let previous = Date.now();
-  room.rhythmTick = setInterval(() => {
-    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.rhythmEngine) return;
-    const now = Date.now();
-    room.rhythmEngine.update((now - previous) / 1_000);
-    previous = now;
-    const snapshot = room.rhythmEngine.snapshot(now);
-    snapshot.players.forEach((player) => room.game.setGenericScore(player.id, Math.round(player.y * 100)));
-    io.to(room.code).volatile.emit("rhythm:state", snapshot);
+function startPacmanLoop(room: RoomRuntime): void {
+  if (!room.pacmanEngine || room.pacmanTick) return;
+  room.pacmanTick = setInterval(() => {
+    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.pacmanEngine) return;
+    room.pacmanEngine.tick();
+    const snapshot = room.pacmanEngine.snapshot();
+    snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
+    io.to(room.code).volatile.emit("pacman:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
-  }, 50);
+  }, 100);
 }
 
 function clearPauseState(room: RoomRuntime): void {
@@ -1301,7 +1283,8 @@ function shutdown(): void {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
-    if (room.abyssTick) clearInterval(room.abyssTick);
+    if (room.tetrisTick) clearInterval(room.tetrisTick);
+    if (room.pacmanTick) clearInterval(room.pacmanTick);
     clearBotTimers(room);
   }
   io.close(() => process.exit(0));

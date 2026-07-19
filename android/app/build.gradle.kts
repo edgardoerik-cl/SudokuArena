@@ -12,8 +12,8 @@ android {
         applicationId = "com.sudokuarena"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26
-        versionName = "7.0.0"
+        versionCode = 27
+        versionName = "8.0.0"
 
         val socketUrl = providers.gradleProperty("SOCKET_URL")
             .getOrElse("http://10.0.2.2:3000")
@@ -45,6 +45,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
+    implementation("io.coil-kt.coil3:coil-compose:3.2.0")
     implementation("io.socket:socket.io-client:2.1.2")
 
     testImplementation("junit:junit:4.13.2")

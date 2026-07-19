@@ -20,14 +20,10 @@ import com.sudokuarena.domain.GameType
 import com.sudokuarena.domain.PuzzleDifficulty
 import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.GenericCell
-import com.sudokuarena.domain.AbyssActor
-import com.sudokuarena.domain.AbyssItem
-import com.sudokuarena.domain.AbyssObstacle
-import com.sudokuarena.domain.AbyssProjectile
-import com.sudokuarena.domain.AbyssState
-import com.sudokuarena.domain.RhythmPlatform
-import com.sudokuarena.domain.RhythmPlayer
-import com.sudokuarena.domain.RhythmState
+import com.sudokuarena.domain.TetrisArenaState
+import com.sudokuarena.domain.TetrisPlayerState
+import com.sudokuarena.domain.PacmanActorState
+import com.sudokuarena.domain.PacmanArenaState
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.WebSocket
@@ -105,8 +101,8 @@ class SocketGameClient(
         } }
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
         socket.on("generic:state") { args -> parseSafely(args) { RealtimeEvent.GenericStateUpdated(parseGenericState(it)) } }
-        socket.on("abyss:state") { args -> parseSafely(args) { RealtimeEvent.AbyssStateUpdated(parseAbyssState(it)) } }
-        socket.on("rhythm:state") { args -> parseSafely(args) { RealtimeEvent.RhythmStateUpdated(parseRhythmState(it)) } }
+        socket.on("tetris:state") { args -> parseSafely(args) { RealtimeEvent.TetrisStateUpdated(parseTetrisState(it)) } }
+        socket.on("pacman:state") { args -> parseSafely(args) { RealtimeEvent.PacmanStateUpdated(parsePacmanState(it)) } }
         socket.on("letters:rack") { args -> parseSafely(args) { payload ->
             RealtimeEvent.LetterRackUpdated(
                 letters = payload.optJSONArray("letters")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
@@ -351,28 +347,13 @@ class SocketGameClient(
         socket.emit("global:chat-send", JSONObject().put("message", message))
     }
 
-    override fun sendAbyssInput(
-        sequence: Long,
-        moveX: Float,
-        moveY: Float,
-        aimX: Float,
-        aimY: Float,
-        shooting: Boolean,
-    ) {
-        socket.emit(
-            "abyss:input",
-            JSONObject()
-                .put("sequence", sequence)
-                .put("moveX", moveX)
-                .put("moveY", moveY)
-                .put("aimX", aimX)
-                .put("aimY", aimY)
-                .put("shooting", shooting),
-        )
+
+    override fun sendTetrisInput(action: String) {
+        socket.emit("tetris:input", JSONObject().put("action", action))
     }
 
-    override fun sendRhythmInput(sequence: Long, moveX: Float) {
-        socket.emit("rhythm:input", JSONObject().put("sequence", sequence).put("moveX", moveX))
+    override fun sendPacmanInput(direction: String) {
+        socket.emit("pacman:input", JSONObject().put("direction", direction))
     }
 
     override fun chooseRps(choice: String) {
@@ -513,89 +494,67 @@ private fun parseGenericState(json: JSONObject): GenericBoardState {
     )
 }
 
-private fun parseAbyssState(json: JSONObject): AbyssState {
-    fun number(value: JSONObject, key: String) = value.optDouble(key, 0.0).toFloat()
-    val actors = json.optJSONArray("actors")?.mapObjects { raw ->
-        val item = raw as JSONObject
-        AbyssActor(
-            id = item.optString("id"),
-            kind = item.optString("kind"),
-            x = number(item, "x"),
-            y = number(item, "y"),
-            vx = number(item, "vx"),
-            vy = number(item, "vy"),
-            hp = number(item, "hp"),
-            maxHp = number(item, "maxHp"),
-            colorHex = item.nullableString("colorHex"),
-            name = item.nullableString("name"),
-            weapon = item.optString("weapon", "SWORD"),
-            kills = item.optInt("kills"),
-            deaths = item.optInt("deaths"),
-            respawnAt = item.optLong("respawnAt"),
-            facingX = number(item, "facingX"),
-            facingY = number(item, "facingY"),
-            attacking = item.optBoolean("attacking"),
-        )
-    }.orEmpty()
-    val projectiles = json.optJSONArray("projectiles")?.mapObjects { raw ->
-        val item = raw as JSONObject
-        AbyssProjectile(item.optString("id"), number(item, "x"), number(item, "y"))
-    }.orEmpty()
-    val items = json.optJSONArray("items")?.mapObjects { raw ->
-        val item = raw as JSONObject
-        AbyssItem(item.optString("id"), number(item, "x"), number(item, "y"), item.optString("type"))
-    }.orEmpty()
-    val obstacles = json.optJSONObject("room")?.optJSONArray("obstacles")?.mapObjects { raw ->
-        val item = raw as JSONObject
-        AbyssObstacle(number(item, "x"), number(item, "y"), number(item, "width"), number(item, "height"))
-    }.orEmpty()
-    val room = json.optJSONObject("room")
-    val maze = room?.optJSONArray("maze")?.let { rows ->
-        List(rows.length()) { rowIndex ->
-            val row = rows.optJSONArray(rowIndex)
-            List(row?.length() ?: 0) { col -> row?.optInt(col) ?: 0 }
-        }
-    }.orEmpty()
-    return AbyssState(
+private fun parseTetrisState(json: JSONObject): TetrisArenaState {
+    val players = json.optJSONArray("players") ?: JSONArray()
+    return TetrisArenaState(
         serverTime = json.optLong("serverTime"),
         tick = json.optLong("tick"),
-        level = json.optInt("level", 1),
-        maxLevel = json.optInt("maxLevel", 20),
-        bossLevel = json.optBoolean("bossLevel"),
-        mode = json.optString("mode", "PVP_FFA"),
-        remainingMs = json.optLong("remainingMs"),
-        winnerId = json.nullableString("winnerId"),
         completed = json.optBoolean("completed"),
-        actors = actors,
-        projectiles = projectiles,
-        items = items,
-        obstacles = obstacles,
-        maze = maze,
-        exitX = room?.optJSONObject("exit")?.optDouble("x", 0.0)?.toFloat() ?: 0f,
-        exitY = room?.optJSONObject("exit")?.optDouble("y", 0.0)?.toFloat() ?: 0f,
+        players = List(players.length()) { index ->
+            val player = players.getJSONObject(index)
+            val rows = player.optJSONArray("board") ?: JSONArray()
+            TetrisPlayerState(
+                id = player.optString("id"),
+                name = player.optString("name"),
+                colorHex = player.optString("colorHex", "#00D9FF"),
+                board = List(rows.length()) { rowIndex ->
+                    val row = rows.getJSONArray(rowIndex)
+                    List(row.length()) { col -> row.optInt(col) }
+                },
+                next = player.optString("next"),
+                score = player.optInt("score"),
+                lines = player.optInt("lines"),
+                gameOver = player.optBoolean("gameOver"),
+            )
+        },
     )
 }
 
-private fun parseRhythmState(json: JSONObject): RhythmState {
-    fun number(value: JSONObject, key: String) = value.optDouble(key, 0.0).toFloat()
-    return RhythmState(
+private fun parsePacmanState(json: JSONObject): PacmanArenaState {
+    fun actors(key: String): List<PacmanActorState> {
+        val array = json.optJSONArray(key) ?: JSONArray()
+        return List(array.length()) { index ->
+            val actor = array.getJSONObject(index)
+            PacmanActorState(
+                id = actor.optString("id"),
+                x = actor.optDouble("x", 0.0).toFloat(),
+                y = actor.optDouble("y", 0.0).toFloat(),
+                direction = actor.optString("direction", "STOP"),
+                lives = actor.optInt("lives"),
+                score = actor.optInt("score"),
+                colorHex = actor.nullableString("colorHex"),
+                name = actor.nullableString("name"),
+                mode = actor.nullableString("mode"),
+            )
+        }
+    }
+    val map = json.optJSONArray("tilemap") ?: JSONArray()
+    fun stringSet(key: String): Set<String> {
+        val array = json.optJSONArray(key) ?: JSONArray()
+        return buildSet { repeat(array.length()) { add(array.optString(it)) } }
+    }
+    return PacmanArenaState(
         serverTime = json.optLong("serverTime"),
         tick = json.optLong("tick"),
-        bpm = json.optInt("bpm", 128),
-        beat = json.optInt("beat"),
-        cameraY = number(json, "cameraY"),
         completed = json.optBoolean("completed"),
-        platforms = json.optJSONArray("platforms")?.mapObjects { raw ->
-            val item = raw as JSONObject
-            RhythmPlatform(item.optInt("id"), number(item, "x"), number(item, "y"), number(item, "width"), item.optBoolean("obstacle"))
-        }.orEmpty(),
-        players = json.optJSONArray("players")?.mapObjects { raw ->
-            val item = raw as JSONObject
-            RhythmPlayer(
-                item.optString("id"), item.optString("name"), item.optString("colorHex"),
-                number(item, "x"), number(item, "y"), number(item, "vy"), item.optInt("lives", 3), item.optBoolean("eliminated"),
-            )
-        }.orEmpty(),
+        tilemap = List(map.length()) { rowIndex ->
+            val row = map.getJSONArray(rowIndex)
+            List(row.length()) { col -> row.optInt(col) }
+        },
+        pills = stringSet("pills"),
+        powerPills = stringSet("powerPills"),
+        players = actors("players"),
+        ghosts = actors("ghosts"),
     )
 }
 

@@ -4,6 +4,7 @@ import { ArenaGame } from "../src/game.js";
 import { createPuzzleBlueprint } from "../src/puzzles/blueprints.js";
 import { GenericPuzzleEngine } from "../src/puzzles/engine.js";
 import { GAME_TYPES } from "../src/puzzles/types.js";
+import { attackRange, calculateDamage, movementRange, skillFor, type Piece } from "../src/puzzles/chessTactics.js";
 
 describe("motor genérico de puzzles", () => {
   it("reproduce una semilla y cambia el tablero con otra", () => {
@@ -36,22 +37,23 @@ describe("motor genérico de puzzles", () => {
     });
   });
 
-  it("publica pistas conceptuales y configura Rummikub Arcade Match", () => {
+  it("publica pistas conceptuales y configura Chess Tactics RPG", () => {
     const crossword = createPuzzleBlueprint("CROSSWORD", { seed: "real-clues", difficulty: "MEDIUM" });
     const clues = crossword.meta.clues as string[];
     assert.ok(clues.every((clue) => !/Palabra de \d+ letras/i.test(clue)));
     assert.ok(clues.every((clue) => clue.split(". ")[1]?.length > 12));
 
-    const rummikub = createPuzzleBlueprint("RUMMIKUB", { seed: "hidden-results", difficulty: "EXPERT" });
-    rummikub.board.forEach((row, y) => row.forEach((cell, x) => {
-      if (cell.isBlocked) return;
-      assert.equal(cell.meta.arcadeTile, true);
-      assert.equal(typeof cell.value, "number");
-      assert.match(String(rummikub.answers[y]![x]), /^(RED|BLUE|GREEN|ORANGE):[1-9]$/);
-    }));
+    const tactics = createPuzzleBlueprint("CHESS_TACTICS", { seed: "combat", difficulty: "EXPERT" });
+    const pieces = tactics.board.flat().filter((cell) => cell.value !== null);
+    assert.ok(pieces.length >= 10);
+    assert.ok(pieces.every((cell) => ["BLUE", "RED"].includes(String(cell.meta.team))));
+    assert.ok(pieces.every((cell) => Number(cell.meta.hp) > 0 && Number(cell.meta.ap) > 0));
   });
 
-  for (const gameType of GAME_TYPES.filter((type) => !["SUDOKU", "CROSS_LETTERS", "SECRET_CODE", "CAPITAL_ARENA"].includes(type))) {
+  for (const gameType of GAME_TYPES.filter((type) => ![
+    "SUDOKU", "CROSS_LETTERS", "SECRET_CODE", "CAPITAL_ARENA",
+    "TETRIS_ARENA", "PACMAN_ARENA", "CHECKERS", "CHESS_TACTICS",
+  ].includes(type))) {
     it(`genera y permite a un Bot resolver ${gameType}`, () => {
       const players = new ArenaGame(`players-${gameType}`);
       players.addPlayer("bot", "Bot_Matriz", true);
@@ -169,17 +171,68 @@ describe("motor genérico de puzzles", () => {
     assert.ok(hangman.board[0]!.every((cell) => cell.value === null));
   });
 
-  it("baraja Nexo Cero profundamente sin perder parejas ortogonales", () => {
+  it("dispersa Nexo Cero sin solapamientos y conserva parejas opuestas", () => {
     const blueprint = createPuzzleBlueprint("NEXUS_ZERO", { seed: "deep-shuffle", difficulty: "EXPERT" });
-    let verticalPairs = 0;
+    const boxes: Array<{ x: number; y: number; width: number; height: number }> = [];
     blueprint.answers.forEach((row, y) => row.forEach((answer, x) => {
       const [targetRow, targetCol] = String(answer).split(":").map(Number);
-      assert.equal(Math.abs(targetRow! - y) + Math.abs(targetCol! - x), 1);
       assert.equal(Number(blueprint.board[y]![x]!.value) + Number(blueprint.board[targetRow!]![targetCol!]!.value), 0);
-      if (targetRow !== y) verticalPairs += 1;
+      const meta = blueprint.board[y]![x]!.meta;
+      boxes.push({ x: Number(meta.x), y: Number(meta.y), width: Number(meta.width), height: Number(meta.height) });
     }));
-    assert.ok(verticalPairs > 0);
+    assert.ok(boxes.some((box, index) => index > 0 && box.x !== boxes[index - 1]!.x));
     assert.equal(blueprint.meta.guaranteedSolvable, true);
+    assert.equal(blueprint.meta.spatialLayout, true);
+  });
+
+  it("El Gato detecta una de las ocho líneas de victoria", () => {
+    const players = new ArenaGame("gato");
+    players.addPlayer("p1", "X"); players.addPlayer("p2", "O");
+    players.startMatch({ gameType: "TIC_TAC_TOE", powersEnabled: false, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("TIC_TAC_TOE", "gato-test");
+    engine.setFirstPlayer("p1");
+    const play = (id: string, row: number, col: number, requestId: string) =>
+      engine.makeMove(id, { requestId, row, col, val: "MARK" }, players);
+    assert.equal(play("p1", 0, 0, "x1").accepted, true);
+    assert.equal(play("p2", 1, 0, "o1").accepted, true);
+    assert.equal(play("p1", 0, 1, "x2").accepted, true);
+    assert.equal(play("p2", 1, 1, "o2").accepted, true);
+    assert.equal(play("p1", 0, 2, "x3").completed, true);
+  });
+
+  it("Ahorcado enmascara la palabra y conserva el turno al acertar", () => {
+    const players = new ArenaGame("hangman-security");
+    players.addPlayer("p1", "Uno"); players.addPlayer("p2", "Dos");
+    players.startMatch({ gameType: "HANGMAN", powersEnabled: false, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("HANGMAN", "hangman-security", { seed: "turns" });
+    engine.setFirstPlayer("p1");
+    const initial = engine.snapshot(players);
+    assert.equal(JSON.stringify(initial).includes("hiddenWord"), false);
+    assert.ok((initial.meta.maskedWord as string[]).every((letter) => letter === "_"));
+    const correct = engine.createBotMove(1, "p1")!;
+    assert.equal(engine.makeMove("p1", correct, players).accepted, true);
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p1");
+    for (const letter of "ZXQWVUTSRPONMLKJIHGFEDCBA") {
+      const result = engine.makeMove("p1", { requestId: `miss-${letter}`, row: 0, col: 0, val: letter }, players);
+      if (result.accepted && result.points === 0) break;
+    }
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p2");
+  });
+
+  it("Flechas modela formas padre con offsets y colisión conjunta", () => {
+    const blueprint = createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "complex-shapes", difficulty: "EXPERT" });
+    const shapes = blueprint.meta.shapes as Array<{ id: string; offsets: Array<{ x: number; y: number }>; direction: string }>;
+    assert.ok(shapes.some((shape) => shape.offsets.length >= 3));
+    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
+    assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
+  });
+
+  it("Chess Tactics calcula AP, rangos y daño mitigado", () => {
+    const knight: Piece = { id: "n", team: "BLUE", type: "KNIGHT", hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12, statusEffects: [] };
+    assert.equal(skillFor(knight), "EARTHQUAKE");
+    assert.ok(movementRange(knight, { row: 4, col: 4 }).length > 8);
+    assert.equal(attackRange(knight, { row: 4, col: 4 }).length, 8);
+    assert.ok(calculateDamage(40, 20) < calculateDamage(40, 0));
   });
 
   it("Buscaminas aplica cinco segundos al pisar una mina", () => {

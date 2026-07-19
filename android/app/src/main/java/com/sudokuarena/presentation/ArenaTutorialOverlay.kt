@@ -97,11 +97,7 @@ fun ArenaTutorialOverlay(
                 ) { index ->
                     val step = steps[index]
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (gameType == GameType.NONOGRAM && index < 4) {
-                            NonogramLesson(index)
-                        } else {
-                            Text(step.icon, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
-                        }
+                        Text(step.icon, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Black)
                         Text(step.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
                         Text(step.body, style = MaterialTheme.typography.bodyLarge)
                         Text("${index + 1} / ${steps.size}", color = Color.Gray)
@@ -136,11 +132,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("✚", "Lee las pistas", "Selecciona una casilla blanca y escribe una letra de la respuesta."),
         TutorialStep("ABC", "Resuelve primero", "Cada letra correcta suma territorio y puntos."),
     )
-    GameType.NONOGRAM -> listOf(
-        TutorialStep("3", "1. Lee las pistas de fila", "A la izquierda verás pistas como «1, 3», alineadas junto al tablero. Cada número es un grupo de casillas pintadas."),
-        TutorialStep("↓", "2. Cruza con las columnas", "Las pistas apiladas sobre cada columna se leen de arriba hacia abajo; la última queda pegada a la cuadrícula."),
-        TutorialStep("1, 1", "3. Separa grupos y marca X", "«1, 1» son dos grupos de una casilla separados por al menos una vacía. Mantén pulsada una casilla para marcarla con X."),
-        TutorialStep("♥", "4. Revela el dibujo", "Alterna entre pintar y marcar X. Cuando todas las pistas coinciden, aparecerá el mosaico oculto."),
+    GameType.TIC_TAC_TOE -> listOf(
+        TutorialStep("X O", "Marca una casilla", "En tu turno toca un espacio libre para colocar tu símbolo."),
+        TutorialStep("3×", "Crea una línea", "Gana formando tres símbolos iguales en horizontal, vertical o diagonal."),
     )
     GameType.DOTS_AND_BOXES -> listOf(
         TutorialStep("□", "Traza una arista", "Toca cerca del borde de un cuadro para dibujar esa línea."),
@@ -158,9 +152,10 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("◼", "Apaga duplicados", "Toca cifras repetidas para que cada fila y columna quede sin duplicados."),
         TutorialStep("⛓", "Mantén conectado", "Las casillas apagadas no deben tocarse por sus lados."),
     )
-    GameType.RUMMIKUB -> listOf(
-        TutorialStep("7·7·7", "Forma grupos", "Combina el mismo número en tres o cuatro colores diferentes."),
-        TutorialStep("5·6·7", "Forma escaleras", "Combina al menos tres números consecutivos del mismo color."),
+    GameType.CHESS_TACTICS -> listOf(
+        TutorialStep("AP", "Administra acciones", "Mover y atacar consume AP. Al tocar una unidad verás movimiento azul y ataque rojo."),
+        TutorialStep("♟", "Falange", "El Peón puede gastar AP para duplicar su defensa durante el turno."),
+        TutorialStep("♞♜", "Habilidades tácticas", "El Caballo golpea un área con Terremoto y la Torre atraviesa dos objetivos con Rayo Perforante."),
     )
     GameType.NURIKABE -> listOf(
         TutorialStep("●≈", "Separa islas", "Los números indican el tamaño exacto de cada isla blanca."),
@@ -170,9 +165,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("●═●", "Conecta islas", "Traza puentes horizontales o verticales entre islas alineadas."),
         TutorialStep("#", "Respeta el número", "Cada isla recibe la cantidad indicada y toda la red queda conectada."),
     )
-    GameType.SLITHERLINK -> listOf(
-        TutorialStep("□", "Forma un lazo", "Traza una sola línea cerrada, sin cruces ni ramificaciones."),
-        TutorialStep("0–3", "Sigue las pistas", "El número indica cuántos lados de la celda pertenecen al lazo."),
+    GameType.TETRIS_ARENA -> listOf(
+        TutorialStep("▟", "Completa líneas", "Mueve y rota los tetrominós. Una fila llena desaparece y suma puntos."),
+        TutorialStep("▰", "Ataca con basura", "Dobles, triples y Tetris envían líneas grises a los tableros rivales."),
     )
     GameType.HANGMAN -> listOf(
         TutorialStep("A _ _", "Adivina la palabra", "Usa la pista y prueba letras. Cada acierto revela todas sus posiciones."),
@@ -182,9 +177,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("➜", "Libera los bloques", "Una flecha sale volando si no existe otro bloque frente a ella."),
         TutorialStep("↩", "Evita rebotes", "Si la trayectoria está ocupada, la ficha rebota y permanece en el tablero."),
     )
-    GameType.RHYTHM_JUMP -> listOf(
-        TutorialStep("♫", "Sigue el pulso", "Las plataformas aparecen al ritmo de la pista electrónica."),
-        TutorialStep("♥♥♥", "Tres vidas", "Muévete lateralmente; quedar bajo la cámara consume una vida."),
+    GameType.PACMAN_ARENA -> listOf(
+        TutorialStep("●", "Come las píldoras", "Recorre el laberinto y suma puntos antes que los demás jugadores."),
+        TutorialStep("👻", "Lee a los fantasmas", "Alternan entre persecución y dispersión. Una píldora de poder los vuelve vulnerables."),
     )
     GameType.CROSS_LETTERS -> listOf(
         TutorialStep("AÑ", "Usa tu atril", "En tu turno forma una palabra española con las siete letras disponibles."),
@@ -202,83 +197,12 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⚡", "Administra tu capital", "Cobra al pasar por Salida, evita la quiebra y termina con el patrimonio más alto."),
     )
     GameType.NEXUS_ZERO -> listOf(
-        TutorialStep("+4 −4", "Neutraliza cargas", "Toca dos nodos vecinos cuyos valores sumen exactamente cero."),
+        TutorialStep("+4 −4", "Neutraliza cargas", "Encuentra dos nodos dispersos vinculados cuyos valores sumen exactamente cero."),
         TutorialStep("⚡", "Encadena enlaces", "Resuelve pares rápidamente para multiplicar tu dominio y energía."),
     )
-    GameType.ABYSS_ARENA -> listOf(
-        TutorialStep("◉", "Explora en primera persona", "Usa el control izquierdo para avanzar y retroceder. Gira con los controles de la derecha para recorrer el laberinto 3D."),
-        TutorialStep("✦", "Combate en equipo", "Lanza hechizos contra el Guardián del Abismo. Los enemigos y aliados cambian de tamaño según su distancia."),
-        TutorialStep("⌂", "Encuentra la salida", "Derriben al jefe y alcancen juntos el portal verde. El servidor valida posiciones, colisiones y proyectiles."),
+    GameType.CHECKERS -> listOf(
+        TutorialStep("⛀", "Mueve en diagonal", "Las fichas normales avanzan una casilla diagonal hacia el lado rival."),
+        TutorialStep("×", "Captura obligatoria", "Si puedes saltar una ficha rival debes hacerlo. Tras una captura puede haber otra encadenada."),
+        TutorialStep("♛", "Corona una reina", "Al alcanzar la última fila, la ficha se convierte en Reina y recorre diagonales completas."),
     )
-}
-
-@Composable
-private fun NonogramLesson(step: Int) {
-    val pulse by rememberInfiniteTransition(label = "nonogramPulse").animateFloat(
-        initialValue = .45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
-        label = "nonogramHighlight",
-    )
-    val pattern = listOf(
-        listOf(false, true, false, true, false),
-        listOf(true, true, true, true, true),
-        listOf(true, true, true, true, true),
-        listOf(false, true, true, true, false),
-        listOf(false, false, true, false, false),
-    )
-    val rowClues = listOf("1 1", "5", "5", "3", "1")
-    val columnClues = listOf("2", "4", "4", "4", "2")
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            when (step) { 0 -> "MIRA LA FILA 4"; 1 -> "MIRA LA COLUMNA 1"; 2 -> "PINTA ■  ·  VACÍA ×"; else -> "MOSAICO COMPLETO" },
-            color = ArenaColors.ElectricBlue,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Black,
-        )
-        Row(verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.size(42.dp))
-            columnClues.forEachIndexed { col, clue ->
-                val highlighted = step == 1 && col == 0
-                Text(
-                    clue,
-                    modifier = Modifier.size(34.dp).background(if (highlighted) Color(0x337C3AED) else Color.Transparent).padding(top = 8.dp),
-                    color = if (highlighted) Color(0xFF5B21B6).copy(alpha = pulse) else Color(0xFF263238),
-                    fontWeight = FontWeight.Black,
-                    fontSize = 13.sp,
-                )
-            }
-        }
-        pattern.forEachIndexed { row, cells ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val rowHighlighted = step == 0 && row == 3
-                Text(
-                    rowClues[row],
-                    modifier = Modifier.size(width = 42.dp, height = 34.dp).background(if (rowHighlighted) Color(0x3300A8FF) else Color.Transparent).padding(top = 7.dp),
-                    color = if (rowHighlighted) ArenaColors.ElectricBlue.copy(alpha = pulse) else Color(0xFF263238),
-                    fontWeight = FontWeight.Black,
-                    fontSize = 12.sp,
-                )
-                cells.forEachIndexed { col, filled ->
-                    val visible = when (step) {
-                        0 -> row == 3
-                        1 -> col == 0
-                        2 -> row == 0
-                        else -> true
-                    }
-                    val showX = visible && !filled
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .border(1.dp, Color(0xFF94A3B8))
-                            .background(if (visible && filled) Color(0xFF243B6B).copy(alpha = if (step < 3) pulse else 1f) else Color(0xFFF8FAFC)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (showX) Text("×", color = Color(0xFFE11D48), fontWeight = FontWeight.Black, fontSize = 22.sp)
-                    }
-                }
-            }
-        }
-        Text("■ = píxel pintado     × = casilla vacía", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
 }

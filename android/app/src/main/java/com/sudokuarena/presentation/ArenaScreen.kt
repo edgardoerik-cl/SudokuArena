@@ -119,13 +119,13 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         return
     }
 
-    if (state.gameType == GameType.ABYSS_ARENA) {
-        AbyssRaycastScreen(state, viewModel::sendAbyssInput, viewModel::requestPause, onExit)
+    if (state.gameType == GameType.TETRIS_ARENA) {
+        TetrisArenaScreen(state, viewModel::sendTetrisInput, viewModel::requestPause, onExit)
         return
     }
 
-    if (state.gameType == GameType.RHYTHM_JUMP) {
-        RhythmJumpScreen(state, viewModel::sendRhythmInput, viewModel::requestPause, onExit)
+    if (state.gameType == GameType.PACMAN_ARENA) {
+        PacmanArenaScreen(state, viewModel::sendPacmanInput, viewModel::requestPause, onExit)
         return
     }
 

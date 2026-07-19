@@ -10,7 +10,14 @@ import org.junit.Test
 class LocalPuzzleEngineTest {
     @Test
     fun `todos los juegos no Sudoku crean un tablero local jugable`() {
-        GameType.entries.filterNot { it in setOf(GameType.SUDOKU, GameType.ABYSS_ARENA) }.forEach { gameType ->
+        val onlineOnly = setOf(
+            GameType.SUDOKU,
+            GameType.TETRIS_ARENA,
+            GameType.PACMAN_ARENA,
+            GameType.CHECKERS,
+            GameType.CHESS_TACTICS,
+        )
+        GameType.entries.filterNot { it in onlineOnly }.forEach { gameType ->
             val state = LocalPuzzleEngine(gameType).snapshot()
             assertEquals(gameType, state.gameType)
             assertTrue("$gameType debe tener filas", state.rows > 0)
@@ -65,26 +72,40 @@ class LocalPuzzleEngineTest {
     }
 
     @Test
-    fun `Crucigrama usa pistas reales y Rummikub oculta resultados`() {
+    fun `Crucigrama usa pistas conceptuales reales`() {
         val crossword = LocalPuzzleEngine(GameType.CROSSWORD, seed = 12L).snapshot()
         val clues = crossword.meta["clues"] as List<*>
         assertTrue(clues.all { !it.toString().contains("Palabra de") })
-
-        val rummikub = LocalPuzzleEngine(GameType.RUMMIKUB, seed = 12L).snapshot()
-        assertTrue(rummikub.board.flatten().all { it.value == null })
-        assertTrue(rummikub.board.flatten().filterNot { it.isBlocked }.all { it.meta["meldType"] in setOf("RUN", "GROUP") })
-        assertTrue(rummikub.board.flatten().none { it.meta.containsKey("rule") })
     }
 
     @Test
-    fun `Nexo Cero conquista dos cargas opuestas vecinas`() {
+    fun `Nexo Cero conquista dos cargas opuestas dispersas`() {
         val engine = LocalPuzzleEngine(GameType.NEXUS_ZERO, seed = 4L)
         val initial = engine.snapshot()
-        val result = engine.move(0, 0, mapOf("targetRow" to 0, "targetCol" to 1))
-        assertTrue(result.accepted)
-        assertEquals(24, result.points)
-        assertEquals("solo", result.state.board[0][0].ownerId)
-        assertEquals("solo", result.state.board[0][1].ownerId)
-        assertEquals(0, (initial.board[0][0].value as Number).toInt() + (initial.board[0][1].value as Number).toInt())
+        var result: LocalPuzzleMoveResult? = null
+        search@ for (row in 0 until initial.rows) {
+            for (col in 0 until initial.columns) {
+                for (targetRow in 0 until initial.rows) {
+                    for (targetCol in 0 until initial.columns) {
+                        val candidate = engine.move(
+                            row,
+                            col,
+                            mapOf("targetRow" to targetRow, "targetCol" to targetCol),
+                        )
+                        if (candidate.accepted) {
+                            result = candidate
+                            break@search
+                        }
+                    }
+                }
+            }
+        }
+        val accepted = requireNotNull(result)
+        assertTrue(accepted.accepted)
+        assertEquals(24, accepted.points)
+        assertEquals(2, accepted.state.board.flatten().count { it.ownerId == "solo" })
+        val conquered = accepted.state.board.flatten().filter { it.ownerId == "solo" }
+        assertEquals(0, conquered.sumOf { (it.value as Number).toInt() })
+        assertTrue(conquered.map { it.meta["x"] }.distinct().size > 1)
     }
 }

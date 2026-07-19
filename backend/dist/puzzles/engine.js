@@ -2,12 +2,16 @@ import { randomUUID } from "node:crypto";
 import { createPuzzleBlueprint } from "./blueprints.js";
 import { SCRABBLE_SCORES } from "./blueprints.js";
 import { SPANISH_DICTIONARY } from "./spanishDictionary.js";
+import { attackRange, calculateDamage, movementRange, skillCost, skillFor } from "./chessTactics.js";
 const GENERIC_HIT_POINTS = 10;
 const GENERIC_ENERGY = 25;
-const STRICT_PLAYER_TURN_GAMES = new Set(["MINESWEEPER", "CROSSWORD", "DOTS_AND_BOXES"]);
+const STRICT_PLAYER_TURN_GAMES = new Set([
+    "MINESWEEPER", "CROSSWORD", "DOTS_AND_BOXES", "HANGMAN",
+    "TIC_TAC_TOE", "CHECKERS", "CHESS_TACTICS",
+]);
 /**
  * Motor matricial autoritativo. Las reglas que no son naturalmente matriciales
- * (palabras, aristas y grupos de Rummikub) se codifican en `val` y `cell.meta`.
+ * Las reglas especializadas se codifican en `val`, `cell.meta` y validadores puros.
  */
 export class GenericPuzzleEngine {
     gameType;
@@ -38,11 +42,10 @@ export class GenericPuzzleEngine {
     capitalLastMove = null;
     capitalEvent = "La economía neón está lista";
     capitalCard = null;
-    lastSlitherMoveAt = new Map();
-    hangmanGuesses = new Map();
+    hangmanGuesses = new Set();
     hangmanErrors = new Map();
+    hiddenWord;
     arrowRemoved = new Map();
-    arcadeDeposits = new Map();
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
         this.gameId = gameId;
@@ -50,6 +53,7 @@ export class GenericPuzzleEngine {
         this.board = blueprint.board;
         this.answers = blueprint.answers;
         this.meta = blueprint.meta;
+        this.hiddenWord = gameType === "HANGMAN" ? blueprint.answers[0].map(String).join("") : "";
     }
     setFirstPlayer(playerId, now = Date.now()) {
         this.activePlayerId = playerId;
@@ -104,9 +108,12 @@ export class GenericPuzzleEngine {
                     propertyLevels: Object.fromEntries(this.capitalPropertyLevels)
                 } : {}),
                 ...(this.gameType === "HANGMAN" ? {
-                    guessedLetters: [...new Set([...this.hangmanGuesses.values()].flatMap((letters) => [...letters]))],
+                    guessedLetters: [...this.hangmanGuesses],
                     errors: Object.fromEntries(this.hangmanErrors),
+                    mistakesMade: [...this.hangmanErrors.values()].reduce((sum, value) => sum + value, 0),
+                    maskedWord: this.board[0].map((cell) => cell.value?.toString() ?? "_"),
                     eliminated: [...this.hangmanErrors].filter(([, errors]) => errors >= 6).map(([id]) => id),
+                    currentPlayerTurn: this.activePlayerId,
                 } : {}),
                 ...(this.gameType === "ARROWS_ESCAPE" ? {
                     progress: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, removed.size])),
@@ -181,7 +188,7 @@ export class GenericPuzzleEngine {
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
         }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE"].includes(this.gameType))) {
+        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS"].includes(this.gameType))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
         const outcome = this.applySpecificMove(playerId, move, cell, game, now);
@@ -239,22 +246,61 @@ export class GenericPuzzleEngine {
                     const key = `${row}:${col}`;
                     if (removed.has(key))
                         continue;
-                    const direction = String(this.board[row][col].meta.arrow);
-                    const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1] : direction === "DOWN" ? [1, 0] : [0, -1];
-                    let clear = true;
-                    for (let y = row + dy, x = col + dx; y >= 0 && y < this.board.length && x >= 0 && x < this.board[0].length; y += dy, x += dx) {
-                        if (!removed.has(`${y}:${x}`)) {
-                            clear = false;
-                            break;
-                        }
-                    }
-                    if (clear)
+                    const shapeId = String(this.board[row][col].meta.shapeId ?? key);
+                    if (this.canArrowShapeEscape(shapeId, removed)) {
                         return { requestId: `arrows-bot-${randomUUID()}`, row, col, val: "ESCAPE" };
+                    }
                 }
             return null;
         }
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && playerId && this.activePlayerId !== playerId)
             return null;
+        if (this.gameType === "TIC_TAC_TOE") {
+            for (let row = 0; row < 3; row += 1)
+                for (let col = 0; col < 3; col += 1) {
+                    if (this.board[row][col].value === null) {
+                        return { requestId: `gato-bot-${randomUUID()}`, row, col, val: "MARK" };
+                    }
+                }
+            return null;
+        }
+        if (this.gameType === "CHECKERS" && playerId) {
+            const team = this.activeTeam(playerId);
+            const captures = this.checkersCapturesFor(team);
+            const sources = captures.length ? captures : this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex })).filter(({ cell }) => cell.meta.team === team));
+            for (const source of sources) {
+                const capture = this.checkersCapturesFrom(source.row, source.col, team)[0];
+                if (capture)
+                    return { requestId: `checkers-bot-${randomUUID()}`, row: source.row, col: source.col, val: { targetRow: capture.row, targetCol: capture.col } };
+                const direction = team === "BLUE" ? 1 : -1;
+                for (const dx of [-1, 1]) {
+                    const target = this.board[source.row + direction]?.[source.col + dx];
+                    if (target && !target.isBlocked && target.value === null) {
+                        return { requestId: `checkers-bot-${randomUUID()}`, row: source.row, col: source.col, val: { targetRow: source.row + direction, targetCol: source.col + dx } };
+                    }
+                }
+            }
+            return null;
+        }
+        if (this.gameType === "CHESS_TACTICS" && playerId) {
+            const team = this.activeTeam(playerId);
+            for (let row = 0; row < 8; row += 1)
+                for (let col = 0; col < 8; col += 1) {
+                    const piece = pieceFromCell(this.board[row][col]);
+                    if (!piece || piece.team !== team)
+                        continue;
+                    const attack = attackRange(piece, { row, col }).find((point) => {
+                        const enemy = pieceFromCell(this.board[point.row][point.col]);
+                        return enemy && enemy.team !== team;
+                    });
+                    if (attack && piece.ap >= 2)
+                        return { requestId: `chess-bot-${randomUUID()}`, row, col, val: { action: "ATTACK", targetRow: attack.row, targetCol: attack.col } };
+                    const target = movementRange(piece, { row, col }).find((point) => this.board[point.row][point.col].value === null);
+                    if (target)
+                        return { requestId: `chess-bot-${randomUUID()}`, row, col, val: { action: "MOVE", targetRow: target.row, targetCol: target.col } };
+                }
+            return null;
+        }
         if (this.gameType === "WORD_SEARCH") {
             const unresolved = this.unresolvedWordPlacements();
             const placement = unresolved[Math.floor(Math.random() * unresolved.length)];
@@ -267,32 +313,6 @@ export class GenericPuzzleEngine {
                 col: placement.startCol,
                 val: { word: correct ? placement.word : `${placement.word}X`, endRow: placement.endRow, endCol: placement.endCol }
             };
-        }
-        if (this.gameType === "RUMMIKUB") {
-            const target = this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex }))).find(({ cell, row, col }) => !cell.isBlocked && cell.ownerId === null && this.answers[row]?.[col] !== null);
-            if (!target)
-                return null;
-            const [color] = String(this.answers[target.row][target.col]).split(":");
-            return {
-                requestId: `rummikub-bot-${randomUUID()}`,
-                row: target.row,
-                col: target.col,
-                val: { deposit: Math.random() <= accuracy ? color : "WRONG" },
-            };
-        }
-        if (this.gameType === "SLITHERLINK") {
-            const current = this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex })))
-                .filter(({ cell }) => cell.ownerId === null)
-                .sort((a, b) => Number(a.cell.meta.pathIndex) - Number(b.cell.meta.pathIndex))[0];
-            if (!current)
-                return null;
-            const answer = String(this.answers[current.row][current.col]);
-            if (answer === "END") {
-                current.cell.ownerId = playerId ?? "BOT";
-                return null;
-            }
-            const [targetRow, targetCol] = answer.split(":").map(Number);
-            return { requestId: `neon-path-bot-${randomUUID()}`, row: current.row, col: current.col, val: { targetRow, targetCol } };
         }
         if (this.gameType === "NEXUS_ZERO") {
             for (let row = 0; row < this.board.length; row += 1) {
@@ -329,7 +349,7 @@ export class GenericPuzzleEngine {
         let suitable = this.gameType === "MINESWEEPER"
             ? candidates.filter(({ row, col }) => (this.answers[row][col] === true) !== correct)
             : candidates;
-        if (["NONOGRAM", "HITORI", "BRIDGES"].includes(this.gameType) && correct) {
+        if (["HITORI", "BRIDGES"].includes(this.gameType) && correct) {
             suitable = candidates.filter(({ row, col }) => this.answers[row][col] === true);
         }
         if (this.gameType === "DOTS_AND_BOXES" && correct) {
@@ -381,7 +401,7 @@ export class GenericPuzzleEngine {
                 val: { word: placement.word, endRow: placement.endRow, endCol: placement.endCol }
             };
         }
-        else if (["NONOGRAM", "HITORI", "NURIKABE", "BRIDGES"].includes(this.gameType) && this.answers[row][col] !== true) {
+        else if (["HITORI", "NURIKABE", "BRIDGES"].includes(this.gameType) && this.answers[row][col] !== true) {
             const unresolved = this.findFirstTrueCell();
             if (!unresolved)
                 return null;
@@ -407,39 +427,54 @@ export class GenericPuzzleEngine {
             const letter = String(move.val ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 1);
             if (!/^[A-ZÑ]$/.test(letter))
                 return { correct: false };
-            const guesses = this.hangmanGuesses.get(playerId) ?? new Set();
-            if (guesses.has(letter))
+            if (this.hangmanGuesses.has(letter))
                 return { correct: false, points: 0 };
-            guesses.add(letter);
-            this.hangmanGuesses.set(playerId, guesses);
+            this.hangmanGuesses.add(letter);
             let hits = 0;
-            this.answers[0].forEach((answer, col) => {
-                if (String(answer) === letter) {
+            [...this.hiddenWord].forEach((answer, col) => {
+                if (answer === letter) {
                     this.board[0][col].value = letter;
                     this.board[0][col].ownerId = playerId;
                     this.board[0][col].isRevealed = true;
                     hits += 1;
                 }
             });
-            if (hits === 0)
+            if (hits === 0) {
                 this.hangmanErrors.set(playerId, (this.hangmanErrors.get(playerId) ?? 0) + 1);
-            return { correct: true, points: hits * 12 };
+                return { correct: true, points: 0 };
+            }
+            return { correct: true, points: hits * 12, extraTurn: true };
         }
+        if (this.gameType === "TIC_TAC_TOE") {
+            if (cell.value !== null)
+                return { correct: false };
+            const playerIndex = Math.max(0, this.turnOrder.indexOf(playerId));
+            cell.value = playerIndex % 2 === 0 ? "X" : "O";
+            cell.ownerId = playerId;
+            cell.isRevealed = true;
+            const winner = this.ticTacToeWinner();
+            if (winner) {
+                this.meta.winnerMark = winner;
+                this.meta.winnerPlayerId = playerId;
+                this.completed = true;
+            }
+            return { correct: true, points: winner ? 100 : 10 };
+        }
+        if (this.gameType === "CHECKERS")
+            return this.applyCheckersMove(playerId, move, cell);
+        if (this.gameType === "CHESS_TACTICS")
+            return this.applyChessTacticsMove(playerId, move, cell);
         if (this.gameType === "ARROWS_ESCAPE") {
             const removed = this.arrowRemoved.get(playerId) ?? new Set();
-            const key = `${move.row}:${move.col}`;
-            if (removed.has(key))
+            const shapeId = String(cell.meta.shapeId ?? `${move.row}:${move.col}`);
+            const members = this.arrowShapeMembers(shapeId);
+            if (!members.length || members.every(({ row, col }) => removed.has(`${row}:${col}`)))
                 return { correct: false };
-            const direction = String(cell.meta.arrow ?? cell.value);
-            const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
-                : direction === "DOWN" ? [1, 0] : [0, -1];
-            for (let row = move.row + dy, col = move.col + dx; row >= 0 && row < this.board.length && col >= 0 && col < this.board[0].length; row += dy, col += dx) {
-                if (!removed.has(`${row}:${col}`))
-                    return { correct: false, points: 0 };
-            }
-            removed.add(key);
+            if (!this.canArrowShapeEscape(shapeId, removed))
+                return { correct: false, points: 0 };
+            members.forEach(({ row, col }) => removed.add(`${row}:${col}`));
             this.arrowRemoved.set(playerId, removed);
-            return { correct: true, points: 10 };
+            return { correct: true, points: 10 * members.length };
         }
         if (this.gameType === "NURIKABE") {
             const action = String(move.val ?? "").toUpperCase();
@@ -516,42 +551,6 @@ export class GenericPuzzleEngine {
                 extraTurn: completedBoxes > 0,
             };
         }
-        if (this.gameType === "SLITHERLINK") {
-            const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
-            const targetRow = Number(payload.targetRow);
-            const targetCol = Number(payload.targetCol);
-            if (String(this.answers[move.row][move.col]) !== `${targetRow}:${targetCol}`)
-                return { correct: false };
-            const target = this.board[targetRow]?.[targetCol];
-            if (!target || target.ownerId !== null)
-                return { correct: false };
-            cell.ownerId = playerId;
-            target.ownerId = playerId;
-            cell.meta.connectedTo = `${targetRow}:${targetCol}`;
-            const elapsed = now - (this.lastSlitherMoveAt.get(playerId) ?? now);
-            this.lastSlitherMoveAt.set(playerId, now);
-            const speedMultiplier = elapsed <= 900 ? 3 : elapsed <= 1_800 ? 2 : 1;
-            target.meta.lastSpeedMultiplier = speedMultiplier;
-            return { correct: true, points: 8 * speedMultiplier };
-        }
-        if (this.gameType === "RUMMIKUB") {
-            const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
-            const zone = String(payload.deposit ?? "").toUpperCase();
-            const color = String(cell.meta.tileColor);
-            const tile = Number(cell.value);
-            if (!(zone === color || zone === "NUMBER"))
-                return { correct: false };
-            const depositKey = `${playerId}:${zone}`;
-            const deposit = this.arcadeDeposits.get(depositKey) ?? [];
-            deposit.push(`${color}:${tile}`);
-            this.arcadeDeposits.set(depositKey, deposit);
-            cell.ownerId = playerId;
-            cell.isRevealed = false;
-            const triple = zone === "NUMBER"
-                ? deposit.filter((entry) => entry.endsWith(`:${tile}`)).length >= 3
-                : deposit.filter((entry) => entry.startsWith(`${color}:`)).length >= 3;
-            return { correct: true, points: triple ? 40 : 8 };
-        }
         if (this.gameType === "NEXUS_ZERO") {
             const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
             const targetRow = Number(payload.targetRow);
@@ -559,9 +558,9 @@ export class GenericPuzzleEngine {
             const target = this.board[targetRow]?.[targetCol];
             if (!target || target.ownerId !== null)
                 return { correct: false };
-            const orthogonal = Math.abs(move.row - targetRow) + Math.abs(move.col - targetCol) === 1;
+            const expectedPartner = String(this.answers[move.row][move.col]) === `${targetRow}:${targetCol}`;
             const sum = Number(cell.value) + Number(target.value);
-            if (!orthogonal || sum !== 0)
+            if (!expectedPartner || sum !== 0)
                 return { correct: false };
             cell.ownerId = playerId;
             target.ownerId = playerId;
@@ -579,6 +578,231 @@ export class GenericPuzzleEngine {
         cell.ownerId = playerId;
         return { correct: true };
     }
+    ticTacToeWinner() {
+        const lines = [
+            [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
+            [[0, 0], [1, 0], [2, 0]], [[0, 1], [1, 1], [2, 1]], [[0, 2], [1, 2], [2, 2]],
+            [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
+        ];
+        for (const line of lines) {
+            const values = line.map(([row, col]) => String(this.board[row][col].value ?? ""));
+            if (values[0] && values.every((value) => value === values[0]))
+                return values[0];
+        }
+        return null;
+    }
+    activeTeam(playerId) {
+        return Math.max(0, this.turnOrder.indexOf(playerId)) % 2 === 0 ? "BLUE" : "RED";
+    }
+    applyCheckersMove(playerId, move, source) {
+        const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
+        let targetRow = Number(payload.targetRow);
+        let targetCol = Number(payload.targetCol);
+        const target = this.board[targetRow]?.[targetCol];
+        const team = this.activeTeam(playerId);
+        if (this.meta.forcedPiece != null && this.meta.forcedPiece !== `${move.row}:${move.col}`)
+            return { correct: false };
+        if (!target || target.isBlocked || target.value !== null || source.meta.team !== team)
+            return { correct: false };
+        const king = source.meta.king === true;
+        const dy = targetRow - move.row;
+        const dx = targetCol - move.col;
+        if (Math.abs(dy) !== Math.abs(dx) || dy === 0)
+            return { correct: false };
+        const direction = team === "BLUE" ? 1 : -1;
+        const captures = this.checkersCapturesFor(team);
+        const mustCapture = captures.length > 0;
+        let captured = null;
+        if (!king) {
+            if (Math.abs(dy) === 1 && dy === direction && !mustCapture) {
+                // Movimiento simple válido.
+            }
+            else if (Math.abs(dy) === 2) {
+                const middle = this.board[move.row + dy / 2][move.col + dx / 2];
+                if (middle.meta.team == null || middle.meta.team === team)
+                    return { correct: false };
+                captured = middle;
+            }
+            else
+                return { correct: false };
+        }
+        else {
+            let enemies = 0;
+            for (let step = 1; step < Math.abs(dy); step += 1) {
+                const traversed = this.board[move.row + Math.sign(dy) * step][move.col + Math.sign(dx) * step];
+                if (traversed.value === null)
+                    continue;
+                if (traversed.meta.team === team || ++enemies > 1)
+                    return { correct: false };
+                captured = traversed;
+            }
+            if (mustCapture && !captured)
+                return { correct: false };
+        }
+        if (mustCapture && !captured)
+            return { correct: false };
+        target.value = source.value;
+        target.isRevealed = true;
+        target.ownerId = playerId;
+        target.meta = { ...source.meta };
+        source.value = null;
+        source.isRevealed = false;
+        source.ownerId = null;
+        source.meta = { playable: true, team: null, king: false };
+        if (captured) {
+            captured.value = null;
+            captured.isRevealed = false;
+            captured.ownerId = null;
+            captured.meta = { playable: true, team: null, king: false };
+        }
+        if ((team === "BLUE" && targetRow === 7) || (team === "RED" && targetRow === 0)) {
+            target.meta.king = true;
+            target.value = `${team}_KING`;
+        }
+        const extraTurn = captured !== null && this.checkersCapturesFrom(targetRow, targetCol, team).length > 0;
+        if (extraTurn)
+            this.meta.forcedPiece = `${targetRow}:${targetCol}`;
+        else
+            delete this.meta.forcedPiece;
+        return { correct: true, points: captured ? 35 : 5, extraTurn };
+    }
+    checkersCapturesFor(team) {
+        const result = [];
+        this.board.forEach((row, rowIndex) => row.forEach((cell, colIndex) => {
+            if (cell.meta.team === team && this.checkersCapturesFrom(rowIndex, colIndex, team).length) {
+                result.push({ row: rowIndex, col: colIndex });
+            }
+        }));
+        return result;
+    }
+    checkersCapturesFrom(row, col, team) {
+        const result = [];
+        for (const dy of [-1, 1])
+            for (const dx of [-1, 1]) {
+                const middle = this.board[row + dy]?.[col + dx];
+                const landing = this.board[row + dy * 2]?.[col + dx * 2];
+                if (middle?.meta.team != null && middle.meta.team !== team && landing && !landing.isBlocked && landing.value === null) {
+                    result.push({ row: row + dy * 2, col: col + dx * 2 });
+                }
+            }
+        return result;
+    }
+    applyChessTacticsMove(playerId, move, source) {
+        const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
+        const action = String(payload.action ?? "MOVE").toUpperCase();
+        let targetRow = Number(payload.targetRow);
+        let targetCol = Number(payload.targetCol);
+        const target = this.board[targetRow]?.[targetCol];
+        const piece = pieceFromCell(source);
+        if (!piece || piece.team !== this.activeTeam(playerId) || !target)
+            return { correct: false };
+        const origin = { row: move.row, col: move.col };
+        if (action === "MOVE") {
+            const valid = movementRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
+            const cost = Math.abs(targetRow - move.row) + Math.abs(targetCol - move.col);
+            if (!valid || target.value !== null || cost > piece.ap)
+                return { correct: false };
+            piece.ap -= cost;
+            writePiece(target, piece, playerId);
+            clearPiece(source);
+            return { correct: true, points: 4, extraTurn: piece.ap > 0 };
+        }
+        if (action === "ATTACK") {
+            const enemy = pieceFromCell(target);
+            const valid = attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
+            if (!enemy || enemy.team === piece.team || piece.ap < 2 || !valid)
+                return { correct: false };
+            enemy.hp -= calculateDamage(piece.type === "ROOK" ? 42 : piece.type === "KNIGHT" ? 36 : 28, enemy.defense);
+            piece.ap -= 2;
+            writePiece(source, piece, playerId);
+            if (enemy.hp <= 0)
+                clearPiece(target);
+            else
+                writePiece(target, enemy, target.ownerId);
+            return { correct: true, points: enemy.hp <= 0 ? 45 : 18, extraTurn: piece.ap > 0 };
+        }
+        if (action !== "SKILL")
+            return { correct: false };
+        const skill = skillFor(piece);
+        const cost = skillCost(skill);
+        if (piece.ap < cost)
+            return { correct: false };
+        if (skill === "PHALANX") {
+            piece.ap -= cost;
+            piece.defense *= 2;
+            piece.statusEffects = [...new Set([...piece.statusEffects, "PHALANX"])];
+            writePiece(source, piece, playerId);
+            return { correct: true, points: 8 };
+        }
+        if (skill === "PIERCING_RAY" && targetRow === move.row && targetCol === move.col) {
+            targetRow += piece.team === "BLUE" ? 1 : -1;
+        }
+        const validTarget = skill === "EARTHQUAKE" && targetRow === move.row && targetCol === move.col
+            || attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
+        if (!validTarget)
+            return { correct: false };
+        piece.ap -= cost;
+        writePiece(source, piece, playerId);
+        if (skill === "EARTHQUAKE") {
+            for (let row = targetRow - 1; row <= targetRow + 1; row += 1)
+                for (let col = targetCol - 1; col <= targetCol + 1; col += 1) {
+                    const victimCell = this.board[row]?.[col];
+                    const victim = victimCell ? pieceFromCell(victimCell) : null;
+                    if (!victimCell || !victim || victim.team === piece.team)
+                        continue;
+                    victim.hp -= calculateDamage(40, victim.defense, .5);
+                    if (victim.hp <= 0)
+                        clearPiece(victimCell);
+                    else
+                        writePiece(victimCell, victim, victimCell.ownerId);
+                }
+        }
+        else {
+            const dy = Math.sign(targetRow - move.row);
+            const dx = Math.sign(targetCol - move.col);
+            let hit = 0;
+            for (let row = move.row + dy, col = move.col + dx; row >= 0 && row < 8 && col >= 0 && col < 8; row += dy, col += dx) {
+                const victimCell = this.board[row][col];
+                const victim = pieceFromCell(victimCell);
+                if (!victim || victim.team === piece.team)
+                    continue;
+                victim.hp -= calculateDamage(58, victim.defense, hit++ === 0 ? 1 : .55);
+                if (victim.hp <= 0)
+                    clearPiece(victimCell);
+                else
+                    writePiece(victimCell, victim, victimCell.ownerId);
+                if (hit >= 2)
+                    break;
+            }
+        }
+        return { correct: true, points: 32 };
+    }
+    arrowShapeMembers(shapeId) {
+        const result = [];
+        this.board.forEach((row, rowIndex) => row.forEach((cell, colIndex) => {
+            if (String(cell.meta.shapeId ?? `${rowIndex}:${colIndex}`) === shapeId) {
+                result.push({ row: rowIndex, col: colIndex, cell });
+            }
+        }));
+        return result;
+    }
+    canArrowShapeEscape(shapeId, removed) {
+        const members = this.arrowShapeMembers(shapeId);
+        if (!members.length)
+            return false;
+        const own = new Set(members.map(({ row, col }) => `${row}:${col}`));
+        const direction = String(members[0].cell.meta.arrow);
+        const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
+            : direction === "DOWN" ? [1, 0] : [0, -1];
+        return members.every((member) => {
+            for (let row = member.row + dy, col = member.col + dx; row >= 0 && row < this.board.length && col >= 0 && col < this.board[0].length; row += dy, col += dx) {
+                const key = `${row}:${col}`;
+                if (!own.has(key) && !removed.has(key))
+                    return false;
+            }
+            return true;
+        });
+    }
     botValue(row, col, correct) {
         if (this.gameType === "WORD_SEARCH") {
             const placement = this.meta.placements.find((item) => item.startRow === row && item.startCol === col);
@@ -590,8 +814,6 @@ export class GenericPuzzleEngine {
             const free = ["top", "right", "bottom", "left"].filter((side) => cell.meta[side] !== true);
             return free[0] ?? "top";
         }
-        if (this.gameType === "SLITHERLINK")
-            return this.missingSlitherEdges(row, col)[0] ?? "top";
         if (this.gameType === "MINESWEEPER") {
             const mine = this.answers[row][col] === true;
             if (correct && mine) {
@@ -660,20 +882,30 @@ export class GenericPuzzleEngine {
         }
         if (this.gameType === "WORD_SEARCH")
             return this.meta.foundWords.length === this.meta.words.length;
-        if (this.gameType === "HANGMAN")
-            return this.board[0].every((cell) => cell.value !== null);
+        if (this.gameType === "HANGMAN") {
+            return this.board[0].every((cell) => cell.value !== null)
+                || (this.turnOrder.length > 0 && this.turnOrder.every((id) => (this.hangmanErrors.get(id) ?? 0) >= 6));
+        }
         if (this.gameType === "ARROWS_ESCAPE")
             return [...this.arrowRemoved.values()].some((removed) => removed.size === this.board.length * this.board[0].length);
+        if (this.gameType === "TIC_TAC_TOE")
+            return this.ticTacToeWinner() !== null || this.board.flat().every((cell) => cell.value !== null);
+        if (this.gameType === "CHECKERS") {
+            const teams = new Set(this.board.flat().map((cell) => cell.meta.team).filter(Boolean));
+            return teams.size <= 1;
+        }
+        if (this.gameType === "CHESS_TACTICS") {
+            const teams = new Set(this.board.flat().map((cell) => cell.meta.team).filter(Boolean));
+            return teams.size <= 1;
+        }
         if (this.gameType === "DOTS_AND_BOXES")
             return this.board.every((row) => row.every((cell) => cell.ownerId !== null));
         if (this.gameType === "NURIKABE") {
             return this.board.every((row, y) => row.every((cell, x) => cell.meta.islandClue === true || cell.value === (this.answers[y][x] === true ? "RIVER" : "ISLAND")));
         }
-        if (["NONOGRAM", "HITORI", "BRIDGES"].includes(this.gameType)) {
+        if (["HITORI", "BRIDGES"].includes(this.gameType)) {
             return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] !== true || cell.ownerId !== null));
         }
-        if (this.gameType === "SLITHERLINK")
-            return this.board.every((row) => row.every((cell) => cell.ownerId !== null));
         if (this.gameType === "CROSS_LETTERS") {
             return this.letterBag.length === 0 && [...this.racks.values()].every((rack) => rack.length === 0 || findWordForRack(rack) === null);
         }
@@ -695,7 +927,8 @@ export class GenericPuzzleEngine {
         }
     }
     syncTurnPlayers(game) {
-        const ids = game.snapshot().players.map((player) => player.id);
+        const ids = game.snapshot().players.map((player) => player.id)
+            .filter((id) => this.gameType !== "HANGMAN" || (this.hangmanErrors.get(id) ?? 0) < 6);
         this.turnOrder = ids;
         if (!this.activePlayerId || !ids.includes(this.activePlayerId))
             this.activePlayerId = ids[0] ?? null;
@@ -951,6 +1184,20 @@ export class GenericPuzzleEngine {
             return;
         const index = Math.max(0, this.turnOrder.indexOf(this.activePlayerId ?? ""));
         this.activePlayerId = this.turnOrder[(index + 1) % this.turnOrder.length];
+        if (this.gameType === "CHESS_TACTICS") {
+            const nextTeam = this.activeTeam(this.activePlayerId);
+            this.board.flat().forEach((cell) => {
+                const piece = pieceFromCell(cell);
+                if (!piece || piece.team !== nextTeam)
+                    return;
+                piece.ap = piece.maxAp;
+                if (piece.statusEffects.includes("PHALANX")) {
+                    piece.defense = Math.max(1, Math.round(piece.defense / 2));
+                    piece.statusEffects = piece.statusEffects.filter((effect) => effect !== "PHALANX");
+                }
+                writePiece(cell, piece, cell.ownerId);
+            });
+        }
     }
     ensureRack(playerId, guaranteeBotMove = false) {
         if (this.racks.has(playerId))
@@ -1015,6 +1262,20 @@ export class GenericPuzzleEngine {
                 return { correct: false };
             rack.splice(index, 1);
         }
+        // Cross-check autoritativo: se simula la colocación completa y se validan
+        // todas las palabras horizontales y verticales que toca cada ficha nueva.
+        const projected = this.board.map((boardRow) => boardRow.map((target) => target.value == null ? "" : String(target.value)));
+        coordinates.forEach(({ row, col, letter }) => { projected[row][col] = letter; });
+        const formedWords = new Set([word]);
+        for (const tile of newTiles) {
+            for (const axis of ["H", "V"]) {
+                const cross = readOrthogonalWord(projected, tile.row, tile.col, axis);
+                if (cross.length >= 2)
+                    formedWords.add(cross);
+            }
+        }
+        if ([...formedWords].some((formed) => !SPANISH_WORDS.has(formed)))
+            return { correct: false };
         let wordMultiplier = 1;
         let points = 0;
         for (const { row, col, letter } of coordinates) {
@@ -1138,10 +1399,6 @@ export class GenericPuzzleEngine {
             return "Movimiento fuera del tablero";
         return null;
     }
-    missingSlitherEdges(row, col) {
-        const expected = String(this.answers[row][col] ?? "").split("|").filter(Boolean);
-        return expected.filter((edge) => this.board[row][col].meta[edge] !== true);
-    }
     reject(requestId, code, message) {
         return { accepted: false, requestId, code, message, points: 0, penaltyMs: 0, completed: this.completed };
     }
@@ -1154,6 +1411,45 @@ function normalizeValue(value, expected) {
     if (typeof expected === "boolean")
         return value === true || value === "true" || value === "BLOCK" || value === "FILL";
     return typeof value === "string" ? value.toUpperCase() : null;
+}
+function pieceFromCell(cell) {
+    const type = String(cell.meta.type ?? "");
+    const team = String(cell.meta.team ?? "");
+    if (!["PAWN", "KNIGHT", "ROOK"].includes(type) || !["BLUE", "RED"].includes(team))
+        return null;
+    return {
+        id: String(cell.meta.pieceId ?? ""),
+        team: team,
+        type: type,
+        hp: Number(cell.meta.hp ?? 0),
+        maxHp: Number(cell.meta.maxHp ?? 1),
+        ap: Number(cell.meta.ap ?? 0),
+        maxAp: Number(cell.meta.maxAp ?? 0),
+        defense: Number(cell.meta.defense ?? 0),
+        statusEffects: Array.isArray(cell.meta.statusEffects) ? cell.meta.statusEffects.map(String) : [],
+    };
+}
+function writePiece(cell, piece, ownerId) {
+    cell.value = piece.type;
+    cell.isRevealed = true;
+    cell.ownerId = ownerId;
+    cell.meta = {
+        pieceId: piece.id,
+        team: piece.team,
+        type: piece.type,
+        hp: piece.hp,
+        maxHp: piece.maxHp,
+        ap: piece.ap,
+        maxAp: piece.maxAp,
+        defense: piece.defense,
+        statusEffects: piece.statusEffects,
+    };
+}
+function clearPiece(cell) {
+    cell.value = null;
+    cell.isRevealed = false;
+    cell.ownerId = null;
+    cell.meta = {};
 }
 function oppositeSide(side) {
     return { top: "bottom", right: "left", bottom: "top", left: "right" }[side] ?? "";
@@ -1170,6 +1466,20 @@ const SPANISH_WORDS = new Set(SPANISH_DICTIONARY.map((entry) => normalizeSpanish
 const LETTER_BAG = [..."AAAAAAAAAAAAEEEEEEEEEEEEOOOOOOOOOOSSSSSSNNNNNRRRRRIIIIILLTTTTCCCCUDPMG B F V Y Q H Z J Ñ X".replace(/\s/g, "")];
 function normalizeSpanishWord(value) {
     return value.trim().toUpperCase().replace(/Ñ/g, "#").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/#/g, "Ñ").replace(/[^A-ZÑ]/g, "");
+}
+function readOrthogonalWord(board, row, col, axis) {
+    const dy = axis === "V" ? 1 : 0;
+    const dx = axis === "H" ? 1 : 0;
+    let startRow = row;
+    let startCol = col;
+    while (board[startRow - dy]?.[startCol - dx]) {
+        startRow -= dy;
+        startCol -= dx;
+    }
+    let result = "";
+    for (let y = startRow, x = startCol; board[y]?.[x]; y += dy, x += dx)
+        result += board[y][x];
+    return result;
 }
 function shuffleLetters(letters) {
     for (let index = letters.length - 1; index > 0; index -= 1) {

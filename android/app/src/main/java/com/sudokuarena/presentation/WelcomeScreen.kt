@@ -38,13 +38,14 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,6 +61,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
+import com.sudokuarena.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -159,9 +163,9 @@ fun WelcomeScreen(
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
                 GameCarouselSelector(selectedGameType, favoriteGames, onGameSelected, onToggleFavorite)
                 NeonArenaButton(
-                    text = if (selectedGameType in setOf(GameType.ABYSS_ARENA, GameType.RHYTHM_JUMP)) "Disponible online" else "Modo Solitario",
+                    text = if (selectedGameType in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS)) "Disponible online" else "Modo Solitario",
                     onClick = onSoloMode,
-                    enabled = selectedGameType !in setOf(GameType.ABYSS_ARENA, GameType.RHYTHM_JUMP),
+                    enabled = selectedGameType !in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(if (landscape) 48.dp else 58.dp),
@@ -332,11 +336,11 @@ private fun GameCarouselSelector(
     onSelected: (GameType) -> Unit,
     onToggleFavorite: (GameType) -> Unit,
 ) {
-    var tab by remember { mutableStateOf(0) }
+    var tab by remember { mutableIntStateOf(0) }
     val allGames = remember { GameType.entries.sortedBy(::gameMenuName) }
     val games = if (tab == 0) allGames else allGames.filter(favorites::contains)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        TabRow(selectedTabIndex = tab, containerColor = Color.Transparent) {
+        PrimaryTabRow(selectedTabIndex = tab, containerColor = Color.Transparent) {
             Tab(tab == 0, onClick = { tab = 0 }, text = { Text("Todos") })
             Tab(tab == 1, onClick = { tab = 1 }, text = { Text("♥ Favoritos (${favorites.size})") })
         }
@@ -365,17 +369,30 @@ private fun GameCarouselSelector(
             modifier = Modifier.fillMaxWidth().height(150.dp),
         ) { page ->
             val game = games[page]
-            val offset = kotlin.math.abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
-            val scale = 1f - offset.coerceIn(0f, 1f) * .13f
             Surface(
                 color = Color.White.copy(alpha = .94f),
                 shape = RoundedCornerShape(22.dp),
                 border = BorderStroke(2.dp, if (game == selected) ArenaColors.ElectricBlue else Color(0xFFCBD5E1)),
                 shadowElevation = if (game == selected) 13.dp else 4.dp,
-                modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale }
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    // Se lee durante la fase gráfica: el swipe mantiene 60 FPS sin
+                    // recomponer toda la tarjeta en cada fracción de desplazamiento.
+                    val offset = kotlin.math.abs(
+                        (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction,
+                    ).coerceIn(0f, 1f)
+                    scaleX = 1f - offset * .15f
+                    scaleY = scaleX
+                    alpha = 1f - offset * .4f
+                }
                     .clickable { onSelected(game) },
             ) {
                 Box(Modifier.fillMaxSize().padding(10.dp)) {
+                    AsyncImage(
+                        model = gameCoverResource(game),
+                        contentDescription = "Portada de ${gameMenuName(game)}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = .34f },
+                    )
                     GameLoopPreview(game, Modifier.align(Alignment.Center).size(84.dp))
                     Text(
                         gameMenuName(game), fontWeight = FontWeight.Black, color = ArenaColors.Ink,
@@ -393,6 +410,12 @@ private fun GameCarouselSelector(
     }
 }
 
+private fun gameCoverResource(game: GameType): Int = when (game) {
+    // El catálogo usa un Drawable local versionado: Coil no depende de red ni
+    // provoca saltos visuales. Puede sustituirse cada entrada por su cover final.
+    else -> R.drawable.multi_arena_icon
+}
+
 @Composable
 private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
     val phase by rememberInfiniteTransition(label = "preview-$game").animateFloat(
@@ -408,14 +431,23 @@ private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
                 drawLine(accent, Offset(x + 15f, center.y), Offset(x + 5f, center.y - 9f), 5f)
                 drawLine(accent, Offset(x + 15f, center.y), Offset(x + 5f, center.y + 9f), 5f)
             }
-            GameType.RHYTHM_JUMP -> {
-                val y = size.height * (.72f - kotlin.math.abs(kotlin.math.sin(phase * 3.14159f)) * .45f)
-                drawCircle(accent, 10f, Offset(center.x, y))
-                drawLine(Color(0xFF00C853), Offset(size.width * .2f, size.height * .78f), Offset(size.width * .8f, size.height * .78f), 7f)
+            GameType.PACMAN_ARENA -> {
+                val x = size.width * (.2f + phase * .6f)
+                drawCircle(Color.Yellow, 11f, Offset(x, center.y))
+                repeat(5) { index -> drawCircle(Color.White, 2.5f, Offset(size.width * (.22f + index * .13f), center.y)) }
+                drawCircle(Color.Red, 10f, Offset(size.width * .8f, center.y))
             }
-            GameType.ABYSS_ARENA -> repeat(12) { ray ->
-                val spread = (ray - 5.5f) / 12f
-                drawLine(accent.copy(alpha = .42f), Offset(center.x, size.height), Offset(center.x + spread * size.width, 0f), 2f)
+            GameType.TETRIS_ARENA -> repeat(4) { index ->
+                val top = size.height * ((phase + index * .22f) % 1f)
+                drawRect(listOf(Color.Cyan, Color.Magenta, Color.Yellow, Color.Green)[index], Offset(size.width * (.27f + index * .12f), top), Size(10f, 10f))
+            }
+            GameType.CHECKERS -> repeat(4) { row -> repeat(4) { col ->
+                if ((row + col) % 2 == 1) drawCircle(if (row < 2) Color(0xFF1565C0) else Color(0xFFE53935), 7f, Offset(size.width * (.2f + col * .2f), size.height * (.2f + row * .2f)))
+            } }
+            GameType.CHESS_TACTICS -> {
+                drawCircle(Color(0xFF1565C0), 18f, Offset(size.width * .34f, center.y))
+                drawCircle(Color(0xFFE53935), 18f, Offset(size.width * .66f, center.y))
+                drawLine(Color(0xFFFFC400), Offset(size.width * .43f, center.y), Offset(size.width * .57f, center.y), 6f)
             }
             GameType.HANGMAN -> {
                 drawLine(accent, Offset(size.width * .25f, size.height * .8f), Offset(size.width * .25f, size.height * .18f), 5f)
@@ -506,28 +538,28 @@ private fun CompactGameSelector(selected: GameType, onSelected: (GameType) -> Un
 
 private fun gameGlyph(game: GameType): String = when (game) {
     GameType.SUDOKU -> "9"; GameType.MINESWEEPER -> "✹"; GameType.WORD_SEARCH -> "A↗"; GameType.CROSSWORD -> "✚"
-    GameType.NONOGRAM -> "▦"; GameType.DOTS_AND_BOXES -> "□"; GameType.KAKURO -> "Σ"; GameType.MATHDOKU -> "×"
-    GameType.HITORI -> "◼"; GameType.RUMMIKUB -> "123"
-    GameType.NURIKABE -> "≈"; GameType.BRIDGES -> "●═●"; GameType.SLITHERLINK -> "⌁"
-    GameType.HANGMAN -> "A_"; GameType.ARROWS_ESCAPE -> "➜"; GameType.RHYTHM_JUMP -> "♫↑"
+    GameType.TIC_TAC_TOE -> "XO"; GameType.DOTS_AND_BOXES -> "□"; GameType.KAKURO -> "Σ"; GameType.MATHDOKU -> "×"
+    GameType.HITORI -> "◼"; GameType.CHESS_TACTICS -> "♞"
+    GameType.NURIKABE -> "≈"; GameType.BRIDGES -> "●═●"; GameType.TETRIS_ARENA -> "▟"
+    GameType.HANGMAN -> "A_"; GameType.ARROWS_ESCAPE -> "➜"; GameType.PACMAN_ARENA -> "●"
     GameType.CROSS_LETTERS -> "AÑ"
     GameType.SECRET_CODE -> "🔐"
     GameType.CAPITAL_ARENA -> "💰"
     GameType.NEXUS_ZERO -> "±0"
-    GameType.ABYSS_ARENA -> "☄"
+    GameType.CHECKERS -> "⛀"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
     GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa Letras"
-    GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
-    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
-    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Conecta Puntos Neón"
-    GameType.HANGMAN -> "El Ahorcado Arena"; GameType.ARROWS_ESCAPE -> "Flechas en Fuga"; GameType.RHYTHM_JUMP -> "Salto Rítmico Arena"
+    GameType.CROSSWORD -> "Crucigrama"; GameType.TIC_TAC_TOE -> "El Gato"; GameType.DOTS_AND_BOXES -> "Timbiriche"
+    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.CHESS_TACTICS -> "Chess Tactics RPG"
+    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.TETRIS_ARENA -> "Tetris Arena"
+    GameType.HANGMAN -> "El Ahorcado Arena"; GameType.ARROWS_ESCAPE -> "Flechas en Fuga"; GameType.PACMAN_ARENA -> "Pac-Man Arena"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"
     GameType.NEXUS_ZERO -> "Nexo Cero"
-    GameType.ABYSS_ARENA -> "Abismo Arena"
+    GameType.CHECKERS -> "Damas Clásicas"
 }
 
 @Composable

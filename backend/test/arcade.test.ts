@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { PacmanArenaEngine, TetrisArenaEngine } from "../src/action/arcadeEngines.js";
+
+const players = [
+  { id: "p1", name: "Nova", color: "#00E5FF", slot: 0, score: 0, blockedUntil: 0, energy: 0, teamId: "A", role: "PLAYER", teamScore: 0, isBot: false, shieldUntil: 0, combo: 0, maxCombo: 0, comboMultiplier: 1, powerLoadout: [], avatarId: "ORBIT" },
+  { id: "p2", name: "Vega", color: "#FF2DAA", slot: 1, score: 0, blockedUntil: 0, energy: 0, teamId: "B", role: "PLAYER", teamScore: 0, isBot: false, shieldUntil: 0, combo: 0, maxCombo: 0, comboMultiplier: 1, powerLoadout: [], avatarId: "NOVA" },
+] as any;
+
+describe("Tetris Arena", () => {
+  it("usa tableros 10x20 y una bolsa de siete piezas", () => {
+    const engine = new TetrisArenaEngine();
+    engine.syncPlayers(players);
+    engine.input("p1", "ROTATE");
+    engine.input("p1", "HARD_DROP");
+    const state = engine.snapshot();
+    assert.equal(state.players.length, 2);
+    assert.equal(state.players[0].board.length, 20);
+    assert.equal(state.players[0].board[0].length, 10);
+    assert.ok(state.players[0].next);
+  });
+});
+
+describe("Pac-Man Arena", () => {
+  it("publica tilemap y fantasmas con máquina de estados", () => {
+    const engine = new PacmanArenaEngine();
+    engine.syncPlayers(players);
+    engine.input("p1", "LEFT");
+    for (let tick = 0; tick < 12; tick += 1) engine.tick(1_000 + tick * 100);
+    const state = engine.snapshot();
+    assert.equal(state.tilemap.length, 15);
+    assert.equal(state.ghosts.length, 4);
+    assert.ok(state.ghosts.every((ghost: { mode: string }) => ["CHASE", "SCATTER", "FRIGHTENED"].includes(ghost.mode)));
+  });
+});

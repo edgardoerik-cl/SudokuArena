@@ -9,25 +9,93 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "MINESWEEPER": return minesweeper(random, difficulty);
     case "WORD_SEARCH": return wordSearch(random, difficulty);
     case "CROSSWORD": return crossword(random, difficulty);
-    case "NONOGRAM": return nonogram(random, difficulty);
+    case "TIC_TAC_TOE": return ticTacToe(difficulty);
     case "DOTS_AND_BOXES": return dotsAndBoxes(difficulty);
     case "KAKURO": return kakuro(random, difficulty);
     case "MATHDOKU": return mathdoku(random, difficulty);
     case "HITORI": return hitori(random, difficulty);
-    case "RUMMIKUB": return logicTiles(random, difficulty);
+    case "CHESS_TACTICS": return chessTactics(difficulty);
     case "NURIKABE": return nurikabe(random, difficulty);
     case "BRIDGES": return bridges(random, difficulty);
-    case "SLITHERLINK": return slitherlink(random, difficulty);
+    case "TETRIS_ARENA": return { board: matrix(20, 10, () => cell(null, false)), answers: matrix<CellValue>(20, 10, () => null), meta: { actionMode: true, engine: "TETRIS_7_BAG", difficulty } };
     case "HANGMAN": return hangman(random, difficulty);
     case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty);
-    case "RHYTHM_JUMP": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, bpm: 128, difficulty } };
+    case "PACMAN_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "PACMAN_TILEMAP", difficulty } };
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
     case "SECRET_CODE": return secretCode(random, difficulty);
     case "CAPITAL_ARENA": return capitalArena(random, difficulty);
     case "NEXUS_ZERO": return nexusZero(random, difficulty);
-    case "ABYSS_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, difficulty } };
+    case "CHECKERS": return checkers(difficulty);
     case "SUDOKU": return latinPuzzle(random, 9);
   }
+}
+
+function ticTacToe(difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  return {
+    board: matrix(3, 3, () => cell(null, false)),
+    answers: matrix<CellValue>(3, 3, () => null),
+    meta: { turnBased: true, marks: ["X", "O"], difficulty },
+  };
+}
+
+function checkers(difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const board = matrix(8, 8, (row, col) => {
+    const playable = (row + col) % 2 === 1;
+    if (!playable) return blockedCell({ playable: false });
+    const team = row <= 2 ? "BLUE" : row >= 5 ? "RED" : null;
+    return cell(team ? `${team}_MAN` : null, team !== null, {
+      playable: true,
+      team,
+      king: false,
+    });
+  });
+  return {
+    board,
+    answers: matrix<CellValue>(8, 8, () => null),
+    meta: {
+      turnBased: true,
+      mandatoryCapture: true,
+      flyingKings: true,
+      instructions: "Las capturas son obligatorias. Encadena saltos y corona una reina al alcanzar el extremo.",
+      difficulty,
+    },
+  };
+}
+
+function chessTactics(difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const board = matrix(8, 8, () => cell(null, false));
+  let id = 0;
+  const add = (row: number, col: number, team: "BLUE" | "RED", type: "PAWN" | "KNIGHT" | "ROOK") => {
+    const stats = type === "PAWN"
+      ? { hp: 70, maxHp: 70, ap: 3, maxAp: 3, defense: 8 }
+      : type === "KNIGHT"
+        ? { hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12 }
+        : { hp: 135, maxHp: 135, ap: 3, maxAp: 3, defense: 18 };
+    board[row]![col] = cell(type, true, {
+      pieceId: `${team}-${type}-${++id}`,
+      team,
+      type,
+      ...stats,
+      statusEffects: [],
+    });
+  };
+  for (const col of [1, 3, 4, 6]) {
+    add(1, col, "BLUE", "PAWN");
+    add(6, col, "RED", "PAWN");
+  }
+  add(0, 0, "BLUE", "ROOK"); add(0, 2, "BLUE", "KNIGHT");
+  add(7, 7, "RED", "ROOK"); add(7, 5, "RED", "KNIGHT");
+  return {
+    board,
+    answers: matrix<CellValue>(8, 8, () => null),
+    meta: {
+      turnBased: true,
+      blueMoves: "movimiento",
+      redMoves: "ataque",
+      instructions: "Gasta AP para mover y atacar. Azul indica movimiento; rojo, alcance de combate.",
+      difficulty,
+    },
+  };
 }
 
 /**
@@ -39,23 +107,37 @@ function nexusZero(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBl
   const columns = 6;
   const board = matrix(rows, columns, () => cell(null, true));
   const answers = matrix<CellValue>(rows, columns, () => null);
-  const partner = Array.from({ length: rows * columns }, (_, index) =>
-    index % columns % 2 === 0 ? index + 1 : index - 1
-  );
-  // Barajado profundo por "domino flips": cada transformación 2×2 conserva
-  // parejas ortogonales y, por tanto, garantiza que el puzzle siga resoluble.
-  for (let pass = 0; pass < rows * columns * 12; pass += 1) {
-    const row = random.int(0, rows - 2);
-    const col = random.int(0, columns - 2);
-    const a = row * columns + col;
-    const b = a + 1;
-    const c = a + columns;
-    const d = c + 1;
-    if (partner[a] === b && partner[c] === d) {
-      partner[a] = c; partner[c] = a; partner[b] = d; partner[d] = b;
-    } else if (partner[a] === c && partner[b] === d) {
-      partner[a] = b; partner[b] = a; partner[c] = d; partner[d] = c;
+  const indices = random.shuffle(Array.from({ length: rows * columns }, (_, index) => index));
+  const partner = new Array<number>(rows * columns);
+  for (let index = 0; index < indices.length; index += 2) {
+    partner[indices[index]!] = indices[index + 1]!;
+    partner[indices[index + 1]!] = indices[index]!;
+  }
+  type Box = { x: number; y: number; width: number; height: number };
+  const boxes: Box[] = [];
+  const width = 74; const height = 58; const arenaWidth = 1_000; const arenaHeight = 700;
+  for (let index = 0; index < rows * columns; index += 1) {
+    let candidate: Box | null = null;
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const proposed = {
+        x: random.int(12, arenaWidth - width - 12),
+        y: random.int(12, arenaHeight - height - 12),
+        width,
+        height,
+      };
+      const overlaps = boxes.some((box) =>
+        proposed.x < box.x + box.width + 10 && proposed.x + proposed.width + 10 > box.x &&
+        proposed.y < box.y + box.height + 10 && proposed.y + proposed.height + 10 > box.y
+      );
+      if (!overlaps) { candidate = proposed; break; }
     }
+    // Fallback determinista para densidades extremas; conserva padding seguro.
+    boxes.push(candidate ?? {
+      x: 18 + (index % columns) * Math.floor((arenaWidth - 36) / columns),
+      y: 18 + Math.floor(index / columns) * Math.floor((arenaHeight - 36) / rows),
+      width: width - 8,
+      height: height - 8,
+    });
   }
   const assigned = new Set<number>();
   for (let index = 0; index < partner.length; index += 1) {
@@ -68,8 +150,8 @@ function nexusZero(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBl
     board[otherRow]![otherCol]!.value = -charge;
     answers[row]![col] = `${otherRow}:${otherCol}`;
     answers[otherRow]![otherCol] = `${row}:${col}`;
-    board[row]![col]!.meta = { charge: true };
-    board[otherRow]![otherCol]!.meta = { charge: true };
+    board[row]![col]!.meta = { charge: true, ...boxes[index]! };
+    board[otherRow]![otherCol]!.meta = { charge: true, ...boxes[other]! };
     assigned.add(index); assigned.add(other);
   }
   return {
@@ -77,7 +159,9 @@ function nexusZero(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBl
     answers,
     meta: {
       instructions: "Nexo Cero: enlaza dos cargas vecinas que sumen 0. Encadena rápido para dominar la matriz.",
-      shufflePasses: rows * columns * 12,
+      spatialLayout: true,
+      arenaWidth,
+      arenaHeight,
       guaranteedSolvable: true,
       difficulty,
     },
@@ -187,19 +271,6 @@ function crossword(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBl
   return { board, answers, meta: { clues: placements.map((p, i) => `${i + 1}${p.direction}. ${p.clue}`), difficulty } };
 }
 
-function nonogram(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const size = sizeFor(difficulty, 6, 8, 10, 12);
-  const density = difficulty === "EASY" ? .46 : .38;
-  const answers = matrix<boolean>(size, size, (row, col) => {
-    const mirror = Math.min(col, size - 1 - col);
-    return new SeededRandom(`${row}:${mirror}:${random.int(0, 1_000_000)}`).next() < density;
-  });
-  return {
-    board: answers.map((row) => row.map(() => cell(null, false))), answers,
-    meta: { rowClues: answers.map(runClues), columnClues: transpose(answers).map(runClues), difficulty }
-  };
-}
-
 function dotsAndBoxes(difficulty: PuzzleDifficulty): PuzzleBlueprint {
   const boxes = sizeFor(difficulty, 3, 5, 6, 7);
   return {
@@ -307,46 +378,6 @@ function hitori(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBluep
   };
 }
 
-function logicTiles(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const rows = sizeFor(difficulty, 6, 8, 10, 12);
-  const columns = 6;
-  const colors = ["RED", "BLUE", "GREEN", "ORANGE"] as const;
-  const answers = matrix<CellValue>(rows, columns, () => null);
-  const board = matrix(rows, columns, (row, col) => {
-    const color = random.pick(colors);
-    const number = random.int(1, 9);
-    answers[row]![col] = `${color}:${number}`;
-    return cell(number, true, { arcadeTile: true, tileColor: color, spawnOrder: row * columns + col });
-  });
-  return {
-    board,
-    answers,
-    meta: {
-      colors,
-      depositZones: ["RED", "BLUE", "GREEN", "ORANGE", "NUMBER"],
-      fallIntervalMs: sizeFor(difficulty, 1_600, 1_250, 950, 700),
-      instructions: "Arcade Match: arrastra fichas a depósitos y encadena tres del mismo color o número.",
-      difficulty,
-    },
-  };
-}
-
-function logicChallenge(random: SeededRandom, operations: readonly string[]): { answer: number; operation: string; rule: string } {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const operation = random.pick(operations);
-    const left = random.int(1, 9);
-    const right = random.int(1, 9);
-    const answer = operation === "SUM" ? left + right
-      : operation === "AND" ? (left & right)
-      : operation === "OR" ? (left | right)
-      : (left ^ right);
-    if (answer < 1 || answer > 9) continue;
-    const symbol = operation === "SUM" ? "+" : operation;
-    return { answer, operation, rule: `${left} ${symbol} ${right} = ?` };
-  }
-  return { answer: 2, operation: "SUM", rule: "1 + 1 = ?" };
-}
-
 function nurikabe(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
   const size = sizeFor(difficulty, 6, 8, 10, 12);
   const answers = matrix<boolean>(size, size, (row, col) => row % 2 === 1 ? col !== (row % 4 === 1 ? size - 1 : 0) : col % 3 === 2);
@@ -411,58 +442,6 @@ function bridges(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlue
   };
 }
 
-function slitherlink(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  return connectDotsNeon(random, difficulty);
-  /*
-  const size = sizeFor(difficulty, 5, 7, 9, 11);
-  // Construimos primero un lazo rectangular válido y después derivamos las pistas.
-  // Los márgenes aleatorios cambian la solución sin arriesgar la continuidad del lazo.
-  const maxInset = Math.max(0, Math.min(2, Math.floor(size / 4)));
-  const top = random.int(0, maxInset);
-  const left = random.int(0, maxInset);
-  const bottom = random.int(size - 1 - maxInset, size - 1);
-  const right = random.int(size - 1 - maxInset, size - 1);
-  const answers = matrix<CellValue>(size, size, (row, col) => {
-    const edges: string[] = [];
-    if (row === top && col >= left && col <= right) edges.push("top");
-    if (row === bottom && col >= left && col <= right) edges.push("bottom");
-    if (col === left && row >= top && row <= bottom) edges.push("left");
-    if (col === right && row >= top && row <= bottom) edges.push("right");
-    return edges.join("|");
-  });
-  const board = matrix(size, size, (row, col) => {
-    const clue = String(answers[row]![col]).split("|").filter(Boolean).length;
-    const hideChance = difficulty === "EASY" ? .15 : difficulty === "EXPERT" ? .58 : .35;
-    return cell(null, false, { ...edgeMeta(), clue: random.next() < hideChance ? -1 : clue });
-  });
-  return { board, answers, meta: { instructions: "Traza un único lazo; cada pista indica cuántos lados usa.", difficulty } };
-  */
-}
-
-function connectDotsNeon(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const size = sizeFor(difficulty, 5, 6, 7, 8);
-  const order: Array<[number, number]> = [];
-  for (let row = 0; row < size; row += 1) {
-    const columns = Array.from({ length: size }, (_, col) => col);
-    if (row % 2 === 1) columns.reverse();
-    for (const col of columns) order.push([row, col]);
-  }
-  if (random.next() < .5) order.reverse();
-  const answers = matrix<CellValue>(size, size, () => null);
-  const board = matrix(size, size, () => cell(null, true, { neonPoint: true }));
-  order.forEach(([row, col], index) => {
-    const next = order[index + 1];
-    answers[row]![col] = next ? `${next[0]}:${next[1]}` : "END";
-    board[row]![col]!.meta.pathIndex = index;
-    board[row]![col]!.meta.start = index === 0;
-  });
-  return {
-    board,
-    answers,
-    meta: { pathLength: order.length, instructions: "Conecta todos los puntos con una sola línea continua, sin cruzarla.", difficulty },
-  };
-}
-
 function hangman(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
   const minimum = sizeFor(difficulty, 4, 6, 8, 10);
   const candidates = SPANISH_DICTIONARY.filter((entry) => entry.word.length >= minimum && entry.word.length <= 14);
@@ -479,20 +458,55 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
   const size = sizeFor(difficulty, 5, 6, 7, 8);
   const board = matrix(size, size, () => cell(null, true));
   const answers = matrix<CellValue>(size, size, () => null);
+  const occupied = new Set<string>();
+  const shapes: Array<{ id: string; anchor: { x: number; y: number }; offsets: Array<{ x: number; y: number }>; direction: string }> = [];
+  const templates = [
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+    [{ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }],
+    [{ x: 0, y: 0 }],
+  ];
   for (let row = 0; row < size; row += 1) for (let col = 0; col < size; col += 1) {
+    if (occupied.has(`${row}:${col}`)) continue;
+    const validTemplates = random.shuffle(templates).filter((offsets) => offsets.every(({ x, y }) =>
+      row + y < size && col + x < size && !occupied.has(`${row + y}:${col + x}`)
+    ));
+    const offsets = validTemplates[0] ?? templates[3]!;
+    offsets.forEach(({ x, y }) => occupied.add(`${row + y}:${col + x}`));
+    const cells = offsets.map(({ x, y }) => ({ row: row + y, col: col + x }));
+    const minRow = Math.min(...cells.map((point) => point.row));
+    const maxRow = Math.max(...cells.map((point) => point.row));
+    const minCol = Math.min(...cells.map((point) => point.col));
+    const maxCol = Math.max(...cells.map((point) => point.col));
     const distances = [
-      { direction: "UP", value: row }, { direction: "RIGHT", value: size - 1 - col },
-      { direction: "DOWN", value: size - 1 - row }, { direction: "LEFT", value: col },
+      { direction: "UP", value: minRow }, { direction: "RIGHT", value: size - 1 - maxCol },
+      { direction: "DOWN", value: size - 1 - maxRow }, { direction: "LEFT", value: minCol },
     ];
     const minimum = Math.min(...distances.map(({ value }) => value));
     const direction = random.pick(distances.filter(({ value }) => value === minimum)).direction;
-    board[row]![col] = cell(direction, true, { arrow: direction, escapeDepth: minimum });
-    answers[row]![col] = direction;
+    const id = `shape-${shapes.length}`;
+    shapes.push({ id, anchor: { x: col, y: row }, offsets, direction });
+    cells.forEach((point, localIndex) => {
+      board[point.row]![point.col] = cell(direction, true, {
+        arrow: direction,
+        shapeId: id,
+        shapeAnchor: localIndex === 0,
+        localX: offsets[localIndex]!.x,
+        localY: offsets[localIndex]!.y,
+      });
+      answers[point.row]![point.col] = direction;
+    });
   }
   return {
     board,
     answers,
-    meta: { totalBlocks: size * size, instructions: "Toca una flecha cuando toda su trayectoria esté libre.", difficulty },
+    meta: {
+      totalBlocks: size * size,
+      totalShapes: shapes.length,
+      shapes,
+      instructions: "Toca una forma cuando la trayectoria de todos sus sub-bloques esté libre.",
+      difficulty,
+    },
   };
 }
 
@@ -526,7 +540,7 @@ function crossLetters(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
   // una regla implícita de Scrabble.
   const centralCandidates = SPANISH_DICTIONARY
     .map((entry) => normalizeWord(entry.word))
-    .filter((word) => word.length >= 4 && word.length <= 7);
+    .filter((word) => word.length >= 4 && word.length <= 6);
   const centralWord = random.pick(centralCandidates) ?? "ARENA";
   const centralStart = 7 - Math.floor(centralWord.length / 2);
   [...centralWord].forEach((letter, index) => {
@@ -621,6 +635,4 @@ function edgeMeta(): GenericCell["meta"] { return { top: false, right: false, bo
 function cell(value: CellValue, isRevealed: boolean, meta: GenericCell["meta"] = {}): GenericCell { return { value, isRevealed, ownerId: null, isBlocked: false, meta }; }
 function blockedCell(meta: GenericCell["meta"] = {}): GenericCell { return { value: null, isRevealed: true, ownerId: null, isBlocked: true, meta }; }
 function matrix<T>(rows: number, columns: number, create: (row: number, col: number) => T): T[][] { return Array.from({ length: rows }, (_, row) => Array.from({ length: columns }, (_, col) => create(row, col))); }
-function runClues(values: boolean[]): number[] { const result: number[] = []; let run = 0; for (const value of values) { if (value) run += 1; else if (run) { result.push(run); run = 0; } } if (run) result.push(run); return result.length ? result : [0]; }
-function transpose<T>(value: T[][]): T[][] { return value[0]!.map((_, col) => value.map((row) => row[col]!)); }
 function normalizeWord(value: string): string { return value.trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-ZÑ]/g, ""); }

@@ -54,7 +54,7 @@ class LocalPuzzleEngine(
     fun move(row: Int, col: Int, value: Any?): LocalPuzzleMoveResult {
         val cell = board.getOrNull(row)?.getOrNull(col) ?: return reject("Movimiento fuera del tablero")
         if (gameType == GameType.CAPITAL_ARENA) return capitalMove(value)
-        if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.SLITHERLINK, GameType.NURIKABE, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
+        if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.TETRIS_ARENA, GameType.NURIKABE, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
 
         if (gameType == GameType.CROSS_LETTERS) {
             val payload = value as? Map<*, *> ?: return incorrect()
@@ -109,32 +109,26 @@ class LocalPuzzleEngine(
             }
             foundWords += word; return accept(word.length * 10)
         }
-        if (gameType == GameType.DOTS_AND_BOXES) return dotsMove(row, col, value, cell)
-        if (gameType == GameType.SLITHERLINK) return slitherMove(row, col, value, cell)
-        if (gameType == GameType.RUMMIKUB) {
-            val payload = value as? Map<*, *> ?: return incorrect()
-            val tile = payload["tile"]?.toString()?.toIntOrNull() ?: return incorrect()
-            val color = payload["color"]?.toString()?.uppercase() ?: return incorrect()
-            if ("$color:$tile" != blueprint.answers[row][col]) return incorrect()
-            replace(
-                row,
-                col,
-                cell.copy(
-                    value = tile,
-                    isRevealed = true,
-                    ownerId = OWNER,
-                    meta = cell.meta + ("tileColor" to color),
-                ),
-            )
-            val meldComplete = board[row].filterNot { it.isBlocked }.all { it.ownerId != null }
-            return accept(if (meldComplete) 35 else 10)
+        if (gameType == GameType.TIC_TAC_TOE) {
+            if (cell.value != null) return reject("Casilla ocupada")
+            replace(row, col, cell.copy(value = "X", isRevealed = true, ownerId = OWNER))
+            if (!ticWinner("X")) {
+                val empty = board.flatMapIndexed { y, cells -> cells.mapIndexedNotNull { x, target -> if (target.value == null) y to x else null } }
+                val bot = empty.randomOrNull(random)
+                if (bot != null) {
+                    val target = board[bot.first][bot.second]
+                    replace(bot.first, bot.second, target.copy(value = "O", isRevealed = true, ownerId = "LOCAL_BOT"))
+                }
+            }
+            return accept(if (ticWinner("X")) 100 else 10)
         }
+        if (gameType == GameType.DOTS_AND_BOXES) return dotsMove(row, col, value, cell)
         if (gameType == GameType.NEXUS_ZERO) {
             val payload = value as? Map<*, *> ?: return incorrect()
             val targetRow = payload["targetRow"]?.toString()?.toIntOrNull() ?: return incorrect()
             val targetCol = payload["targetCol"]?.toString()?.toIntOrNull() ?: return incorrect()
             val target = board.getOrNull(targetRow)?.getOrNull(targetCol) ?: return incorrect()
-            if (target.ownerId != null || kotlin.math.abs(row - targetRow) + kotlin.math.abs(col - targetCol) != 1) return incorrect()
+            if (target.ownerId != null || blueprint.answers[row][col] != "$targetRow:$targetCol") return incorrect()
             if ((cell.value as? Number)?.toInt()?.plus((target.value as? Number)?.toInt() ?: 99) != 0) return incorrect()
             replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
             replace(targetRow, targetCol, target.copy(ownerId = OWNER, isRevealed = true))
@@ -168,26 +162,6 @@ class LocalPuzzleEngine(
         return accept(if (boxes > 0) boxes * 50 else 5)
     }
 
-    private fun slitherMove(row: Int, col: Int, value: Any?, cell: GenericCell): LocalPuzzleMoveResult {
-        var targetRow = row
-        var targetCol = col
-        var side = value?.toString()?.lowercase().orEmpty()
-        var target = cell
-        var expected = blueprint.answers[targetRow][targetCol].toString().split('|').filter(String::isNotBlank)
-        if (side !in expected) {
-            val neighbour = neighbour(targetRow, targetCol, side) ?: return incorrect()
-            val opposite = mapOf("top" to "bottom", "right" to "left", "bottom" to "top", "left" to "right")[side] ?: return incorrect()
-            val neighbourExpected = blueprint.answers[neighbour.first][neighbour.second].toString().split('|').filter(String::isNotBlank)
-            if (opposite !in neighbourExpected) return incorrect()
-            targetRow = neighbour.first; targetCol = neighbour.second; side = opposite
-            target = board[targetRow][targetCol]; expected = neighbourExpected
-        }
-        if (target.meta[side] == true) return incorrect()
-        val meta = target.meta + (side to true)
-        replace(targetRow, targetCol, target.copy(meta = meta, ownerId = OWNER.takeIf { expected.all { edge -> meta[edge] == true } })); mirrorEdge(targetRow, targetCol, side)
-        return accept(8)
-    }
-
     private fun accept(points: Int): LocalPuzzleMoveResult { revision++; return LocalPuzzleMoveResult(true, snapshot(), points, message = if (isComplete()) "Puzzle completado" else "¡Correcto!") }
     private fun incorrect() = LocalPuzzleMoveResult(false, snapshot(), penaltyMs = 3_000, message = "Movimiento incorrecto")
     private fun reject(message: String) = LocalPuzzleMoveResult(false, snapshot(), message = message)
@@ -201,8 +175,8 @@ class LocalPuzzleEngine(
         GameType.WORD_SEARCH -> foundWords.size == (blueprint.meta["words"] as List<*>).size
         GameType.DOTS_AND_BOXES -> board.flatten().all { it.ownerId != null }
         GameType.NURIKABE -> board.indices.all { y -> board[y].indices.all { x -> board[y][x].meta["islandClue"] == true || board[y][x].value == if (blueprint.answers[y][x] == true) "RIVER" else "ISLAND" } }
-        GameType.NONOGRAM, GameType.HITORI, GameType.BRIDGES -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] != true || board[y][x].ownerId != null } }
-        GameType.SLITHERLINK -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x].toString().split('|').filter(String::isNotBlank).all { board[y][x].meta[it] == true } } }
+        GameType.TIC_TAC_TOE -> ticWinner("X") || ticWinner("O") || board.flatten().all { it.value != null }
+        GameType.HITORI, GameType.BRIDGES -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] != true || board[y][x].ownerId != null } }
         GameType.CROSS_LETTERS -> listOf(6, 8, 9, 10).all { board[it][7].ownerId != null }
         GameType.SECRET_CODE -> board.flatten().count { it.ownerId != null && it.meta["revealedColor"] == "RED" } == 8
         GameType.CAPITAL_ARENA -> false
@@ -212,14 +186,30 @@ class LocalPuzzleEngine(
     private data class Blueprint(val board: List<List<GenericCell>>, val answers: List<List<Any?>>, val meta: Map<String, Any?>, val seed: Int)
     private fun result(board: List<List<GenericCell>>, answers: List<List<Any?>>, meta: Map<String, Any?> = emptyMap()) = Blueprint(board, answers, meta + ("difficulty" to difficulty.name), random.nextInt())
     private fun createBlueprint(type: GameType): Blueprint = when (type) {
-        GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.NONOGRAM -> nonogram()
+        GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.TIC_TAC_TOE -> ticTacToe()
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
-        GameType.RUMMIKUB -> logicTiles(); GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges(); GameType.SLITHERLINK -> slitherlink()
+        GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges()
         GameType.HANGMAN -> hangman(); GameType.ARROWS_ESCAPE -> arrowsEscape()
         GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
         GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
-        GameType.ABYSS_ARENA, GameType.RHYTHM_JUMP -> result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
+        GameType.CHESS_TACTICS, GameType.TETRIS_ARENA, GameType.CHECKERS, GameType.PACMAN_ARENA ->
+            result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
+    }
+
+    private fun ticTacToe(): Blueprint = result(
+        matrix(3, 3) { _, _ -> GenericCell() },
+        matrix(3, 3) { _, _ -> null },
+        mapOf("turnBased" to true),
+    )
+
+    private fun ticWinner(mark: String): Boolean {
+        val lines = listOf(
+            listOf(0 to 0, 0 to 1, 0 to 2), listOf(1 to 0, 1 to 1, 1 to 2), listOf(2 to 0, 2 to 1, 2 to 2),
+            listOf(0 to 0, 1 to 0, 2 to 0), listOf(0 to 1, 1 to 1, 2 to 1), listOf(0 to 2, 1 to 2, 2 to 2),
+            listOf(0 to 0, 1 to 1, 2 to 2), listOf(0 to 2, 1 to 1, 2 to 0),
+        )
+        return lines.any { line -> line.all { (row, col) -> board[row][col].value == mark } }
     }
 
     private fun hangman(): Blueprint {
@@ -305,7 +295,6 @@ class LocalPuzzleEngine(
         } }
         return result(board, answers, mapOf("clues" to selected.mapIndexed { index, entry -> "${index + 1}H. ${entry.second}" }))
     }
-    private fun nonogram(): Blueprint { val size=size(6,8,10,12); val answers=matrix<Any?>(size,size){_,_->random.nextDouble()<.42}; return result(answers.map{row->row.map{GenericCell()}},answers,mapOf("rowClues" to answers.map{clues(it.map{v->v==true})},"columnClues" to (0 until size).map{x->clues(answers.map{it[x]==true})})) }
     private fun dots(): Blueprint { val size=size(3,5,6,7); return result(matrix(size,size){_,_->GenericCell(meta=SIDES.associateWith{false})},matrix(size,size){_,_->true},mapOf("dots" to size+1)) }
     private fun kakuro(): Blueprint {
         val playable = size(3, 4, 5, 6); val digits = (1..9).shuffled(random).take(playable); val sum = digits.sum()
@@ -324,46 +313,6 @@ class LocalPuzzleEngine(
     }
     private fun mathdoku(): Blueprint { val size=size(4,5,6,7); val symbols=(1..size).shuffled(random); val answers=matrix<Any?>(size,size){r,c->symbols[(r+c)%size]}; val board=matrix(size,size){r,c->val start=c-c%2;val target=(answers[r][start] as Int)+(answers[r][minOf(size-1,start+1)] as Int);GenericCell(meta=mapOf("cageId" to "$r:$start","cageLabel" to if(c==start)"$target+" else "","cageStart" to(c==start),"cageEnd" to(c==minOf(size-1,start+1))))}; return result(board,answers,mapOf("instructions" to "Usa 1 a $size y cumple las jaulas.")) }
     private fun hitori(): Blueprint { val size=size(5,6,7,8); val black=mutableSetOf<String>(); for(index in(0 until size*size).shuffled(random)){val r=index/size;val c=index%size;if(black.size>=size(4,6,9,12))break;if(listOf("${r-1}:$c","${r+1}:$c","$r:${c-1}","$r:${c+1}").none{it in black})black+="$r:$c"}; val values=matrix(size,size){r,c->((r+c)%size)+1}.map{it.toMutableList()};black.forEach{val(r,c)=it.split(':').map(String::toInt);values[r][c]=values[r][(c+1)%size]};val answers=matrix<Any?>(size,size){r,c->"$r:$c" in black};return result(values.map{row->row.map{GenericCell(value=it,isRevealed=true)}},answers,mapOf("instructions" to "Apaga duplicados sin tocar negras por sus lados.")) }
-    private fun logicTiles(): Blueprint {
-        val colors = listOf("RED", "BLUE", "GREEN", "ORANGE")
-        val rows = size(4, 5, 6, 7)
-        val cols = 5
-        val answers = MutableList(rows) { MutableList<Any?>(cols) { null } }
-        val board = MutableList(rows) { MutableList(cols) { blocked() } }
-        repeat(rows) { row ->
-            val meldLength = if (difficulty == PuzzleDifficulty.EASY) 3 else random.nextInt(3, 5)
-            if (row % 2 == 0) {
-                val color = colors.random(random)
-                val start = random.nextInt(1, 15 - meldLength)
-                repeat(meldLength) { col ->
-                    val tile = start + col
-                    answers[row][col] = "$color:$tile"
-                    board[row][col] = GenericCell(meta = mapOf("meldId" to row, "meldType" to "RUN", "meldLength" to meldLength))
-                }
-            } else {
-                val tile = random.nextInt(1, 14)
-                colors.shuffled(random).take(meldLength).forEachIndexed { col, color ->
-                    answers[row][col] = "$color:$tile"
-                    board[row][col] = GenericCell(meta = mapOf("meldId" to row, "meldType" to "GROUP", "meldLength" to meldLength))
-                }
-            }
-        }
-        return result(
-            board.map { it.toList() },
-            answers.map { it.toList() },
-            mapOf("instructions" to "Completa escaleras del mismo color o grupos del mismo número con colores distintos."),
-        )
-    }
-
-    private fun logicChallenge(operations: List<String>): Pair<Int, String> {
-        repeat(100) {
-            val operation = operations.random(random)
-            val left = random.nextInt(1, 10); val right = random.nextInt(1, 10)
-            val answer = when (operation) { "SUM" -> left + right; "AND" -> left and right; "OR" -> left or right; else -> left xor right }
-            if (answer in 1..9) return answer to "$left ${if (operation == "SUM") "+" else operation} $right = ?"
-        }
-        return 2 to "1 + 1 = ?"
-    }
     private fun nurikabe(): Blueprint { val size=size(6,8,10,12);val answers=matrix<Any?>(size,size){r,c->if(r%2==1)c!=(if(r%4==1)size-1 else 0)else c%3==2};val board=matrix(size,size){_,_->GenericCell()}.map{it.toMutableList()};var id=0;for(r in 0 until size){var c=0;while(c<size){if(answers[r][c]==true){c++;continue};val start=c;while(c<size&&answers[r][c]!=true)c++;id++;val clue=(start until c).random(random);board[r][clue]=blocked(mapOf("islandClue" to true,"islandSize" to c-start,"islandId" to id))}};return result(board,answers,mapOf("instructions" to "Pinta el río; evita bloques negros 2×2.")) }
     private fun bridges(): Blueprint {
         val grid = size(3, 4, 5, 6); val boardSize = grid * 2 - 1
@@ -385,49 +334,44 @@ class LocalPuzzleEngine(
         }
         return result(board, answers, mapOf("instructions" to "Toca una isla y luego un vecino resaltado."))
     }
-    private fun slitherlink(): Blueprint {
-        val size = size(5, 7, 9, 11)
-        val maxInset = minOf(2, size / 4)
-        val top = random.nextInt(0, maxInset + 1)
-        val left = random.nextInt(0, maxInset + 1)
-        val bottom = random.nextInt(size - 1 - maxInset, size)
-        val right = random.nextInt(size - 1 - maxInset, size)
-        val answers = matrix<Any?>(size, size) { row, col ->
-            buildList {
-                if (row == top && col in left..right) add("top")
-                if (row == bottom && col in left..right) add("bottom")
-                if (col == left && row in top..bottom) add("left")
-                if (col == right && row in top..bottom) add("right")
-            }.joinToString("|")
-        }
-        val board = matrix(size, size) { row, col ->
-            GenericCell(
-                meta = SIDES.associateWith { false } + mapOf(
-                    "clue" to answers[row][col].toString().split('|').count(String::isNotBlank),
-                ),
-            )
-        }
-        return result(board, answers, mapOf("instructions" to "Traza un único lazo según las pistas."))
-    }
     private fun nexusZero(): Blueprint {
         val rows = size(4, 6, 6, 8)
         val cols = 6
-        val board = MutableList(rows) { MutableList(cols) { GenericCell(isRevealed = true, meta = mapOf("charge" to true)) } }
+        val total = rows * cols
+        val shuffled = (0 until total).shuffled(random)
+        val partners = IntArray(total)
+        shuffled.chunked(2).forEach { pair -> partners[pair[0]] = pair[1]; partners[pair[1]] = pair[0] }
+        val positions = (0 until total).map { index ->
+            val baseX = 24 + (index % cols) * 158
+            val baseY = 24 + (index / cols) * (650 / rows)
+            mapOf(
+                "x" to (baseX + random.nextInt(-18, 19)).coerceIn(6, 920),
+                "y" to (baseY + random.nextInt(-12, 13)).coerceIn(6, 630),
+                "width" to 74,
+                "height" to 58,
+            )
+        }
+        val board = MutableList(rows) { row -> MutableList(cols) { col ->
+            GenericCell(isRevealed = true, meta = mapOf("charge" to true) + positions[row * cols + col])
+        } }
         val answers = MutableList(rows) { MutableList<Any?>(cols) { null } }
-        repeat(rows) { row ->
-            for (col in 0 until cols step 2) {
-                val charge = random.nextInt(1, 10) * if (random.nextBoolean()) 1 else -1
-                val reverse = random.nextBoolean()
-                board[row][col] = board[row][col].copy(value = if (reverse) -charge else charge)
-                board[row][col + 1] = board[row][col + 1].copy(value = if (reverse) charge else -charge)
-                answers[row][col] = "$row:${col + 1}"
-                answers[row][col + 1] = "$row:$col"
-            }
+        val assigned = mutableSetOf<Int>()
+        repeat(total) { index ->
+            if (index in assigned) return@repeat
+            val partner = partners[index]
+            val charge = random.nextInt(1, 10) * if (random.nextBoolean()) 1 else -1
+            val row = index / cols; val col = index % cols
+            val otherRow = partner / cols; val otherCol = partner % cols
+            board[row][col] = board[row][col].copy(value = charge)
+            board[otherRow][otherCol] = board[otherRow][otherCol].copy(value = -charge)
+            answers[row][col] = "$otherRow:$otherCol"
+            answers[otherRow][otherCol] = "$row:$col"
+            assigned += index; assigned += partner
         }
         return result(
             board.map { it.toList() },
             answers.map { it.toList() },
-            mapOf("instructions" to "Nexo Cero: enlaza dos cargas vecinas que sumen 0."),
+            mapOf("instructions" to "Nexo Cero: enlaza cargas dispersas que sumen 0.", "spatialLayout" to true, "arenaWidth" to 1000, "arenaHeight" to 700),
         )
     }
 
@@ -575,7 +519,6 @@ class LocalPuzzleEngine(
     }
 
     private fun blocked(meta: Map<String, Any?> = emptyMap()) = GenericCell(isRevealed = true, isBlocked = true, meta = meta)
-    private fun clues(values: List<Boolean>): List<Int> { val out=mutableListOf<Int>();var run=0;values.forEach{if(it)run++ else if(run>0){out+=run;run=0}};if(run>0)out+=run;return out.ifEmpty{listOf(0)} }
     private fun size(easy:Int,medium:Int,hard:Int,expert:Int)=when(difficulty){PuzzleDifficulty.EASY->easy;PuzzleDifficulty.MEDIUM->medium;PuzzleDifficulty.HARD->hard;PuzzleDifficulty.EXPERT->expert}
     private fun <T> matrix(rows:Int,cols:Int,create:(Int,Int)->T)=List(rows){r->List(cols){c->create(r,c)}}
 

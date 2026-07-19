@@ -3,22 +3,22 @@ export const GAME_TYPES = [
     "MINESWEEPER",
     "WORD_SEARCH",
     "CROSSWORD",
-    "NONOGRAM",
+    "TIC_TAC_TOE",
     "DOTS_AND_BOXES",
     "KAKURO",
     "MATHDOKU",
     "HITORI",
-    "RUMMIKUB",
+    "CHESS_TACTICS",
     "NURIKABE",
     "BRIDGES",
-    "SLITHERLINK",
+    "TETRIS_ARENA",
     "HANGMAN",
     "ARROWS_ESCAPE",
-    "RHYTHM_JUMP",
+    "PACMAN_ARENA",
     "CROSS_LETTERS",
     "SECRET_CODE",
     "CAPITAL_ARENA",
     "NEXUS_ZERO",
-    "ABYSS_ARENA"
+    "CHECKERS"
 ];
 //# sourceMappingURL=types.js.map

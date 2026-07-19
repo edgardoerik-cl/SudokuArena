@@ -196,7 +196,7 @@ fun RoomLobbyScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("MODO DE EQUIPO", style = MaterialTheme.typography.labelLarge)
-                    if (room.config.gameType == GameType.ABYSS_ARENA) {
+                    if (room.config.gameType == GameType.CHECKERS) {
                         Text("Todos contra todos · PvP obligatorio", fontWeight = FontWeight.Black)
                     } else {
                         TeamMode.entries.forEach { mode ->
@@ -237,15 +237,15 @@ fun RoomLobbyScreen(
 
 private fun shortGameTitle(type: GameType): String = when (type) {
     GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa Letras"
-    GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
-    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
-    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Conecta Puntos Neón"
-    GameType.HANGMAN -> "El Ahorcado"; GameType.ARROWS_ESCAPE -> "Flechas en Fuga"; GameType.RHYTHM_JUMP -> "Salto Rítmico"
+    GameType.CROSSWORD -> "Crucigrama"; GameType.TIC_TAC_TOE -> "El Gato"; GameType.DOTS_AND_BOXES -> "Timbiriche"
+    GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.CHESS_TACTICS -> "Chess Tactics RPG"
+    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.TETRIS_ARENA -> "Tetris Arena"
+    GameType.HANGMAN -> "El Ahorcado"; GameType.ARROWS_ESCAPE -> "Flechas en Fuga"; GameType.PACMAN_ARENA -> "Pac-Man Arena"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"
     GameType.NEXUS_ZERO -> "Nexo Cero"
-    GameType.ABYSS_ARENA -> "Abismo Arena"
+    GameType.CHECKERS -> "Damas Clásicas"
 }
 
 private fun teamModeLabel(mode: TeamMode): String = when (mode) {
