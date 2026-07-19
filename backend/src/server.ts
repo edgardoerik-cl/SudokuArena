@@ -11,7 +11,13 @@ import {
   createRandomSolution
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
-import { PacmanArenaEngine, TetrisArenaEngine, type PacmanDirection, type TetrisAction } from "./action/arcadeEngines.js";
+import {
+  DemolitionArenaEngine,
+  PacmanArenaEngine,
+  TetrisArenaEngine,
+  type PacmanDirection,
+  type TetrisAction,
+} from "./action/arcadeEngines.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import { GenericPuzzleEngine } from "./puzzles/engine.js";
 import { GAME_TYPES, type GameType, type GenericMove, type PuzzleDifficulty } from "./puzzles/types.js";
@@ -56,6 +62,8 @@ interface RoomRuntime {
   tetrisTick: NodeJS.Timeout | null;
   pacmanEngine: PacmanArenaEngine | null;
   pacmanTick: NodeJS.Timeout | null;
+  demolitionEngine: DemolitionArenaEngine | null;
+  demolitionTick: NodeJS.Timeout | null;
   pauseRequesterId: string | null;
   pauseVotes: Set<string>;
   pauseNoVotes: Set<string>;
@@ -300,6 +308,12 @@ io.on("connection", (socket) => {
     room.pacmanEngine.input(playerId, payload.direction);
   });
 
+  socket.on("demolition:input", (payload: { paddleX?: number }) => {
+    const room = roomFor(socket);
+    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "DEMOLITION_ARCADE" || !room.demolitionEngine) return;
+    room.demolitionEngine.input(playerId, Number(payload?.paddleX));
+  });
+
   socket.on("use_power", (payload: PowerProposal) => {
     const room = roomFor(socket);
     if (!room) return emitRoomError(socket, "NOT_IN_ROOM", "Primero debes entrar a una sala");
@@ -455,6 +469,8 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     tetrisTick: null,
     pacmanEngine: null,
     pacmanTick: null,
+    demolitionEngine: null,
+    demolitionTick: null,
     pauseRequesterId: null,
     pauseVotes: new Set(),
     pauseNoVotes: new Set(),
@@ -520,6 +536,7 @@ function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
     if (room.rpsTimer) clearTimeout(room.rpsTimer);
     if (room.tetrisTick) clearInterval(room.tetrisTick);
     if (room.pacmanTick) clearInterval(room.pacmanTick);
+    if (room.demolitionTick) clearInterval(room.demolitionTick);
     clearBotTimers(room);
     rooms.delete(room.code);
     return;
@@ -700,7 +717,10 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   room.endsAt = room.startedAt + matchDurationMs;
   if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
   else room.game.startMatch(room.config, resolveBossPlayerId(room));
-  room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "TETRIS_ARENA" || room.config.gameType === "PACMAN_ARENA"
+  room.genericEngine = room.config.gameType === "SUDOKU"
+    || room.config.gameType === "TETRIS_ARENA"
+    || room.config.gameType === "PACMAN_ARENA"
+    || room.config.gameType === "DEMOLITION_ARCADE"
     ? null
     : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
         seed: `${room.code}-${room.startedAt}`,
@@ -708,8 +728,10 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
       });
   room.tetrisEngine = room.config.gameType === "TETRIS_ARENA" ? new TetrisArenaEngine() : null;
   room.pacmanEngine = room.config.gameType === "PACMAN_ARENA" ? new PacmanArenaEngine() : null;
+  room.demolitionEngine = room.config.gameType === "DEMOLITION_ARCADE" ? new DemolitionArenaEngine() : null;
   room.tetrisEngine?.syncPlayers(room.game.snapshot().players);
   room.pacmanEngine?.syncPlayers(room.game.snapshot().players);
+  room.demolitionEngine?.syncPlayers(room.game.snapshot().players);
   if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
   emitRoomState(room);
   emitState(room);
@@ -717,6 +739,7 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
   if (room.tetrisEngine) startTetrisLoop(room);
   if (room.pacmanEngine) startPacmanLoop(room);
+  if (room.demolitionEngine) startDemolitionLoop(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
@@ -740,6 +763,8 @@ function finishMatch(room: RoomRuntime, force = false): void {
   if (room.tetrisTick) clearInterval(room.tetrisTick);
   room.tetrisTick = null;
   if (room.pacmanTick) clearInterval(room.pacmanTick);
+  if (room.demolitionTick) clearInterval(room.demolitionTick);
+  room.demolitionTick = null;
   room.pacmanTick = null;
   room.rpsTimer = null;
   room.boardEventTimeout = null;
@@ -821,6 +846,7 @@ function processGenericMove(room: RoomRuntime, playerId: string, payload: Generi
   const result = engine.makeMove(playerId, payload, room.game);
   if (!result.accepted) {
     responder?.emit("generic:move-rejected", result);
+    if (room.config.gameType === "CHECKERS") responder?.emit("InvalidMove", result);
     if (result.penaltyMs > 0) {
       const blockedUntil = Date.now() + result.penaltyMs;
       responder?.emit("player:penalty", { requestId: result.requestId, blockedUntil, reason: result.code });
@@ -1089,6 +1115,8 @@ function maybeActivatePause(room: RoomRuntime): void {
   room.tetrisTick = null;
   if (room.pacmanTick) clearInterval(room.pacmanTick);
   room.pacmanTick = null;
+  if (room.demolitionTick) clearInterval(room.demolitionTick);
+  room.demolitionTick = null;
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   room.boardEventTimeout = null;
   room.game.endBoardEvent();
@@ -1115,6 +1143,7 @@ function resumeRoom(room: RoomRuntime): void {
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   if (room.tetrisEngine) startTetrisLoop(room);
   if (room.pacmanEngine) startPacmanLoop(room);
+  if (room.demolitionEngine) startDemolitionLoop(room);
   emitRoomState(room);
   io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
 }
@@ -1141,6 +1170,21 @@ function startPacmanLoop(room: RoomRuntime): void {
     io.to(room.code).volatile.emit("pacman:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
   }, 100);
+}
+
+function startDemolitionLoop(room: RoomRuntime): void {
+  if (!room.demolitionEngine || room.demolitionTick) return;
+  let emittedTick = 0;
+  room.demolitionTick = setInterval(() => {
+    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.demolitionEngine) return;
+    room.demolitionEngine.tick(1 / 60);
+    emittedTick += 1;
+    if (emittedTick % 3 !== 0) return;
+    const snapshot = room.demolitionEngine.snapshot();
+    snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
+    io.to(room.code).volatile.emit("demolition:state", snapshot);
+    if (snapshot.completed) finishMatch(room, true);
+  }, 16);
 }
 
 function clearPauseState(room: RoomRuntime): void {
@@ -1285,6 +1329,7 @@ function shutdown(): void {
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
     if (room.tetrisTick) clearInterval(room.tetrisTick);
     if (room.pacmanTick) clearInterval(room.pacmanTick);
+    if (room.demolitionTick) clearInterval(room.demolitionTick);
     clearBotTimers(room);
   }
   io.close(() => process.exit(0));

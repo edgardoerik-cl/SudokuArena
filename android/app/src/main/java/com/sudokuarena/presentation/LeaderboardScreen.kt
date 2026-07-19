@@ -144,7 +144,7 @@ private fun shortGameTitle(type: GameType): String = when (type) {
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"
     GameType.NEXUS_ZERO -> "Nexo Cero"
-    GameType.CHECKERS -> "Damas Clásicas"
+    GameType.CHECKERS -> "Damas Clásicas"; GameType.DEMOLITION_ARCADE -> "Demolición Arcade"
 }
 
 private data class HonorRow(val rank: Int, val nickname: String, val value: String)

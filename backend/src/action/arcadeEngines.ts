@@ -3,6 +3,15 @@ import type { PlayerState } from "../types.js";
 type TetrominoName = "I" | "J" | "L" | "O" | "S" | "T" | "Z";
 export type TetrisAction = "LEFT" | "RIGHT" | "ROTATE" | "SOFT_DROP" | "HARD_DROP";
 export type PacmanDirection = "UP" | "RIGHT" | "DOWN" | "LEFT" | "STOP";
+export interface DemolitionBrick {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  hp: number;
+  color: number;
+}
 
 const TETROMINOES: Record<TetrominoName, number[][][]> = {
   I: [[[0, 0], [0, 1], [0, 2], [0, 3]], [[0, 2], [1, 2], [2, 2], [3, 2]]],
@@ -220,6 +229,8 @@ export class PacmanArenaEngine {
           ? "FRIGHTENED"
           : Math.floor(now / 8_000) % 2 === 0 ? "CHASE" : "SCATTER";
       if (ghost.mode === "FRIGHTENED" && this.tickNumber % 2 === 1) return;
+      // En Chase/Scatter avanzan 4 de cada 5 ticks: 80% de Pac-Man.
+      if (ghost.mode !== "EATEN" && ghost.mode !== "FRIGHTENED" && this.tickNumber % 5 === 0) return;
       const target = ghost.mode === "EATEN"
         ? { x: 7, y: 7 }
         : ghost.mode === "SCATTER"
@@ -302,6 +313,162 @@ export class PacmanArenaEngine {
   }
 }
 
+interface DemolitionPlayer {
+  id: string;
+  name: string;
+  colorHex: string;
+  paddleX: number;
+  ballX: number;
+  ballY: number;
+  velocityX: number;
+  velocityY: number;
+  lives: number;
+  score: number;
+  level: number;
+  bricks: DemolitionBrick[];
+  completed: boolean;
+  isBot: boolean;
+}
+
+export class DemolitionArenaEngine {
+  private readonly players = new Map<string, DemolitionPlayer>();
+  private tickNumber = 0;
+
+  syncPlayers(players: PlayerState[]): void {
+    players.forEach((player) => {
+      if (this.players.has(player.id)) return;
+      this.players.set(player.id, {
+        id: player.id,
+        name: player.name,
+        colorHex: player.color,
+        paddleX: .5,
+        ballX: .5,
+        ballY: .78,
+        velocityX: .34,
+        velocityY: -.48,
+        lives: 3,
+        score: 0,
+        level: 1,
+        bricks: this.generateLevel(1),
+        completed: false,
+        isBot: player.isBot,
+      });
+    });
+  }
+
+  input(playerId: string, paddleX: number): boolean {
+    const player = this.players.get(playerId);
+    if (!player || !Number.isFinite(paddleX)) return false;
+    player.paddleX = Math.max(.11, Math.min(.89, paddleX));
+    return true;
+  }
+
+  tick(deltaSeconds = 1 / 60): void {
+    this.tickNumber += 1;
+    for (const player of this.players.values()) {
+      if (player.completed || player.lives <= 0) continue;
+      if (player.isBot) {
+        const maxStep = deltaSeconds * .52;
+        player.paddleX += Math.max(-maxStep, Math.min(maxStep, player.ballX - player.paddleX));
+        player.paddleX = Math.max(.11, Math.min(.89, player.paddleX));
+      }
+      this.integrate(player, Math.min(.033, Math.max(.001, deltaSeconds)));
+    }
+  }
+
+  snapshot(): any {
+    return {
+      serverTime: Date.now(),
+      tick: this.tickNumber,
+      completed: [...this.players.values()].length > 0
+        && [...this.players.values()].every((player) => player.lives <= 0 || player.completed),
+      players: [...this.players.values()].map((player) => ({
+        ...player,
+        bricks: player.bricks.map((brick) => ({ ...brick })),
+      })),
+    };
+  }
+
+  private integrate(player: DemolitionPlayer, deltaSeconds: number): void {
+    const radius = .014;
+    let nextX = player.ballX + player.velocityX * deltaSeconds;
+    let nextY = player.ballY + player.velocityY * deltaSeconds;
+    if (nextX - radius <= 0 || nextX + radius >= 1) {
+      player.velocityX *= -1;
+      nextX = Math.max(radius, Math.min(1 - radius, nextX));
+    }
+    if (nextY - radius <= 0) {
+      player.velocityY = Math.abs(player.velocityY);
+      nextY = radius;
+    }
+    const paddle = { x: player.paddleX - .105, y: .91, width: .21, height: .025 };
+    if (player.velocityY > 0 && circleIntersectsRect(nextX, nextY, radius, paddle)) {
+      const relative = (nextX - player.paddleX) / (paddle.width / 2);
+      const speed = Math.min(.78, Math.hypot(player.velocityX, player.velocityY) * 1.015);
+      player.velocityX = relative * speed * .78;
+      player.velocityY = -Math.sqrt(Math.max(.08, speed * speed - player.velocityX * player.velocityX));
+      nextY = paddle.y - radius;
+    }
+    const hit = player.bricks.find((brick) =>
+      brick.hp > 0 && circleIntersectsRect(nextX, nextY, radius, brick)
+    );
+    if (hit) {
+      const previousXInside = player.ballX >= hit.x && player.ballX <= hit.x + hit.width;
+      if (previousXInside) player.velocityY *= -1;
+      else player.velocityX *= -1;
+      hit.hp -= 1;
+      player.score += 10 * player.level;
+      if (hit.hp <= 0) player.bricks = player.bricks.filter((brick) => brick.id !== hit.id);
+    }
+    player.ballX = nextX;
+    player.ballY = nextY;
+    if (player.ballY - radius > 1) {
+      player.lives -= 1;
+      this.resetBall(player);
+      return;
+    }
+    if (player.bricks.length === 0) {
+      player.level += 1;
+      player.score += 250;
+      player.bricks = this.generateLevel(player.level);
+      this.resetBall(player);
+    }
+  }
+
+  private resetBall(player: DemolitionPlayer): void {
+    player.ballX = player.paddleX;
+    player.ballY = .82;
+    const speed = Math.min(.72, .48 + player.level * .025);
+    player.velocityX = (Math.random() < .5 ? -1 : 1) * speed * .55;
+    player.velocityY = -speed;
+  }
+
+  private generateLevel(level: number): DemolitionBrick[] {
+    const rows = Math.min(8, 4 + Math.floor((level - 1) / 2));
+    const columns = 8;
+    const gap = .012;
+    const width = (1 - .12 - gap * (columns - 1)) / columns;
+    const height = .045;
+    const bricks: DemolitionBrick[] = [];
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < columns; col += 1) {
+        // Los huecos cambian por nivel para crear mapas progresivos distintos.
+        if ((row * 3 + col + level) % Math.max(5, 9 - level) === 0) continue;
+        bricks.push({
+          id: `L${level}-${row}-${col}`,
+          x: .06 + col * (width + gap),
+          y: .08 + row * (height + gap),
+          width,
+          height,
+          hp: level >= 4 && (row + col + level) % 4 === 0 ? 2 : 1,
+          color: (row + level) % 6,
+        });
+      }
+    }
+    return bricks;
+  }
+}
+
 function shuffledBag(): TetrominoName[] {
   const bag = [...PIECE_NAMES];
   for (let index = bag.length - 1; index > 0; index -= 1) {
@@ -315,4 +482,17 @@ function grid(rows: number, columns: number, value: number): number[][] {
 }
 function manhattan(a: { x: number; y: number }, b: { x: number; y: number }): number {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
+function circleIntersectsRect(
+  circleX: number,
+  circleY: number,
+  radius: number,
+  rect: { x: number; y: number; width: number; height: number },
+): boolean {
+  const closestX = Math.max(rect.x, Math.min(circleX, rect.x + rect.width));
+  const closestY = Math.max(rect.y, Math.min(circleY, rect.y + rect.height));
+  const dx = circleX - closestX;
+  const dy = circleY - closestY;
+  return dx * dx + dy * dy <= radius * radius;
 }

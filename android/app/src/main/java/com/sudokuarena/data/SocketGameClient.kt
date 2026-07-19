@@ -24,6 +24,9 @@ import com.sudokuarena.domain.TetrisArenaState
 import com.sudokuarena.domain.TetrisPlayerState
 import com.sudokuarena.domain.PacmanActorState
 import com.sudokuarena.domain.PacmanArenaState
+import com.sudokuarena.domain.DemolitionArenaState
+import com.sudokuarena.domain.DemolitionBrickState
+import com.sudokuarena.domain.DemolitionPlayerState
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.WebSocket
@@ -103,6 +106,7 @@ class SocketGameClient(
         socket.on("generic:state") { args -> parseSafely(args) { RealtimeEvent.GenericStateUpdated(parseGenericState(it)) } }
         socket.on("tetris:state") { args -> parseSafely(args) { RealtimeEvent.TetrisStateUpdated(parseTetrisState(it)) } }
         socket.on("pacman:state") { args -> parseSafely(args) { RealtimeEvent.PacmanStateUpdated(parsePacmanState(it)) } }
+        socket.on("demolition:state") { args -> parseSafely(args) { RealtimeEvent.DemolitionStateUpdated(parseDemolitionState(it)) } }
         socket.on("letters:rack") { args -> parseSafely(args) { payload ->
             RealtimeEvent.LetterRackUpdated(
                 letters = payload.optJSONArray("letters")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
@@ -356,6 +360,10 @@ class SocketGameClient(
         socket.emit("pacman:input", JSONObject().put("direction", direction))
     }
 
+    override fun sendDemolitionInput(paddleX: Float) {
+        socket.emit("demolition:input", JSONObject().put("paddleX", paddleX.coerceIn(0f, 1f)))
+    }
+
     override fun chooseRps(choice: String) {
         socket.emit("rps:choose", JSONObject().put("choice", choice))
     }
@@ -557,6 +565,40 @@ private fun parsePacmanState(json: JSONObject): PacmanArenaState {
         ghosts = actors("ghosts"),
     )
 }
+
+private fun parseDemolitionState(json: JSONObject): DemolitionArenaState = DemolitionArenaState(
+    serverTime = json.optLong("serverTime"),
+    tick = json.optLong("tick"),
+    completed = json.optBoolean("completed"),
+    players = json.optJSONArray("players")?.mapObjects { item ->
+        val player = item as JSONObject
+        DemolitionPlayerState(
+            id = player.optString("id"),
+            name = player.optString("name"),
+            colorHex = player.optString("colorHex", "#00E5FF"),
+            paddleX = player.optDouble("paddleX", .5).toFloat(),
+            ballX = player.optDouble("ballX", .5).toFloat(),
+            ballY = player.optDouble("ballY", .72).toFloat(),
+            velocityX = player.optDouble("velocityX", .2).toFloat(),
+            velocityY = player.optDouble("velocityY", -.4).toFloat(),
+            lives = player.optInt("lives", 3),
+            score = player.optInt("score"),
+            level = player.optInt("level", 1),
+            bricks = player.optJSONArray("bricks")?.mapObjects { rawBrick ->
+                val brick = rawBrick as JSONObject
+                DemolitionBrickState(
+                    id = brick.optString("id"),
+                    x = brick.optDouble("x").toFloat(),
+                    y = brick.optDouble("y").toFloat(),
+                    width = brick.optDouble("width").toFloat(),
+                    height = brick.optDouble("height").toFloat(),
+                    hp = brick.optInt("hp", 1),
+                    color = brick.optInt("color"),
+                )
+            }.orEmpty(),
+        )
+    }.orEmpty(),
+)
 
 private fun JSONObject.toKotlinMap(): Map<String, Any?> = keys().asSequence().associateWith { key -> jsonValueToKotlin(opt(key)) }
 

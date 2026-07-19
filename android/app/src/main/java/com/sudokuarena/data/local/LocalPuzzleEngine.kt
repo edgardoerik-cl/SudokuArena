@@ -192,7 +192,7 @@ class LocalPuzzleEngine(
         GameType.HANGMAN -> hangman(); GameType.ARROWS_ESCAPE -> arrowsEscape()
         GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
         GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
-        GameType.CHESS_TACTICS, GameType.TETRIS_ARENA, GameType.CHECKERS, GameType.PACMAN_ARENA ->
+        GameType.CHESS_TACTICS, GameType.TETRIS_ARENA, GameType.CHECKERS, GameType.PACMAN_ARENA, GameType.DEMOLITION_ARCADE ->
             result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }

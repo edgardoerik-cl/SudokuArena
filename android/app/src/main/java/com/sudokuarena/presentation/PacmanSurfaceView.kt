@@ -7,7 +7,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
-import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import com.sudokuarena.domain.PacmanActorState
@@ -27,9 +26,6 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
     @Volatile private var arenaState: PacmanArenaState? = null
     @Volatile private var running = false
     private var renderThread: Thread? = null
-    private var downX = 0f
-    private var downY = 0f
-    var onDirection: (String) -> Unit = {}
 
     init {
         holder.addCallback(this)
@@ -203,35 +199,6 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
             paint.color = Color.rgb(13, 71, 161)
             canvas.drawCircle(display.x + offset + lookX, display.y - radius * .18f + lookY, radius * .11f, paint)
         }
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downX = event.x
-                downY = event.y
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                val dx = event.x - downX
-                val dy = event.y - downY
-                if (maxOf(abs(dx), abs(dy)) >= 24f) {
-                    onDirection(
-                        if (abs(dx) > abs(dy)) {
-                            if (dx > 0f) "RIGHT" else "LEFT"
-                        } else if (dy > 0f) "DOWN" else "UP",
-                    )
-                }
-                performClick()
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    override fun performClick(): Boolean {
-        super.performClick()
-        return true
     }
 
     private fun parseColor(value: String?, fallback: Int): Int =

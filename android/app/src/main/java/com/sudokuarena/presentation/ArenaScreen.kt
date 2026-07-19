@@ -129,6 +129,11 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         return
     }
 
+    if (state.gameType == GameType.DEMOLITION_ARCADE) {
+        DemolitionArenaScreen(state, viewModel::sendDemolitionInput, viewModel::requestPause, onExit)
+        return
+    }
+
     if (state.gameType != GameType.SUDOKU) {
         GenericArenaScreen(
             state = state,

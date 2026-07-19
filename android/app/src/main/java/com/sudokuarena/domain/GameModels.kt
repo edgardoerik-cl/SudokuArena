@@ -40,7 +40,7 @@ enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, TIC_TAC_TOE,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, CHESS_TACTICS,
     NURIKABE, BRIDGES, TETRIS_ARENA, HANGMAN, ARROWS_ESCAPE, PACMAN_ARENA,
-    CROSS_LETTERS, SECRET_CODE, CAPITAL_ARENA, NEXUS_ZERO, CHECKERS,
+    CROSS_LETTERS, SECRET_CODE, CAPITAL_ARENA, NEXUS_ZERO, CHECKERS, DEMOLITION_ARCADE,
 }
 enum class RoomPhase { LOBBY, RPS, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
@@ -109,6 +109,38 @@ data class PacmanArenaState(
     val powerPills: Set<String>,
     val players: List<PacmanActorState>,
     val ghosts: List<PacmanActorState>,
+)
+
+data class DemolitionBrickState(
+    val id: String,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float,
+    val hp: Int,
+    val color: Int,
+)
+
+data class DemolitionPlayerState(
+    val id: String,
+    val name: String,
+    val colorHex: String,
+    val paddleX: Float,
+    val ballX: Float,
+    val ballY: Float,
+    val velocityX: Float,
+    val velocityY: Float,
+    val lives: Int,
+    val score: Int,
+    val level: Int,
+    val bricks: List<DemolitionBrickState>,
+)
+
+data class DemolitionArenaState(
+    val serverTime: Long,
+    val tick: Long,
+    val completed: Boolean,
+    val players: List<DemolitionPlayerState>,
 )
 
 data class RoomState(
@@ -227,6 +259,7 @@ sealed interface RealtimeEvent {
     data class RpsResult(val round: Int, val choices: Map<String, String>, val winnerId: String?, val tie: Boolean) : RealtimeEvent
     data class TetrisStateUpdated(val state: TetrisArenaState) : RealtimeEvent
     data class PacmanStateUpdated(val state: PacmanArenaState) : RealtimeEvent
+    data class DemolitionStateUpdated(val state: DemolitionArenaState) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 
@@ -257,6 +290,7 @@ interface GameRealtimeGateway {
     fun chooseRps(choice: String)
     fun sendTetrisInput(action: String)
     fun sendPacmanInput(direction: String)
+    fun sendDemolitionInput(paddleX: Float)
     fun requestPause()
     fun respondPause(accepted: Boolean)
     fun resumePausedGame()

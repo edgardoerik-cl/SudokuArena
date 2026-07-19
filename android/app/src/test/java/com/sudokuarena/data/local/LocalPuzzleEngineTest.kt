@@ -16,6 +16,7 @@ class LocalPuzzleEngineTest {
             GameType.PACMAN_ARENA,
             GameType.CHECKERS,
             GameType.CHESS_TACTICS,
+            GameType.DEMOLITION_ARCADE,
         )
         GameType.entries.filterNot { it in onlineOnly }.forEach { gameType ->
             val state = LocalPuzzleEngine(gameType).snapshot()

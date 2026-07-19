@@ -163,9 +163,9 @@ fun WelcomeScreen(
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
                 GameCarouselSelector(selectedGameType, favoriteGames, onGameSelected, onToggleFavorite)
                 NeonArenaButton(
-                    text = if (selectedGameType in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS)) "Disponible online" else "Modo Solitario",
+                    text = if (selectedGameType in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS, GameType.DEMOLITION_ARCADE)) "Disponible online" else "Modo Solitario",
                     onClick = onSoloMode,
-                    enabled = selectedGameType !in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS),
+                    enabled = selectedGameType !in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS, GameType.DEMOLITION_ARCADE),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(if (landscape) 48.dp else 58.dp),
@@ -441,6 +441,17 @@ private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
                 val top = size.height * ((phase + index * .22f) % 1f)
                 drawRect(listOf(Color.Cyan, Color.Magenta, Color.Yellow, Color.Green)[index], Offset(size.width * (.27f + index * .12f), top), Size(10f, 10f))
             }
+            GameType.DEMOLITION_ARCADE -> {
+                repeat(4) { row ->
+                    drawRoundRect(
+                        listOf(Color.Cyan, Color.Magenta, Color(0xFFFFB300))[row % 3],
+                        Offset(size.width * (.25f + (row % 2) * .28f), size.height * (.18f + row * .1f)),
+                        Size(size.width * .22f, size.height * .07f),
+                    )
+                }
+                drawCircle(Color.White, size.height * .055f, Offset(size.width * (.28f + phase * .42f), size.height * (.72f - phase * .32f)))
+                drawRoundRect(Color(0xFF00E5FF), Offset(size.width * .3f, size.height * .84f), Size(size.width * .4f, size.height * .05f))
+            }
             GameType.CHECKERS -> repeat(4) { row -> repeat(4) { col ->
                 if ((row + col) % 2 == 1) drawCircle(if (row < 2) Color(0xFF1565C0) else Color(0xFFE53935), 7f, Offset(size.width * (.2f + col * .2f), size.height * (.2f + row * .2f)))
             } }
@@ -546,7 +557,7 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.SECRET_CODE -> "🔐"
     GameType.CAPITAL_ARENA -> "💰"
     GameType.NEXUS_ZERO -> "±0"
-    GameType.CHECKERS -> "⛀"
+    GameType.CHECKERS -> "⛀"; GameType.DEMOLITION_ARCADE -> "●▰"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
@@ -559,7 +570,7 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"
     GameType.NEXUS_ZERO -> "Nexo Cero"
-    GameType.CHECKERS -> "Damas Clásicas"
+    GameType.CHECKERS -> "Damas Clásicas"; GameType.DEMOLITION_ARCADE -> "Demolición Arcade"
 }
 
 @Composable

@@ -19,6 +19,7 @@ export const GAME_TYPES = [
     "SECRET_CODE",
     "CAPITAL_ARENA",
     "NEXUS_ZERO",
-    "CHECKERS"
+    "CHECKERS",
+    "DEMOLITION_ARCADE"
 ];
 //# sourceMappingURL=types.js.map

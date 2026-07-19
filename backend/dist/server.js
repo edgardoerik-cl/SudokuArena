@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { BOARD_EVENT_DURATION_MS, BOARD_EVENT_INTERVAL_MS, APP_VERSION, CLEAR_DELAY_MS, MATCH_DURATION_MS, SUDDEN_DEATH_DURATION_MS, createRandomSolution } from "./constants.js";
 import { ArenaGame } from "./game.js";
-import { PacmanArenaEngine, TetrisArenaEngine } from "./action/arcadeEngines.js";
+import { DemolitionArenaEngine, PacmanArenaEngine, TetrisArenaEngine, } from "./action/arcadeEngines.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import { GenericPuzzleEngine } from "./puzzles/engine.js";
 import { GAME_TYPES } from "./puzzles/types.js";
@@ -257,6 +257,12 @@ io.on("connection", (socket) => {
             return;
         room.pacmanEngine.input(playerId, payload.direction);
     });
+    socket.on("demolition:input", (payload) => {
+        const room = roomFor(socket);
+        if (!room || room.phase !== "PLAYING" || room.config.gameType !== "DEMOLITION_ARCADE" || !room.demolitionEngine)
+            return;
+        room.demolitionEngine.input(playerId, Number(payload?.paddleX));
+    });
     socket.on("use_power", (payload) => {
         const room = roomFor(socket);
         if (!room)
@@ -417,6 +423,8 @@ function createRoom(hostPlayerId) {
         tetrisTick: null,
         pacmanEngine: null,
         pacmanTick: null,
+        demolitionEngine: null,
+        demolitionTick: null,
         pauseRequesterId: null,
         pauseVotes: new Set(),
         pauseNoVotes: new Set(),
@@ -487,6 +495,8 @@ function removeDisconnectedPlayer(room, playerId) {
             clearInterval(room.tetrisTick);
         if (room.pacmanTick)
             clearInterval(room.pacmanTick);
+        if (room.demolitionTick)
+            clearInterval(room.demolitionTick);
         clearBotTimers(room);
         rooms.delete(room.code);
         return;
@@ -662,7 +672,10 @@ function startMatch(room, rematch = false, startingPlayerId) {
         room.game.resetMatch(room.config, resolveBossPlayerId(room));
     else
         room.game.startMatch(room.config, resolveBossPlayerId(room));
-    room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "TETRIS_ARENA" || room.config.gameType === "PACMAN_ARENA"
+    room.genericEngine = room.config.gameType === "SUDOKU"
+        || room.config.gameType === "TETRIS_ARENA"
+        || room.config.gameType === "PACMAN_ARENA"
+        || room.config.gameType === "DEMOLITION_ARCADE"
         ? null
         : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
             seed: `${room.code}-${room.startedAt}`,
@@ -670,8 +683,10 @@ function startMatch(room, rematch = false, startingPlayerId) {
         });
     room.tetrisEngine = room.config.gameType === "TETRIS_ARENA" ? new TetrisArenaEngine() : null;
     room.pacmanEngine = room.config.gameType === "PACMAN_ARENA" ? new PacmanArenaEngine() : null;
+    room.demolitionEngine = room.config.gameType === "DEMOLITION_ARCADE" ? new DemolitionArenaEngine() : null;
     room.tetrisEngine?.syncPlayers(room.game.snapshot().players);
     room.pacmanEngine?.syncPlayers(room.game.snapshot().players);
+    room.demolitionEngine?.syncPlayers(room.game.snapshot().players);
     if (startingPlayerId)
         room.genericEngine?.setFirstPlayer(startingPlayerId);
     emitRoomState(room);
@@ -682,6 +697,8 @@ function startMatch(room, rematch = false, startingPlayerId) {
         startTetrisLoop(room);
     if (room.pacmanEngine)
         startPacmanLoop(room);
+    if (room.demolitionEngine)
+        startDemolitionLoop(room);
     for (const botId of room.bots.keys())
         scheduleBotAction(room, botId);
     room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
@@ -710,6 +727,9 @@ function finishMatch(room, force = false) {
     room.tetrisTick = null;
     if (room.pacmanTick)
         clearInterval(room.pacmanTick);
+    if (room.demolitionTick)
+        clearInterval(room.demolitionTick);
+    room.demolitionTick = null;
     room.pacmanTick = null;
     room.rpsTimer = null;
     room.boardEventTimeout = null;
@@ -792,6 +812,8 @@ function processGenericMove(room, playerId, payload, responder) {
     const result = engine.makeMove(playerId, payload, room.game);
     if (!result.accepted) {
         responder?.emit("generic:move-rejected", result);
+        if (room.config.gameType === "CHECKERS")
+            responder?.emit("InvalidMove", result);
         if (result.penaltyMs > 0) {
             const blockedUntil = Date.now() + result.penaltyMs;
             responder?.emit("player:penalty", { requestId: result.requestId, blockedUntil, reason: result.code });
@@ -1062,6 +1084,9 @@ function maybeActivatePause(room) {
     if (room.pacmanTick)
         clearInterval(room.pacmanTick);
     room.pacmanTick = null;
+    if (room.demolitionTick)
+        clearInterval(room.demolitionTick);
+    room.demolitionTick = null;
     if (room.boardEventTimeout)
         clearTimeout(room.boardEventTimeout);
     room.boardEventTimeout = null;
@@ -1091,6 +1116,8 @@ function resumeRoom(room) {
         startTetrisLoop(room);
     if (room.pacmanEngine)
         startPacmanLoop(room);
+    if (room.demolitionEngine)
+        startDemolitionLoop(room);
     emitRoomState(room);
     io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
 }
@@ -1121,6 +1148,24 @@ function startPacmanLoop(room) {
         if (snapshot.completed)
             finishMatch(room, true);
     }, 100);
+}
+function startDemolitionLoop(room) {
+    if (!room.demolitionEngine || room.demolitionTick)
+        return;
+    let emittedTick = 0;
+    room.demolitionTick = setInterval(() => {
+        if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.demolitionEngine)
+            return;
+        room.demolitionEngine.tick(1 / 60);
+        emittedTick += 1;
+        if (emittedTick % 3 !== 0)
+            return;
+        const snapshot = room.demolitionEngine.snapshot();
+        snapshot.players.forEach((player) => room.game.setGenericScore(player.id, player.score));
+        io.to(room.code).volatile.emit("demolition:state", snapshot);
+        if (snapshot.completed)
+            finishMatch(room, true);
+    }, 16);
 }
 function clearPauseState(room) {
     if (room.resumeTimer)
@@ -1263,6 +1308,8 @@ function shutdown() {
             clearInterval(room.tetrisTick);
         if (room.pacmanTick)
             clearInterval(room.pacmanTick);
+        if (room.demolitionTick)
+            clearInterval(room.demolitionTick);
         clearBotTimers(room);
     }
     io.close(() => process.exit(0));

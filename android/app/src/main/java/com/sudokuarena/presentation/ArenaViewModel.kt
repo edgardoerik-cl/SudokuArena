@@ -104,6 +104,7 @@ data class ArenaUiState(
     val rpsTie: Boolean = false,
     val tetrisState: com.sudokuarena.domain.TetrisArenaState? = null,
     val pacmanState: com.sudokuarena.domain.PacmanArenaState? = null,
+    val demolitionState: com.sudokuarena.domain.DemolitionArenaState? = null,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -320,6 +321,10 @@ class ArenaViewModel(
 
     fun sendPacmanInput(direction: String) {
         gateway?.sendPacmanInput(direction)
+    }
+
+    fun sendDemolitionInput(paddleX: Float) {
+        gateway?.sendDemolitionInput(paddleX)
     }
 
     fun chooseRps(choice: String) {
@@ -758,6 +763,9 @@ class ArenaViewModel(
             }
             is RealtimeEvent.PacmanStateUpdated -> mutableState.update {
                 it.copy(pacmanState = event.state, serverNowMs = event.state.serverTime)
+            }
+            is RealtimeEvent.DemolitionStateUpdated -> mutableState.update {
+                it.copy(demolitionState = event.state, serverNowMs = event.state.serverTime)
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }

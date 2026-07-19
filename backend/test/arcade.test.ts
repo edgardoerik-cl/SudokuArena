@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PacmanArenaEngine, TetrisArenaEngine } from "../src/action/arcadeEngines.js";
+import { DemolitionArenaEngine, PacmanArenaEngine, TetrisArenaEngine } from "../src/action/arcadeEngines.js";
 
 const players = [
   { id: "p1", name: "Nova", color: "#00E5FF", slot: 0, score: 0, blockedUntil: 0, energy: 0, teamId: "A", role: "PLAYER", teamScore: 0, isBot: false, shieldUntil: 0, combo: 0, maxCombo: 0, comboMultiplier: 1, powerLoadout: [], avatarId: "ORBIT" },
@@ -32,5 +32,20 @@ describe("Pac-Man Arena", () => {
     assert.equal(state.ghosts.length, 4);
     assert.ok(state.ghosts.every((ghost: { mode: string }) => ["CHASE", "SCATTER", "FRIGHTENED", "EATEN"].includes(ghost.mode)));
     assert.ok(["LEFT", "UP", "DOWN", "RIGHT", "STOP"].includes(state.players[0].direction));
+  });
+});
+
+describe("Demolición Arcade", () => {
+  it("mantiene física autoritativa, colisiones y niveles por jugador", () => {
+    const engine = new DemolitionArenaEngine();
+    engine.syncPlayers(players);
+    assert.equal(engine.input("p1", .82), true);
+    for (let tick = 0; tick < 120; tick += 1) engine.tick(1 / 60);
+    const state = engine.snapshot();
+    assert.equal(state.players.length, 2);
+    assert.equal(state.players[0].paddleX, .82);
+    assert.ok(state.players[0].bricks.length > 0);
+    assert.ok(state.players[0].ballX >= 0 && state.players[0].ballX <= 1);
+    assert.ok(state.players[0].ballY >= 0 && state.players[0].ballY <= 1);
   });
 });

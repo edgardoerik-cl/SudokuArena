@@ -136,6 +136,7 @@ fun GenericArenaScreen(
                     } else {
                         val boardRatio = when (generic.gameType) {
                             GameType.HANGMAN -> 1.65f
+                            GameType.ARROWS_ESCAPE -> 1.15f
                             else -> generic.columns.toFloat() / generic.rows.toFloat()
                         }
                         val boardWidth = minOf(maxWidth, maxHeight * boardRatio)
@@ -327,6 +328,11 @@ private fun AnimatedHangmanBoard(
                     if (used.isNotBlank()) {
                         Text("USADAS · $used", Modifier.padding(top = 10.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
+                    val wrong = (state.meta["wrongGuesses"] as? List<*>)
+                        ?.joinToString("  ") { it.toString() }.orEmpty()
+                    if (wrong.isNotBlank()) {
+                        Text("FALLOS · $wrong", color = Color(0xFFD50000), fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    }
                 }
             }
             if (landscape) {
@@ -391,6 +397,7 @@ private fun AnimatedArrowsGrid(
     modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val spatialShapes = remember(state.meta) { parseSpatialArrowShapes(state) }
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
             ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
@@ -398,7 +405,7 @@ private fun AnimatedArrowsGrid(
     var previousRemoved by remember(state.gameId, localPlayerId) { mutableStateOf(removed) }
     var flying by remember(state.gameId, localPlayerId) { mutableStateOf(emptySet<String>()) }
     val flight = remember(state.gameId, localPlayerId) { androidx.compose.animation.core.Animatable(1f) }
-    var blockedKey by remember(state.gameId) { mutableStateOf<String?>(null) }
+    var blockedShapeId by remember(state.gameId) { mutableStateOf<String?>(null) }
     val shake = remember(state.gameId) { androidx.compose.animation.core.Animatable(0f) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(removed) {
@@ -415,81 +422,122 @@ private fun AnimatedArrowsGrid(
     Canvas(
         modifier
             .fillMaxWidth()
-            .aspectRatio(state.columns.toFloat() / state.rows.toFloat())
+            .aspectRatio(1.15f)
             .background(Color(0xFFF8FAFF), RoundedCornerShape(14.dp))
-            .pointerInput(state.board, removed, enabled) {
+            .pointerInput(spatialShapes, removed, enabled) {
                 detectTapGestures { offset ->
                     if (!enabled) return@detectTapGestures
-                    val row = floor(offset.y / (size.height / state.rows)).toInt().coerceIn(0, state.rows - 1)
-                    val col = floor(offset.x / (size.width / state.columns)).toInt().coerceIn(0, state.columns - 1)
-                    val key = "$row:$col"
-                    if (key in removed) return@detectTapGestures
-                    if (canArrowEscapeClient(state, row, col, removed)) {
-                        onDirectMove(row, col, "ESCAPE")
+                    val worldX = offset.x / size.width
+                    val worldY = offset.y / size.height
+                    val shape = spatialShapes.lastOrNull { candidate ->
+                        worldX in candidate.x..(candidate.x + candidate.width)
+                            && worldY in candidate.y..(candidate.y + candidate.height)
+                            && !candidate.memberKeys.all(removed::contains)
+                    } ?: return@detectTapGestures
+                    val member = shape.memberKeys.first().split(":").map(String::toInt)
+                    if (canArrowEscapeClient(state, member[0], member[1], removed)) {
+                        onDirectMove(member[0], member[1], "ESCAPE")
                     } else {
-                        blockedKey = key
+                        blockedShapeId = shape.id
                         scope.launch {
                             shake.snapTo(0f)
                             shake.animateTo(1f, tween(340))
-                            blockedKey = null
+                            blockedShapeId = null
                         }
                     }
                 }
             },
     ) {
-        val cellWidth = size.width / state.columns
-        val cellHeight = size.height / state.rows
-        state.board.forEachIndexed { row, cells ->
-            cells.forEachIndexed { col, cell ->
-                val key = "$row:$col"
-                if (key in removed && key !in flying) return@forEachIndexed
-                val direction = cell.meta["arrow"]?.toString() ?: cell.value?.toString().orEmpty()
+        spatialShapes.forEach { shape ->
+                val isRemoved = shape.memberKeys.all(removed::contains)
+                val isFlying = shape.memberKeys.any(flying::contains)
+                if (isRemoved && !isFlying) return@forEach
+                val direction = shape.direction
                 val vector = when (direction) {
                     "UP" -> Offset(0f, -1f)
                     "RIGHT" -> Offset(1f, 0f)
                     "DOWN" -> Offset(0f, 1f)
                     else -> Offset(-1f, 0f)
                 }
-                val escape = if (key in flying) flight.value else 0f
+                val escape = if (isFlying) flight.value else 0f
+                val curveSign = if (shape.pathType == "CURVE_LEFT") -1f else if (shape.pathType == "CURVE_RIGHT") 1f else 0f
+                val curve = curveSign * sin(escape * Math.PI.toFloat()) * size.minDimension * .11f
+                val perpendicular = Offset(-vector.y, vector.x)
                 val distance = max(size.width, size.height) * 1.15f * escape
-                val blockedOffset = if (blockedKey == key) {
-                    sin(shake.value * Math.PI.toFloat() * 8f) * cellWidth * .10f
+                val blockedOffset = if (blockedShapeId == shape.id) {
+                    sin(shake.value * Math.PI.toFloat() * 8f) * size.width * .012f
                 } else 0f
                 val origin = Offset(
-                    col * cellWidth + vector.x * distance + blockedOffset,
-                    row * cellHeight + vector.y * distance,
+                    shape.x * size.width + vector.x * distance + perpendicular.x * curve + blockedOffset,
+                    shape.y * size.height + vector.y * distance + perpendicular.y * curve,
                 )
-                val shapeId = cell.meta["shapeId"]?.toString().orEmpty()
-                val color = colors.getOrNull(kotlin.math.abs(shapeId.hashCode()) % maxOf(1, colors.size))
-                    ?: listOf(Color(0xFF00A8FF), Color(0xFF7C3AED), Color(0xFFE91E63))[kotlin.math.abs(shapeId.hashCode()) % 3]
+                val shapeWidth = shape.width * size.width
+                val shapeHeight = shape.height * size.height
+                val color = colors.getOrNull(kotlin.math.abs(shape.id.hashCode()) % maxOf(1, colors.size))
+                    ?: listOf(Color(0xFF00A8FF), Color(0xFF7C3AED), Color(0xFFE91E63))[kotlin.math.abs(shape.id.hashCode()) % 3]
                 val alpha = 1f - escape
-                val inset = min(cellWidth, cellHeight) * .06f
-                drawRoundRect(
-                    color.copy(alpha = .22f * alpha),
-                    origin + Offset(inset, inset),
-                    Size(cellWidth - inset * 2, cellHeight - inset * 2),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(inset * 1.8f),
-                )
-                drawRoundRect(
-                    color.copy(alpha = alpha),
-                    origin + Offset(inset, inset),
-                    Size(cellWidth - inset * 2, cellHeight - inset * 2),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(inset * 1.8f),
-                    style = Stroke(maxOf(2f, inset * .55f)),
-                )
-                if (cell.meta["shapeAnchor"] == true || cell.meta["shapeId"] == null) {
-                    drawCenteredText(
-                        when (direction) { "UP" -> "↑"; "RIGHT" -> "→"; "DOWN" -> "↓"; else -> "←" },
-                        Offset(origin.x + cellWidth / 2f, origin.y + cellHeight / 2f),
-                        cellWidth * .82f,
-                        textMeasurer,
+                val maxOffsetX = shape.offsets.maxOfOrNull { it.first }?.coerceAtLeast(0) ?: 0
+                val maxOffsetY = shape.offsets.maxOfOrNull { it.second }?.coerceAtLeast(0) ?: 0
+                val segmentWidth = shapeWidth / (maxOffsetX + 1)
+                val segmentHeight = shapeHeight / (maxOffsetY + 1)
+                shape.offsets.forEach { (x, y) ->
+                    val segmentOrigin = origin + Offset(x * segmentWidth, y * segmentHeight)
+                    val inset = min(segmentWidth, segmentHeight) * .06f
+                    drawRoundRect(
+                        color.copy(alpha = .28f * alpha),
+                        segmentOrigin + Offset(inset, inset),
+                        Size(segmentWidth - inset * 2, segmentHeight - inset * 2),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(inset * 1.8f),
+                    )
+                    drawRoundRect(
                         color.copy(alpha = alpha),
+                        segmentOrigin + Offset(inset, inset),
+                        Size(segmentWidth - inset * 2, segmentHeight - inset * 2),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(inset * 1.8f),
+                        style = Stroke(maxOf(2f, inset * .65f)),
                     )
                 }
-            }
+                drawCenteredText(
+                    when (direction) { "UP" -> "↑"; "RIGHT" -> "→"; "DOWN" -> "↓"; else -> "←" },
+                    origin + Offset(shapeWidth / 2f, shapeHeight / 2f),
+                    max(shapeWidth, shapeHeight) * .72f,
+                    textMeasurer,
+                    color.copy(alpha = alpha),
+                )
         }
     }
 }
+
+private data class SpatialArrowShape(
+    val id: String,
+    val x: Float,
+    val y: Float,
+    val width: Float,
+    val height: Float,
+    val offsets: List<Pair<Int, Int>>,
+    val direction: String,
+    val pathType: String,
+    val memberKeys: List<String>,
+)
+
+private fun parseSpatialArrowShapes(state: GenericBoardState): List<SpatialArrowShape> =
+    (state.meta["shapes"] as? List<*>)?.mapNotNull { raw ->
+        val shape = raw as? Map<*, *> ?: return@mapNotNull null
+        SpatialArrowShape(
+            id = shape["id"]?.toString() ?: return@mapNotNull null,
+            x = (shape["x"] as? Number)?.toFloat() ?: return@mapNotNull null,
+            y = (shape["y"] as? Number)?.toFloat() ?: return@mapNotNull null,
+            width = (shape["width"] as? Number)?.toFloat() ?: return@mapNotNull null,
+            height = (shape["height"] as? Number)?.toFloat() ?: return@mapNotNull null,
+            offsets = (shape["offsets"] as? List<*>)?.mapNotNull { offsetRaw ->
+                val offset = offsetRaw as? Map<*, *> ?: return@mapNotNull null
+                ((offset["x"] as? Number)?.toInt() ?: 0) to ((offset["y"] as? Number)?.toInt() ?: 0)
+            }.orEmpty(),
+            direction = shape["direction"]?.toString().orEmpty(),
+            pathType = shape["pathType"]?.toString() ?: "STRAIGHT",
+            memberKeys = (shape["memberKeys"] as? List<*>)?.map { it.toString() }.orEmpty(),
+        )
+    }.orEmpty()
 
 private fun canArrowEscapeClient(
     state: GenericBoardState,
@@ -497,6 +545,39 @@ private fun canArrowEscapeClient(
     col: Int,
     removed: Set<String>,
 ): Boolean {
+    if (state.meta["freeSpace"] == true) {
+        val shapes = parseSpatialArrowShapes(state)
+        val shapeId = state.board[row][col].meta["shapeId"]?.toString() ?: return false
+        val shape = shapes.find { it.id == shapeId } ?: return false
+        val obstacles = shapes.filter { candidate ->
+            candidate.id != shape.id && !candidate.memberKeys.all(removed::contains)
+        }
+        val initiallyOverlapping = obstacles.filter { other ->
+            shape.x < other.x + other.width && shape.x + shape.width > other.x &&
+                shape.y < other.y + other.height && shape.y + shape.height > other.y
+        }.mapTo(mutableSetOf()) { it.id }
+        val vector = when (shape.direction) {
+            "UP" -> 0f to -1f
+            "RIGHT" -> 1f to 0f
+            "DOWN" -> 0f to 1f
+            else -> -1f to 0f
+        }
+        val perpendicular = -vector.second to vector.first
+        repeat(80) { index ->
+            val progress = (index + 1) / 40f
+            val sign = if (shape.pathType == "CURVE_LEFT") -1f else if (shape.pathType == "CURVE_RIGHT") 1f else 0f
+            val curve = sign * sin(progress.coerceAtMost(1f) * Math.PI.toFloat()) * .11f
+            val x = shape.x + vector.first * progress + perpendicular.first * curve
+            val y = shape.y + vector.second * progress + perpendicular.second * curve
+            if (x + shape.width < 0 || x > 1 || y + shape.height < 0 || y > 1) return true
+            if (obstacles.any { other ->
+                    other.id !in initiallyOverlapping &&
+                    x < other.x + other.width && x + shape.width > other.x
+                        && y < other.y + other.height && y + shape.height > other.y
+                }) return false
+        }
+        return false
+    }
     val shapeId = state.board[row][col].meta["shapeId"]?.toString() ?: "$row:$col"
     val members = buildList {
         state.board.forEachIndexed { y, cells ->
@@ -543,7 +624,7 @@ fun GenericPuzzleGrid(
     modifier: Modifier = Modifier,
 ) {
     if (state.gameType == GameType.CAPITAL_ARENA) {
-        CapitalArenaBoard(state, players, modifier)
+        CapitalArenaBoard(state, players, localPlayerId, onDirectMove, modifier)
         return
     }
     if (state.gameType == GameType.DOTS_AND_BOXES) {
@@ -1476,6 +1557,7 @@ fun gameTitle(type: GameType): String = when (type) {
     GameType.CAPITAL_ARENA -> "Multi Arena · Capital Arena"
     GameType.NEXUS_ZERO -> "Multi Arena · Nexo Cero"
     GameType.CHECKERS -> "Multi Arena · Damas Clásicas"
+    GameType.DEMOLITION_ARCADE -> "Multi Arena · Demolición Arcade"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

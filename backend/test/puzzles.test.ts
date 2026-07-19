@@ -84,6 +84,15 @@ describe("motor genérico de puzzles", () => {
     assert.equal(initial.meta.currentPlayerTurn, "p1");
     assert.equal((initial.meta.balances as Record<string, number>).p1, 1_500);
     assert.equal(engine.makeMove("p2", { requestId: "capital-wrong-turn", row: 10, col: 10, val: { action: "ROLL" } }, players, 1_001).accepted, false);
+    const fakeMove = engine.makeMove(
+      "p1",
+      { requestId: "capital-teleport", row: 10, col: 10, val: { action: "ROLL", from: "0", to: "12" } },
+      players,
+      1_001,
+    );
+    assert.equal(fakeMove.accepted, false);
+    assert.equal(engine.snapshot(players, 1_001).meta.currentPlayerTurn, "p1");
+    assert.equal(engine.snapshot(players, 1_001).meta.stage, "ROLL");
 
     const originalRandom = Math.random;
     Math.random = () => 0; // 1+1 cae en Suerte y roba la primera tarjeta.
@@ -185,6 +194,40 @@ describe("motor genérico de puzzles", () => {
     assert.equal(blueprint.meta.spatialLayout, true);
   });
 
+  it("Nexo Cero acepta valores opuestos aunque lleguen como enteros serializados", () => {
+    const players = new ArenaGame("nexus-int");
+    players.addPlayer("p1", "Cero");
+    players.startMatch({ gameType: "NEXUS_ZERO", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("NEXUS_ZERO", "nexus-int", { seed: "integer-zero" });
+    const snapshot = engine.snapshot(players);
+    const answer = String((createPuzzleBlueprint("NEXUS_ZERO", { seed: "integer-zero" }).answers[0]![0]));
+    const [targetRow, targetCol] = answer.split(":");
+    const result = engine.makeMove("p1", {
+      requestId: "zero-sum",
+      row: 0,
+      col: 0,
+      val: { targetRow, targetCol },
+    }, players);
+    assert.equal(result.accepted, true);
+    assert.equal(snapshot.board[0]![0]!.ownerId, null);
+  });
+
+  it("Damas conserva el turno al intentar un movimiento ilegal", () => {
+    const players = new ArenaGame("checkers-invalid");
+    players.addPlayer("p1", "Azul"); players.addPlayer("p2", "Rojo");
+    players.startMatch({ gameType: "CHECKERS", powersEnabled: false, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("CHECKERS", "checkers-invalid");
+    engine.setFirstPlayer("p1");
+    const rejected = engine.makeMove("p1", {
+      requestId: "illegal-checker",
+      row: 2,
+      col: 1,
+      val: { targetRow: 7, targetCol: 6 },
+    }, players, 1_000);
+    assert.equal(rejected.accepted, false);
+    assert.equal(engine.snapshot(players, 1_001).meta.currentPlayerTurn, "p1");
+  });
+
   it("El Gato detecta una de las ocho líneas de victoria", () => {
     const players = new ArenaGame("gato");
     players.addPlayer("p1", "X"); players.addPlayer("p2", "O");
@@ -207,7 +250,9 @@ describe("motor genérico de puzzles", () => {
     const engine = new GenericPuzzleEngine("HANGMAN", "hangman-security", { seed: "turns" });
     engine.setFirstPlayer("p1");
     const initial = engine.snapshot(players);
-    assert.equal(JSON.stringify(initial).includes("hiddenWord"), false);
+    assert.ok(Array.isArray(initial.meta.hiddenWord));
+    assert.ok((initial.meta.hiddenWord as string[]).every((letter) => letter === "_"));
+    assert.deepEqual(initial.meta.wrongGuesses, []);
     assert.ok((initial.meta.maskedWord as string[]).every((letter) => letter === "_"));
     const correct = engine.createBotMove(1, "p1")!;
     assert.equal(engine.makeMove("p1", correct, players).accepted, true);

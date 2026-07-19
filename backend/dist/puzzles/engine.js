@@ -36,6 +36,7 @@ export class GenericPuzzleEngine {
     capitalPositions = new Map();
     capitalPropertyOwners = new Map();
     capitalPropertyLevels = new Map();
+    capitalSkillsUsed = new Set();
     capitalStage = "ROLL";
     capitalPendingProperty = null;
     capitalDice = [1, 1];
@@ -105,13 +106,18 @@ export class GenericPuzzleEngine {
                     balances: Object.fromEntries(this.capitalBalances),
                     positions: Object.fromEntries(this.capitalPositions),
                     propertyOwners: Object.fromEntries(this.capitalPropertyOwners),
-                    propertyLevels: Object.fromEntries(this.capitalPropertyLevels)
+                    propertyLevels: Object.fromEntries(this.capitalPropertyLevels),
+                    skillsUsed: [...this.capitalSkillsUsed],
                 } : {}),
                 ...(this.gameType === "HANGMAN" ? {
                     guessedLetters: [...this.hangmanGuesses],
                     errors: Object.fromEntries(this.hangmanErrors),
                     mistakesMade: [...this.hangmanErrors.values()].reduce((sum, value) => sum + value, 0),
                     maskedWord: this.board[0].map((cell) => cell.value?.toString() ?? "_"),
+                    // Compatibilidad del contrato solicitado: nunca contiene la respuesta,
+                    // solo letras ya descubiertas y guiones.
+                    hiddenWord: this.board[0].map((cell) => cell.value?.toString() ?? "_"),
+                    wrongGuesses: [...this.hangmanGuesses].filter((letter) => !this.hiddenWord.includes(letter)),
                     eliminated: [...this.hangmanErrors].filter(([, errors]) => errors >= 6).map(([id]) => id),
                     currentPlayerTurn: this.activePlayerId,
                     ...(this.completed && this.board[0].some((cell) => cell.value === null)
@@ -201,7 +207,8 @@ export class GenericPuzzleEngine {
         if (!outcome.correct) {
             const penaltyMs = this.gameType === "MINESWEEPER" && outcome.hitMine ? 5_000 : 3_000;
             game.applyGenericPenalty(playerId, now + penaltyMs);
-            if (STRICT_PLAYER_TURN_GAMES.has(this.gameType))
+            // En Damas una jugada ilegal no consume el turno.
+            if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && this.gameType !== "CHECKERS")
                 this.advanceStrictTurn();
             this.revision += 1;
             return {
@@ -562,14 +569,17 @@ export class GenericPuzzleEngine {
         }
         if (this.gameType === "NEXUS_ZERO") {
             const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
-            const targetRow = Number(payload.targetRow);
-            const targetCol = Number(payload.targetCol);
+            const targetRow = Number.parseInt(String(payload.targetRow), 10);
+            const targetCol = Number.parseInt(String(payload.targetCol), 10);
             const target = this.board[targetRow]?.[targetCol];
             if (!target || target.ownerId !== null)
                 return { correct: false };
             const expectedPartner = String(this.answers[move.row][move.col]) === `${targetRow}:${targetCol}`;
-            const sum = Number(cell.value) + Number(target.value);
-            if (!expectedPartner || sum !== 0)
+            const firstValue = Number.parseInt(String(cell.value), 10);
+            const secondValue = Number.parseInt(String(target.value), 10);
+            if (!Number.isInteger(firstValue) || !Number.isInteger(secondValue))
+                return { correct: false };
+            if (!expectedPartner || firstValue + secondValue !== 0)
                 return { correct: false };
             cell.ownerId = playerId;
             target.ownerId = playerId;
@@ -920,6 +930,39 @@ export class GenericPuzzleEngine {
         return result;
     }
     canArrowShapeEscape(shapeId, removed) {
+        if (this.meta.freeSpace === true) {
+            const shapes = this.meta.shapes;
+            const shape = shapes.find((candidate) => candidate.id === shapeId);
+            if (!shape)
+                return false;
+            const obstacles = shapes.filter((candidate) => candidate.id !== shape.id && !candidate.memberKeys.every((key) => removed.has(key)));
+            // Una ligera superposición visual de las formas curvas de la silueta no
+            // debe convertir el nivel en un interbloqueo imposible desde el inicio.
+            const initiallyOverlapping = new Set(obstacles.filter((obstacle) => rectanglesIntersect(shape, obstacle)).map((obstacle) => obstacle.id));
+            const vector = shape.direction === "UP" ? { x: 0, y: -1 }
+                : shape.direction === "RIGHT" ? { x: 1, y: 0 }
+                    : shape.direction === "DOWN" ? { x: 0, y: 1 }
+                        : { x: -1, y: 0 };
+            const perpendicular = { x: -vector.y, y: vector.x };
+            for (let step = 1; step <= 80; step += 1) {
+                const progress = step / 40;
+                const curveSign = shape.pathType === "CURVE_LEFT" ? -1 : shape.pathType === "CURVE_RIGHT" ? 1 : 0;
+                const curve = curveSign * Math.sin(Math.min(1, progress) * Math.PI) * .11;
+                const projected = {
+                    x: shape.x + vector.x * progress + perpendicular.x * curve,
+                    y: shape.y + vector.y * progress + perpendicular.y * curve,
+                    width: shape.width,
+                    height: shape.height,
+                };
+                const outside = projected.x + projected.width < 0 || projected.x > 1
+                    || projected.y + projected.height < 0 || projected.y > 1;
+                if (outside)
+                    return true;
+                if (obstacles.some((obstacle) => !initiallyOverlapping.has(obstacle.id) && rectanglesIntersect(projected, obstacle)))
+                    return false;
+            }
+            return false;
+        }
         const members = this.arrowShapeMembers(shapeId);
         if (!members.length)
             return false;
@@ -1122,6 +1165,19 @@ export class GenericPuzzleEngine {
     applyCapitalMove(playerId, move, game) {
         const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
         const action = String(payload.action ?? "").toUpperCase();
+        const authoritativePosition = this.capitalPositions.get(playerId) ?? 0;
+        if (payload.from != null && Number.parseInt(String(payload.from), 10) !== authoritativePosition) {
+            return { correct: false, neutral: true, message: "La posición de origen no coincide con el servidor" };
+        }
+        if (payload.to != null) {
+            const requestedTarget = Number.parseInt(String(payload.to), 10);
+            const clockwiseDistance = (requestedTarget - authoritativePosition + 40) % 40;
+            // Ningún payload del cliente puede teletransportar una ficha. Los saltos
+            // por dados o cartas se calculan exclusivamente en el servidor.
+            if (!Number.isInteger(requestedTarget) || clockwiseDistance !== 1) {
+                return { correct: false, neutral: true, message: "Movimiento no adyacente rechazado" };
+            }
+        }
         if (action === "ROLL") {
             if (this.capitalStage !== "ROLL")
                 return { correct: false };
@@ -1136,6 +1192,15 @@ export class GenericPuzzleEngine {
             this.capitalPositions.set(playerId, to);
             this.capitalLastMove = { playerId, from, to };
             this.resolveCapitalLanding(playerId, to);
+            this.refreshCapitalScores(game);
+            return { correct: true, points: 0 };
+        }
+        if (action === "SKILL") {
+            if (this.capitalSkillsUsed.has(playerId))
+                return { correct: false };
+            this.capitalSkillsUsed.add(playerId);
+            this.changeCapitalBalance(playerId, 100);
+            this.capitalEvent = "Impulso de mercado activado: +100 créditos";
             this.refreshCapitalScores(game);
             return { correct: true, points: 0 };
         }
@@ -1632,6 +1697,12 @@ function clearPiece(cell) {
 }
 function oppositeSide(side) {
     return { top: "bottom", right: "left", bottom: "top", left: "right" }[side] ?? "";
+}
+function rectanglesIntersect(first, second) {
+    return first.x < second.x + second.width
+        && first.x + first.width > second.x
+        && first.y < second.y + second.height
+        && first.y + first.height > second.y;
 }
 function neighbourFor(row, col, side, rows, columns) {
     const target = side === "top" ? { row: row - 1, col }

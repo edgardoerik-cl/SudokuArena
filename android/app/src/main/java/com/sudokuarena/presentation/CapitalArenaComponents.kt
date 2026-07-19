@@ -7,6 +7,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -23,6 +24,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +36,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -39,6 +45,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
@@ -63,6 +71,8 @@ private data class CapitalSpaceUi(
 fun CapitalArenaBoard(
     state: GenericBoardState,
     players: Map<String, Player>,
+    localPlayerId: String?,
+    onAction: (Int, Int, Any?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
@@ -73,6 +83,12 @@ fun CapitalArenaBoard(
     val levels = state.meta.stringIntMap("propertyLevels")
     val surpriseCard = state.meta["surpriseCard"] as? Map<*, *>
     val activePlayerId = state.meta["currentPlayerTurn"]?.toString()
+    var focused by remember(state.gameId) { mutableStateOf(false) }
+    var powerMenuVisible by remember(state.gameId) { mutableStateOf(false) }
+    val cameraScale by animateFloatAsState(if (focused) 2f else 1f, tween(420), label = "capitalCamera")
+    val ownPosition = positions[localPlayerId] ?: 0
+    val ownCellGrid = capitalCellGridPosition(ownPosition)
+    val powerUsed = (state.meta["skillsUsed"] as? Map<*, *>)?.containsKey(localPlayerId) == true
     val activeGlow by rememberInfiniteTransition(label = "capitalActiveGlow").animateFloat(
         initialValue = .35f, targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(520), RepeatMode.Reverse),
@@ -99,7 +115,22 @@ fun CapitalArenaBoard(
             .aspectRatio(1f)
             .background(Color(0xFFF6F8FF), RoundedCornerShape(18.dp)),
     ) {
-        Canvas(Modifier.fillMaxSize()) {
+        Canvas(
+            Modifier.fillMaxSize()
+                .graphicsLayer {
+                    scaleX = cameraScale
+                    scaleY = cameraScale
+                    transformOrigin = TransformOrigin(ownCellGrid.x / 11f, ownCellGrid.y / 11f)
+                }
+                .pointerInput(localPlayerId, positions) {
+                    detectTapGestures { tap ->
+                        val unit = minOf(size.width, size.height) / 11f
+                        val own = capitalCellOffset(ownPosition, unit)
+                        powerMenuVisible = localPlayerId != null &&
+                            tap.x in own.x..(own.x + unit) && tap.y in own.y..(own.y + unit)
+                    }
+                },
+        ) {
             val unit = size.minDimension / 11f
             spaces.forEach { space ->
                 val cell = capitalCellOffset(space.index, unit)
@@ -112,6 +143,7 @@ fun CapitalArenaBoard(
                     "START" -> "SALIDA"; "GO_TO_JAIL" -> "CÁRCEL"; "CHANCE" -> "?"; "TAX" -> "IMP"
                     "STATION" -> "TREN"; "JAIL" -> "JAIL"; "PARKING" -> "P"; else -> space.name.take(7)
                 }
+                drawCapitalSpaceIcon(space.type, cell + Offset(unit * .5f, unit * .78f), unit * .14f)
                 val layout = textMeasurer.measure(
                     shortName,
                     TextStyle(color = Color(0xFF102A56), fontSize = if (shortName.length > 4) 6.sp else 9.sp, fontWeight = FontWeight.Black),
@@ -165,6 +197,35 @@ fun CapitalArenaBoard(
             card = surpriseCard,
             modifier = Modifier.align(Alignment.Center).fillMaxWidth(.48f),
         )
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            OutlinedButton(onClick = { focused = true }) { Text("◎ Enfocar", fontSize = 10.sp) }
+            OutlinedButton(onClick = { focused = false }) { Text("▣ Completo", fontSize = 10.sp) }
+        }
+        if (powerMenuVisible && localPlayerId != null) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = 10.dp),
+                color = Color(0xFF102A56),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(2.dp, Color(0xFF00E5FF)),
+                shadowElevation = 14.dp,
+            ) {
+                Button(
+                    onClick = {
+                        onAction(0, 0, mapOf("action" to "SKILL"))
+                        powerMenuVisible = false
+                    },
+                    enabled = !powerUsed,
+                    modifier = Modifier.padding(6.dp),
+                ) {
+                    Text(if (powerUsed) "⚡ Poder usado" else "⚡ Impulso +100")
+                }
+            }
+        }
     }
 }
 
@@ -352,6 +413,32 @@ private fun capitalCellOffset(index: Int, unit: Float): Offset = when {
     index <= 20 -> Offset(0f, (20 - index) * unit)
     index <= 30 -> Offset((index - 20) * unit, 0f)
     else -> Offset(10 * unit, (index - 30) * unit)
+}
+
+private fun capitalCellGridPosition(index: Int): Offset = capitalCellOffset(index, 1f) + Offset(.5f, .5f)
+
+private fun DrawScope.drawCapitalSpaceIcon(type: String, center: Offset, radius: Float) {
+    when (type) {
+        "PROPERTY" -> {
+            drawRect(Color(0xFF263A60), center - Offset(radius * .65f, radius * .5f), Size(radius * 1.3f, radius))
+            val roof = Path().apply {
+                moveTo(center.x - radius * .8f, center.y - radius * .5f)
+                lineTo(center.x, center.y - radius * 1.05f)
+                lineTo(center.x + radius * .8f, center.y - radius * .5f)
+                close()
+            }
+            drawPath(roof, Color(0xFF7C3AED))
+            drawRect(Color(0xFF00E5FF), center - Offset(radius * .18f, 0f), Size(radius * .36f, radius * .5f))
+        }
+        "STATION" -> {
+            drawRoundRect(Color(0xFF263A60), center - Offset(radius * .75f, radius * .48f), Size(radius * 1.5f, radius * .85f))
+            drawCircle(Color.White, radius * .2f, center + Offset(-radius * .42f, radius * .46f))
+            drawCircle(Color.White, radius * .2f, center + Offset(radius * .42f, radius * .46f))
+        }
+        "CHANCE" -> drawCircle(Color(0xFF7C3AED), radius, center)
+        "TAX" -> drawLine(Color(0xFFFF1744), center - Offset(radius, radius), center + Offset(radius, radius), radius * .32f)
+        else -> drawCircle(Color(0xFF00A8FF).copy(alpha = .65f), radius * .42f, center)
+    }
 }
 
 private fun capitalPositionOffset(position: Float, unit: Float): Offset {

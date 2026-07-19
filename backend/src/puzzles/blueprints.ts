@@ -26,6 +26,7 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "CAPITAL_ARENA": return capitalArena(random, difficulty);
     case "NEXUS_ZERO": return nexusZero(random, difficulty);
     case "CHECKERS": return checkers(difficulty);
+    case "DEMOLITION_ARCADE": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "BREAKOUT_PHYSICS", difficulty } };
     case "SUDOKU": return latinPuzzle(random, 9);
   }
 }
@@ -472,67 +473,74 @@ function hangman(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlue
 }
 
 function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const size = sizeFor(difficulty, 5, 6, 7, 8);
-  const board = matrix(size, size, () => cell(null, true));
-  const answers = matrix<CellValue>(size, size, () => null);
-  const occupied = new Set<string>();
-  const shapes: Array<{ id: string; anchor: { x: number; y: number }; offsets: Array<{ x: number; y: number }>; direction: string }> = [];
+  const count = sizeFor(difficulty, 14, 20, 26, 32);
+  const board = matrix(1, count, () => cell(null, true));
+  const answers = matrix<CellValue>(1, count, () => null);
+  const shapes: Array<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    offsets: Array<{ x: number; y: number }>;
+    direction: string;
+    pathType: string;
+    memberKeys: string[];
+  }> = [];
   const templates = [
     [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }],
     [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+    [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }],
     [{ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }],
     [{ x: 0, y: 0 }],
   ];
-  for (let row = 0; row < size; row += 1) for (let col = 0; col < size; col += 1) {
-    if (occupied.has(`${row}:${col}`)) continue;
-    const validTemplates = random.shuffle(templates).filter((offsets) => offsets.every(({ x, y }) =>
-      row + y < size && col + x < size && !occupied.has(`${row + y}:${col + x}`)
-    ));
-    const offsets = validTemplates[0] ?? templates[3]!;
-    offsets.forEach(({ x, y }) => occupied.add(`${row + y}:${col + x}`));
-    const cells = offsets.map(({ x, y }) => ({ row: row + y, col: col + x }));
-    const minRow = Math.min(...cells.map((point) => point.row));
-    const maxRow = Math.max(...cells.map((point) => point.row));
-    const minCol = Math.min(...cells.map((point) => point.col));
-    const maxCol = Math.max(...cells.map((point) => point.col));
-    const distances = [
-      { direction: "UP", value: minRow }, { direction: "RIGHT", value: size - 1 - maxCol },
-      { direction: "DOWN", value: size - 1 - maxRow }, { direction: "LEFT", value: minCol },
-    ];
-    const minimum = Math.min(...distances.map(({ value }) => value));
-    const direction = random.pick(distances.filter(({ value }) => value === minimum)).direction;
-    const id = `shape-${shapes.length}`;
-    shapes.push({ id, anchor: { x: col, y: row }, offsets, direction });
-    cells.forEach((point, localIndex) => {
-      board[point.row]![point.col] = cell(direction, true, {
-        arrow: direction,
-        shapeId: id,
-        shapeAnchor: localIndex === 0,
-        localX: offsets[localIndex]!.x,
-        localY: offsets[localIndex]!.y,
-      });
-      answers[point.row]![point.col] = direction;
+  for (let index = 0; index < count; index += 1) {
+    // Parametrización de corazón: las piezas flotan formando una silueta,
+    // pero sus coordenadas siguen siendo libres y no celdas visuales.
+    const angle = (index / count) * Math.PI * 2;
+    const heartX = 16 * Math.sin(angle) ** 3;
+    const heartY = 13 * Math.cos(angle) - 5 * Math.cos(2 * angle) - 2 * Math.cos(3 * angle) - Math.cos(4 * angle);
+    const offsets = random.pick(templates);
+    // Mantener separación inicial evita tableros geométricamente bloqueados.
+    // Las formas siguen siendo legibles porque el cliente amplía su trazo.
+    const unit = .010 + random.next() * .003;
+    const width = (Math.max(...offsets.map((point) => point.x)) + 1) * unit;
+    const height = (Math.max(...offsets.map((point) => point.y)) + 1) * unit;
+    const x = .5 + heartX / 44 + (random.next() - .5) * .025 - width / 2;
+    const y = .48 - heartY / 46 + (random.next() - .5) * .025 - height / 2;
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const direction = Math.abs(centerX - .5) > Math.abs(centerY - .5)
+      ? centerX < .5 ? "LEFT" : "RIGHT"
+      : centerY < .5 ? "UP" : "DOWN";
+    const id = `shape-${index}`;
+    const pathType = difficulty === "EXPERT" && index % 5 === 0
+      ? (index % 2 === 0 ? "CURVE_LEFT" : "CURVE_RIGHT")
+      : "STRAIGHT";
+    shapes.push({ id, x, y, width, height, offsets, direction, pathType, memberKeys: [`0:${index}`] });
+    board[0]![index] = cell(direction, true, {
+      arrow: direction,
+      shapeId: id,
+      shapeAnchor: true,
+      pathType,
     });
+    answers[0]![index] = direction;
   }
   return {
     board,
     answers,
     meta: {
-      totalBlocks: size * size,
+      freeSpace: true,
+      worldWidth: 1,
+      worldHeight: 1,
+      totalBlocks: count,
       totalShapes: shapes.length,
       shapes,
-      instructions: "Toca una forma cuando la trayectoria de todos sus sub-bloques esté libre.",
+      instructions: "Toca una pieza flotante. Toda su geometría debe recorrer la trayectoria de salida sin tocar otra forma.",
       difficulty,
     },
   };
-}
-
-function rayCells(row: number, col: number, direction: string, size: number): Array<[number, number]> {
-  const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
-    : direction === "DOWN" ? [1, 0] : [0, -1];
-  const result: Array<[number, number]> = [];
-  for (let y = row + dy, x = col + dx; y >= 0 && y < size && x >= 0 && x < size; y += dy, x += dx) result.push([y, x]);
-  return result;
 }
 
 export const SCRABBLE_SCORES: Record<string, number> = {

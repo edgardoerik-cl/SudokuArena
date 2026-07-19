@@ -205,4 +205,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("×", "Captura obligatoria", "Si puedes saltar una ficha rival debes hacerlo. Tras una captura puede haber otra encadenada."),
         TutorialStep("♛", "Corona una reina", "Al alcanzar la última fila, la ficha se convierte en Reina y recorre diagonales completas."),
     )
+    GameType.DEMOLITION_ARCADE -> listOf(
+        TutorialStep("Mueve la plataforma", "Arrastra el dedo horizontalmente en la arena para seguir la bola.", "↔"),
+        TutorialStep("Rompe la estructura", "Cada impacto daña un bloque. Algunos necesitan más de un golpe.", "●▰"),
+        TutorialStep("Conserva tus vidas", "Si la bola cae por abajo pierdes una vida. Vacía el nivel para avanzar.", "♥"),
+    )
 }
