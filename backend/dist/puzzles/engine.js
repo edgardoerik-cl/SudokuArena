@@ -39,6 +39,10 @@ export class GenericPuzzleEngine {
     capitalEvent = "La economía neón está lista";
     capitalCard = null;
     lastSlitherMoveAt = new Map();
+    hangmanGuesses = new Map();
+    hangmanErrors = new Map();
+    arrowRemoved = new Map();
+    arcadeDeposits = new Map();
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
         this.gameId = gameId;
@@ -98,6 +102,15 @@ export class GenericPuzzleEngine {
                     positions: Object.fromEntries(this.capitalPositions),
                     propertyOwners: Object.fromEntries(this.capitalPropertyOwners),
                     propertyLevels: Object.fromEntries(this.capitalPropertyLevels)
+                } : {}),
+                ...(this.gameType === "HANGMAN" ? {
+                    guessedLetters: [...new Set([...this.hangmanGuesses.values()].flatMap((letters) => [...letters]))],
+                    errors: Object.fromEntries(this.hangmanErrors),
+                    eliminated: [...this.hangmanErrors].filter(([, errors]) => errors >= 6).map(([id]) => id),
+                } : {}),
+                ...(this.gameType === "ARROWS_ESCAPE" ? {
+                    progress: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, removed.size])),
+                    removedByPlayer: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, [...removed]])),
                 } : {})
             }
         };
@@ -168,7 +181,7 @@ export class GenericPuzzleEngine {
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
         }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA"].includes(this.gameType))) {
+        if (cell.isBlocked || (cell.ownerId !== null && !["SLITHERLINK", "NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE"].includes(this.gameType))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
         const outcome = this.applySpecificMove(playerId, move, cell, game, now);
@@ -213,6 +226,33 @@ export class GenericPuzzleEngine {
             return this.createSecretBotMove(playerId);
         if (this.gameType === "CAPITAL_ARENA")
             return this.createCapitalBotMove(playerId);
+        if (this.gameType === "HANGMAN") {
+            const target = this.board[0].findIndex((cell) => cell.value === null);
+            if (target < 0)
+                return null;
+            return { requestId: `hangman-bot-${randomUUID()}`, row: 0, col: target, val: this.answers[0][target] };
+        }
+        if (this.gameType === "ARROWS_ESCAPE") {
+            const removed = this.arrowRemoved.get(playerId ?? "bot") ?? new Set();
+            for (let row = 0; row < this.board.length; row += 1)
+                for (let col = 0; col < this.board[row].length; col += 1) {
+                    const key = `${row}:${col}`;
+                    if (removed.has(key))
+                        continue;
+                    const direction = String(this.board[row][col].meta.arrow);
+                    const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1] : direction === "DOWN" ? [1, 0] : [0, -1];
+                    let clear = true;
+                    for (let y = row + dy, x = col + dx; y >= 0 && y < this.board.length && x >= 0 && x < this.board[0].length; y += dy, x += dx) {
+                        if (!removed.has(`${y}:${x}`)) {
+                            clear = false;
+                            break;
+                        }
+                    }
+                    if (clear)
+                        return { requestId: `arrows-bot-${randomUUID()}`, row, col, val: "ESCAPE" };
+                }
+            return null;
+        }
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && playerId && this.activePlayerId !== playerId)
             return null;
         if (this.gameType === "WORD_SEARCH") {
@@ -232,14 +272,27 @@ export class GenericPuzzleEngine {
             const target = this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex }))).find(({ cell, row, col }) => !cell.isBlocked && cell.ownerId === null && this.answers[row]?.[col] !== null);
             if (!target)
                 return null;
-            const [color, rawTile] = String(this.answers[target.row][target.col]).split(":");
-            const tile = Number(rawTile);
+            const [color] = String(this.answers[target.row][target.col]).split(":");
             return {
                 requestId: `rummikub-bot-${randomUUID()}`,
                 row: target.row,
                 col: target.col,
-                val: { color, tile: Math.random() <= accuracy ? tile : ((tile % 13) + 1) },
+                val: { deposit: Math.random() <= accuracy ? color : "WRONG" },
             };
+        }
+        if (this.gameType === "SLITHERLINK") {
+            const current = this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex })))
+                .filter(({ cell }) => cell.ownerId === null)
+                .sort((a, b) => Number(a.cell.meta.pathIndex) - Number(b.cell.meta.pathIndex))[0];
+            if (!current)
+                return null;
+            const answer = String(this.answers[current.row][current.col]);
+            if (answer === "END") {
+                current.cell.ownerId = playerId ?? "BOT";
+                return null;
+            }
+            const [targetRow, targetCol] = answer.split(":").map(Number);
+            return { requestId: `neon-path-bot-${randomUUID()}`, row: current.row, col: current.col, val: { targetRow, targetCol } };
         }
         if (this.gameType === "NEXUS_ZERO") {
             for (let row = 0; row < this.board.length; row += 1) {
@@ -265,7 +318,7 @@ export class GenericPuzzleEngine {
         for (let row = 0; row < this.board.length; row += 1) {
             for (let col = 0; col < this.board[row].length; col += 1) {
                 const cell = this.board[row][col];
-                if ((cell.ownerId === null || this.gameType === "SLITHERLINK") && !cell.isBlocked) {
+                if (cell.ownerId === null && !cell.isBlocked) {
                     candidates.push({ row, col });
                 }
             }
@@ -278,9 +331,6 @@ export class GenericPuzzleEngine {
             : candidates;
         if (["NONOGRAM", "HITORI", "BRIDGES"].includes(this.gameType) && correct) {
             suitable = candidates.filter(({ row, col }) => this.answers[row][col] === true);
-        }
-        if (this.gameType === "SLITHERLINK") {
-            suitable = candidates.filter(({ row, col }) => this.missingSlitherEdges(row, col).length > 0);
         }
         if (this.gameType === "DOTS_AND_BOXES" && correct) {
             const edgeCount = ({ row, col }) => ["top", "right", "bottom", "left"].filter((side) => this.board[row][col].meta[side] === true).length;
@@ -351,6 +401,46 @@ export class GenericPuzzleEngine {
             return this.applySecretCodeMove(playerId, move, cell);
         if (this.gameType === "CAPITAL_ARENA")
             return this.applyCapitalMove(playerId, move, game);
+        if (this.gameType === "HANGMAN") {
+            if ((this.hangmanErrors.get(playerId) ?? 0) >= 6)
+                return { correct: false, points: 0 };
+            const letter = String(move.val ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 1);
+            if (!/^[A-ZÑ]$/.test(letter))
+                return { correct: false };
+            const guesses = this.hangmanGuesses.get(playerId) ?? new Set();
+            if (guesses.has(letter))
+                return { correct: false, points: 0 };
+            guesses.add(letter);
+            this.hangmanGuesses.set(playerId, guesses);
+            let hits = 0;
+            this.answers[0].forEach((answer, col) => {
+                if (String(answer) === letter) {
+                    this.board[0][col].value = letter;
+                    this.board[0][col].ownerId = playerId;
+                    this.board[0][col].isRevealed = true;
+                    hits += 1;
+                }
+            });
+            if (hits === 0)
+                this.hangmanErrors.set(playerId, (this.hangmanErrors.get(playerId) ?? 0) + 1);
+            return { correct: true, points: hits * 12 };
+        }
+        if (this.gameType === "ARROWS_ESCAPE") {
+            const removed = this.arrowRemoved.get(playerId) ?? new Set();
+            const key = `${move.row}:${move.col}`;
+            if (removed.has(key))
+                return { correct: false };
+            const direction = String(cell.meta.arrow ?? cell.value);
+            const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
+                : direction === "DOWN" ? [1, 0] : [0, -1];
+            for (let row = move.row + dy, col = move.col + dx; row >= 0 && row < this.board.length && col >= 0 && col < this.board[0].length; row += dy, col += dx) {
+                if (!removed.has(`${row}:${col}`))
+                    return { correct: false, points: 0 };
+            }
+            removed.add(key);
+            this.arrowRemoved.set(playerId, removed);
+            return { correct: true, points: 10 };
+        }
         if (this.gameType === "NURIKABE") {
             const action = String(move.val ?? "").toUpperCase();
             if (!['RIVER', 'ISLAND', 'CLEAR'].includes(action) || cell.meta.islandClue === true)
@@ -427,33 +517,17 @@ export class GenericPuzzleEngine {
             };
         }
         if (this.gameType === "SLITHERLINK") {
-            let row = move.row;
-            let col = move.col;
-            let side = String(move.val ?? "").toLowerCase();
-            let target = cell;
-            let expected = String(this.answers[row][col] ?? "").split("|").filter(Boolean);
-            if (!expected.includes(side)) {
-                const neighbour = neighbourFor(row, col, side, this.board.length, this.board[0].length);
-                if (!neighbour)
-                    return { correct: false };
-                const opposite = oppositeSide(side);
-                const neighbourExpected = String(this.answers[neighbour.row][neighbour.col] ?? "").split("|").filter(Boolean);
-                if (!neighbourExpected.includes(opposite))
-                    return { correct: false };
-                row = neighbour.row;
-                col = neighbour.col;
-                side = opposite;
-                target = this.board[row][col];
-                expected = neighbourExpected;
-            }
-            if (target.meta[side] === true)
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
+            const targetRow = Number(payload.targetRow);
+            const targetCol = Number(payload.targetCol);
+            if (String(this.answers[move.row][move.col]) !== `${targetRow}:${targetCol}`)
                 return { correct: false };
-            target.meta[side] = true;
-            this.mirrorDotsEdge(row, col, side);
-            if (expected.every((edge) => target.meta[edge] === true)) {
-                target.ownerId = playerId;
-                target.isRevealed = true;
-            }
+            const target = this.board[targetRow]?.[targetCol];
+            if (!target || target.ownerId !== null)
+                return { correct: false };
+            cell.ownerId = playerId;
+            target.ownerId = playerId;
+            cell.meta.connectedTo = `${targetRow}:${targetCol}`;
             const elapsed = now - (this.lastSlitherMoveAt.get(playerId) ?? now);
             this.lastSlitherMoveAt.set(playerId, now);
             const speedMultiplier = elapsed <= 900 ? 3 : elapsed <= 1_800 ? 2 : 1;
@@ -461,21 +535,22 @@ export class GenericPuzzleEngine {
             return { correct: true, points: 8 * speedMultiplier };
         }
         if (this.gameType === "RUMMIKUB") {
-            const payload = typeof move.val === "object" && move.val !== null ? move.val : { tile: move.val };
-            const tile = Number(payload.tile);
-            const color = String(payload.color ?? "").toUpperCase();
-            if (!Number.isInteger(tile) || tile < 1 || tile > 13 || !["RED", "BLUE", "GREEN", "ORANGE"].includes(color)) {
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
+            const zone = String(payload.deposit ?? "").toUpperCase();
+            const color = String(cell.meta.tileColor);
+            const tile = Number(cell.value);
+            if (!(zone === color || zone === "NUMBER"))
                 return { correct: false };
-            }
-            if (`${color}:${tile}` !== this.answers[move.row][move.col])
-                return { correct: false };
-            cell.value = tile;
+            const depositKey = `${playerId}:${zone}`;
+            const deposit = this.arcadeDeposits.get(depositKey) ?? [];
+            deposit.push(`${color}:${tile}`);
+            this.arcadeDeposits.set(depositKey, deposit);
             cell.ownerId = playerId;
-            cell.isRevealed = true;
-            cell.meta.tileColor = color;
-            const meldLength = Number(cell.meta.meldLength ?? 3);
-            const completedMeld = this.board[move.row].slice(0, meldLength).every((target) => target.ownerId !== null);
-            return { correct: true, points: completedMeld ? 35 : 10 };
+            cell.isRevealed = false;
+            const triple = zone === "NUMBER"
+                ? deposit.filter((entry) => entry.endsWith(`:${tile}`)).length >= 3
+                : deposit.filter((entry) => entry.startsWith(`${color}:`)).length >= 3;
+            return { correct: true, points: triple ? 40 : 8 };
         }
         if (this.gameType === "NEXUS_ZERO") {
             const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
@@ -585,6 +660,10 @@ export class GenericPuzzleEngine {
         }
         if (this.gameType === "WORD_SEARCH")
             return this.meta.foundWords.length === this.meta.words.length;
+        if (this.gameType === "HANGMAN")
+            return this.board[0].every((cell) => cell.value !== null);
+        if (this.gameType === "ARROWS_ESCAPE")
+            return [...this.arrowRemoved.values()].some((removed) => removed.size === this.board.length * this.board[0].length);
         if (this.gameType === "DOTS_AND_BOXES")
             return this.board.every((row) => row.every((cell) => cell.ownerId !== null));
         if (this.gameType === "NURIKABE") {
@@ -593,12 +672,8 @@ export class GenericPuzzleEngine {
         if (["NONOGRAM", "HITORI", "BRIDGES"].includes(this.gameType)) {
             return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] !== true || cell.ownerId !== null));
         }
-        if (this.gameType === "SLITHERLINK") {
-            return this.board.every((row, y) => row.every((cell, x) => {
-                const expected = String(this.answers[y][x] ?? "").split("|").filter(Boolean);
-                return expected.every((edge) => cell.meta[edge] === true);
-            }));
-        }
+        if (this.gameType === "SLITHERLINK")
+            return this.board.every((row) => row.every((cell) => cell.ownerId !== null));
         if (this.gameType === "CROSS_LETTERS") {
             return this.letterBag.length === 0 && [...this.racks.values()].every((rack) => rack.length === 0 || findWordForRack(rack) === null);
         }

@@ -3,9 +3,17 @@ package com.sudokuarena.data.local
 import android.content.Context
 import com.sudokuarena.domain.PlayerRecordStore
 import java.util.UUID
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private val Context.favoriteDataStore by preferencesDataStore(name = "multi_arena_favorites")
 
 class PlayerPreferences(context: Context) : PlayerRecordStore {
     private val preferences = context.getSharedPreferences("sudoku_arena_player", Context.MODE_PRIVATE)
+    private val favoritesStore = context.favoriteDataStore
 
     fun nickname(): String = preferences.getString(KEY_NICKNAME, "")?.trim().orEmpty()
 
@@ -22,6 +30,20 @@ class PlayerPreferences(context: Context) : PlayerRecordStore {
 
     fun saveAvatarId(avatarId: String) {
         if (avatarId in AVATARS) preferences.edit().putString(KEY_AVATAR, avatarId).apply()
+    }
+
+    fun favoriteGamesFlow(): Flow<Set<com.sudokuarena.domain.GameType>> = favoritesStore.data.map { values ->
+        values[FAVORITES_KEY].orEmpty().mapNotNull {
+            runCatching { com.sudokuarena.domain.GameType.valueOf(it) }.getOrNull()
+        }.toSet()
+    }
+
+    suspend fun toggleFavorite(gameType: com.sudokuarena.domain.GameType) {
+        favoritesStore.edit { values ->
+            val updated = values[FAVORITES_KEY].orEmpty().toMutableSet()
+            if (!updated.add(gameType.name)) updated.remove(gameType.name)
+            values[FAVORITES_KEY] = updated
+        }
     }
 
     override fun soloBestMs(gameType: com.sudokuarena.domain.GameType): Long = preferences.getLong("${KEY_SOLO_BEST_MS}_${gameType.name}", preferences.getLong(KEY_SOLO_BEST_MS, 0L).takeIf { gameType == com.sudokuarena.domain.GameType.SUDOKU } ?: 0L)
@@ -68,6 +90,7 @@ class PlayerPreferences(context: Context) : PlayerRecordStore {
         const val KEY_DAILY = "daily_completed"
         const val KEY_CLIENT_ID = "client_id"
         const val KEY_AVATAR = "avatar_id"
+        val FAVORITES_KEY = stringSetPreferencesKey("favorite_games")
         val AVATARS = setOf("ORBIT", "NOVA", "PIXEL", "NINJA", "ASTRO", "BRAIN", "ROBOT", "FOX")
     }
 }

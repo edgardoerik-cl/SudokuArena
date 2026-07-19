@@ -25,6 +25,9 @@ import com.sudokuarena.domain.AbyssItem
 import com.sudokuarena.domain.AbyssObstacle
 import com.sudokuarena.domain.AbyssProjectile
 import com.sudokuarena.domain.AbyssState
+import com.sudokuarena.domain.RhythmPlatform
+import com.sudokuarena.domain.RhythmPlayer
+import com.sudokuarena.domain.RhythmState
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.engineio.client.transports.WebSocket
@@ -103,6 +106,7 @@ class SocketGameClient(
         socket.on("game:state") { args -> parseSafely(args) { RealtimeEvent.StateUpdated(parseSnapshot(it)) } }
         socket.on("generic:state") { args -> parseSafely(args) { RealtimeEvent.GenericStateUpdated(parseGenericState(it)) } }
         socket.on("abyss:state") { args -> parseSafely(args) { RealtimeEvent.AbyssStateUpdated(parseAbyssState(it)) } }
+        socket.on("rhythm:state") { args -> parseSafely(args) { RealtimeEvent.RhythmStateUpdated(parseRhythmState(it)) } }
         socket.on("letters:rack") { args -> parseSafely(args) { payload ->
             RealtimeEvent.LetterRackUpdated(
                 letters = payload.optJSONArray("letters")?.let { array -> List(array.length()) { index -> array.optString(index) } }.orEmpty(),
@@ -367,6 +371,10 @@ class SocketGameClient(
         )
     }
 
+    override fun sendRhythmInput(sequence: Long, moveX: Float) {
+        socket.emit("rhythm:input", JSONObject().put("sequence", sequence).put("moveX", moveX))
+    }
+
     override fun chooseRps(choice: String) {
         socket.emit("rps:choose", JSONObject().put("choice", choice))
     }
@@ -541,6 +549,13 @@ private fun parseAbyssState(json: JSONObject): AbyssState {
         val item = raw as JSONObject
         AbyssObstacle(number(item, "x"), number(item, "y"), number(item, "width"), number(item, "height"))
     }.orEmpty()
+    val room = json.optJSONObject("room")
+    val maze = room?.optJSONArray("maze")?.let { rows ->
+        List(rows.length()) { rowIndex ->
+            val row = rows.optJSONArray(rowIndex)
+            List(row?.length() ?: 0) { col -> row?.optInt(col) ?: 0 }
+        }
+    }.orEmpty()
     return AbyssState(
         serverTime = json.optLong("serverTime"),
         tick = json.optLong("tick"),
@@ -555,6 +570,32 @@ private fun parseAbyssState(json: JSONObject): AbyssState {
         projectiles = projectiles,
         items = items,
         obstacles = obstacles,
+        maze = maze,
+        exitX = room?.optJSONObject("exit")?.optDouble("x", 0.0)?.toFloat() ?: 0f,
+        exitY = room?.optJSONObject("exit")?.optDouble("y", 0.0)?.toFloat() ?: 0f,
+    )
+}
+
+private fun parseRhythmState(json: JSONObject): RhythmState {
+    fun number(value: JSONObject, key: String) = value.optDouble(key, 0.0).toFloat()
+    return RhythmState(
+        serverTime = json.optLong("serverTime"),
+        tick = json.optLong("tick"),
+        bpm = json.optInt("bpm", 128),
+        beat = json.optInt("beat"),
+        cameraY = number(json, "cameraY"),
+        completed = json.optBoolean("completed"),
+        platforms = json.optJSONArray("platforms")?.mapObjects { raw ->
+            val item = raw as JSONObject
+            RhythmPlatform(item.optInt("id"), number(item, "x"), number(item, "y"), number(item, "width"), item.optBoolean("obstacle"))
+        }.orEmpty(),
+        players = json.optJSONArray("players")?.mapObjects { raw ->
+            val item = raw as JSONObject
+            RhythmPlayer(
+                item.optString("id"), item.optString("name"), item.optString("colorHex"),
+                number(item, "x"), number(item, "y"), number(item, "vy"), item.optInt("lives", 3), item.optBoolean("eliminated"),
+            )
+        }.orEmpty(),
     )
 }
 

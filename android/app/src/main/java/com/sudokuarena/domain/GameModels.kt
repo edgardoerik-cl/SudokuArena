@@ -39,8 +39,8 @@ enum class PuzzleDifficulty { EASY, MEDIUM, HARD, EXPERT }
 enum class GameType {
     SUDOKU, MINESWEEPER, WORD_SEARCH, CROSSWORD, NONOGRAM,
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, RUMMIKUB,
-    NURIKABE, BRIDGES, SLITHERLINK, CRYPTARITHM, CROSS_LETTERS, SECRET_CODE, CAPITAL_ARENA,
-    NEXUS_ZERO, ABYSS_ARENA,
+    NURIKABE, BRIDGES, SLITHERLINK, HANGMAN, ARROWS_ESCAPE, RHYTHM_JUMP,
+    CROSS_LETTERS, SECRET_CODE, CAPITAL_ARENA, NEXUS_ZERO, ABYSS_ARENA,
 }
 enum class RoomPhase { LOBBY, RPS, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
@@ -110,6 +110,19 @@ data class AbyssState(
     val projectiles: List<AbyssProjectile>,
     val items: List<AbyssItem>,
     val obstacles: List<AbyssObstacle>,
+    val maze: List<List<Int>> = emptyList(),
+    val exitX: Float = 0f,
+    val exitY: Float = 0f,
+)
+
+data class RhythmPlatform(val id: Int, val x: Float, val y: Float, val width: Float, val obstacle: Boolean)
+data class RhythmPlayer(
+    val id: String, val name: String, val colorHex: String, val x: Float, val y: Float,
+    val vy: Float, val lives: Int, val eliminated: Boolean,
+)
+data class RhythmState(
+    val serverTime: Long, val tick: Long, val bpm: Int, val beat: Int, val cameraY: Float,
+    val completed: Boolean, val platforms: List<RhythmPlatform>, val players: List<RhythmPlayer>,
 )
 
 data class RoomState(
@@ -227,6 +240,7 @@ sealed interface RealtimeEvent {
     data class RpsStarted(val round: Int, val endsAt: Long) : RealtimeEvent
     data class RpsResult(val round: Int, val choices: Map<String, String>, val winnerId: String?, val tie: Boolean) : RealtimeEvent
     data class AbyssStateUpdated(val state: AbyssState) : RealtimeEvent
+    data class RhythmStateUpdated(val state: RhythmState) : RealtimeEvent
     data class Failure(val message: String) : RealtimeEvent
 }
 
@@ -256,6 +270,7 @@ interface GameRealtimeGateway {
     fun sendGlobalChat(message: String)
     fun chooseRps(choice: String)
     fun sendAbyssInput(sequence: Long, moveX: Float, moveY: Float, aimX: Float, aimY: Float, shooting: Boolean)
+    fun sendRhythmInput(sequence: Long, moveX: Float)
     fun requestPause()
     fun respondPause(accepted: Boolean)
     fun resumePausedGame()

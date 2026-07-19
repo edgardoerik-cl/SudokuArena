@@ -145,6 +145,15 @@ object GlobalAudioManager {
         toneGenerator?.startTone(tone, if (sound == GameSound.DANGER) 220 else 75)
     }
 
+    /** Posición monotónica de la pista usada por juegos sincronizados al BPM. */
+    @Synchronized
+    fun playbackPositionMs(): Long = runCatching { player?.currentPosition?.toLong() ?: 0L }.getOrDefault(0L)
+
+    fun beatPhase(bpm: Int): Float {
+        val beatMs = 60_000f / bpm.coerceAtLeast(1)
+        return (playbackPositionMs() % beatMs.toLong()) / beatMs
+    }
+
     private fun persist() {
         val current = mutableState.value
         appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()

@@ -36,7 +36,7 @@ describe("motor genérico de puzzles", () => {
     });
   });
 
-  it("publica pistas conceptuales y nunca filtra la respuesta de Rummikub", () => {
+  it("publica pistas conceptuales y configura Rummikub Arcade Match", () => {
     const crossword = createPuzzleBlueprint("CROSSWORD", { seed: "real-clues", difficulty: "MEDIUM" });
     const clues = crossword.meta.clues as string[];
     assert.ok(clues.every((clue) => !/Palabra de \d+ letras/i.test(clue)));
@@ -45,10 +45,9 @@ describe("motor genérico de puzzles", () => {
     const rummikub = createPuzzleBlueprint("RUMMIKUB", { seed: "hidden-results", difficulty: "EXPERT" });
     rummikub.board.forEach((row, y) => row.forEach((cell, x) => {
       if (cell.isBlocked) return;
-      assert.equal(cell.value, null);
-      assert.ok(["RUN", "GROUP"].includes(String(cell.meta.meldType)));
-      assert.equal(cell.meta.rule, undefined);
-      assert.match(String(rummikub.answers[y]![x]), /^(RED|BLUE|GREEN|ORANGE):(1[0-3]|[1-9])$/);
+      assert.equal(cell.meta.arcadeTile, true);
+      assert.equal(typeof cell.value, "number");
+      assert.match(String(rummikub.answers[y]![x]), /^(RED|BLUE|GREEN|ORANGE):[1-9]$/);
     }));
   });
 
@@ -157,17 +156,30 @@ describe("motor genérico de puzzles", () => {
     assert.equal(engine.snapshot(players).board[Math.floor(redIndex / 5)]![redIndex % 5]!.meta.revealedColor, currentTeam);
   });
 
-  it("inyecta pistas iniciales bloqueadas en Kakuro y Criptogramas", () => {
+  it("inyecta pistas iniciales en Kakuro y configura Ahorcado", () => {
     const kakuro = createPuzzleBlueprint("KAKURO", { seed: "anchors", difficulty: "MEDIUM" });
     const kakuroGivens = kakuro.board.flat().filter((cell) => cell.meta.given === true);
     assert.ok(kakuroGivens.length >= 3);
     assert.equal(kakuro.meta.verifiedUnique, true);
     assert.ok(kakuroGivens.every((cell) => cell.isBlocked && cell.value !== null));
 
-    const crypt = createPuzzleBlueprint("CRYPTARITHM", { seed: "deduction", difficulty: "HARD" });
-    const cryptGivens = crypt.board.flat().filter((cell) => cell.meta.given === true);
-    assert.ok(cryptGivens.length >= Math.ceil((crypt.meta.letters as string[]).length * .35));
-    assert.ok(cryptGivens.every((cell) => cell.isBlocked && typeof cell.value === "number"));
+    const hangman = createPuzzleBlueprint("HANGMAN", { seed: "deduction", difficulty: "HARD" });
+    assert.ok(Number(hangman.meta.wordLength) >= 8);
+    assert.equal(hangman.meta.maxErrors, 6);
+    assert.ok(hangman.board[0]!.every((cell) => cell.value === null));
+  });
+
+  it("baraja Nexo Cero profundamente sin perder parejas ortogonales", () => {
+    const blueprint = createPuzzleBlueprint("NEXUS_ZERO", { seed: "deep-shuffle", difficulty: "EXPERT" });
+    let verticalPairs = 0;
+    blueprint.answers.forEach((row, y) => row.forEach((answer, x) => {
+      const [targetRow, targetCol] = String(answer).split(":").map(Number);
+      assert.equal(Math.abs(targetRow! - y) + Math.abs(targetCol! - x), 1);
+      assert.equal(Number(blueprint.board[y]![x]!.value) + Number(blueprint.board[targetRow!]![targetCol!]!.value), 0);
+      if (targetRow !== y) verticalPairs += 1;
+    }));
+    assert.ok(verticalPairs > 0);
+    assert.equal(blueprint.meta.guaranteedSolvable, true);
   });
 
   it("Buscaminas aplica cinco segundos al pisar una mina", () => {

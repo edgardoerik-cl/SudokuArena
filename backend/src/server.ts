@@ -12,6 +12,7 @@ import {
 } from "./constants.js";
 import { ArenaGame } from "./game.js";
 import { AbyssEngine, type AbyssInput } from "./action/abyssEngine.js";
+import { RhythmEngine, type RhythmInput } from "./action/rhythmEngine.js";
 import { LeaderboardStore, sanitizeNickname } from "./leaderboard.js";
 import { GenericPuzzleEngine } from "./puzzles/engine.js";
 import { GAME_TYPES, type GameType, type GenericMove, type PuzzleDifficulty } from "./puzzles/types.js";
@@ -54,6 +55,8 @@ interface RoomRuntime {
   genericEngine: GenericPuzzleEngine | null;
   abyssEngine: AbyssEngine | null;
   abyssTick: NodeJS.Timeout | null;
+  rhythmEngine: RhythmEngine | null;
+  rhythmTick: NodeJS.Timeout | null;
   pauseRequesterId: string | null;
   pauseVotes: Set<string>;
   pauseNoVotes: Set<string>;
@@ -154,7 +157,7 @@ io.on("connection", (socket) => {
     room.config = {
       gameType,
       powersEnabled: payload.powersEnabled,
-      teamMode: gameType === "ABYSS_ARENA" ? "FFA" : teamMode,
+      teamMode: gameType === "ABYSS_ARENA" || gameType === "RHYTHM_JUMP" ? "FFA" : teamMode,
       tileType,
       botDifficulty,
       puzzleDifficulty,
@@ -290,6 +293,12 @@ io.on("connection", (socket) => {
     const room = roomFor(socket);
     if (!room || room.phase !== "PLAYING" || room.config.gameType !== "ABYSS_ARENA" || !room.abyssEngine) return;
     room.abyssEngine.applyInput(playerId, payload);
+  });
+
+  socket.on("rhythm:input", (payload: Partial<RhythmInput>) => {
+    const room = roomFor(socket);
+    if (!room || room.phase !== "PLAYING" || room.config.gameType !== "RHYTHM_JUMP" || !room.rhythmEngine) return;
+    room.rhythmEngine.applyInput(playerId, payload);
   });
 
   socket.on("use_power", (payload: PowerProposal) => {
@@ -445,6 +454,8 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     genericEngine: null,
     abyssEngine: null,
     abyssTick: null,
+    rhythmEngine: null,
+    rhythmTick: null,
     pauseRequesterId: null,
     pauseVotes: new Set(),
     pauseNoVotes: new Set(),
@@ -509,6 +520,7 @@ function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
     if (room.rpsTimer) clearTimeout(room.rpsTimer);
     if (room.abyssTick) clearInterval(room.abyssTick);
+    if (room.rhythmTick) clearInterval(room.rhythmTick);
     clearBotTimers(room);
     rooms.delete(room.code);
     return;
@@ -689,7 +701,7 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   room.endsAt = room.startedAt + matchDurationMs;
   if (rematch) room.game.resetMatch(room.config, resolveBossPlayerId(room));
   else room.game.startMatch(room.config, resolveBossPlayerId(room));
-  room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "ABYSS_ARENA"
+  room.genericEngine = room.config.gameType === "SUDOKU" || room.config.gameType === "ABYSS_ARENA" || room.config.gameType === "RHYTHM_JUMP"
     ? null
     : new GenericPuzzleEngine(room.config.gameType, `puzzle-${room.code}-${room.startedAt}`, {
         seed: `${room.code}-${room.startedAt}`,
@@ -701,12 +713,19 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
         room.game.snapshot().players.map(({ id, name, color, isBot }) => ({ id, name, colorHex: color, isBot })),
       )
     : null;
+  room.rhythmEngine = room.config.gameType === "RHYTHM_JUMP"
+    ? new RhythmEngine(
+        `${room.code}-${room.startedAt}`,
+        room.game.snapshot().players.map(({ id, name, color, isBot }) => ({ id, name, colorHex: color, isBot })),
+      )
+    : null;
   if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
   emitRoomState(room);
   emitState(room);
   emitGenericState(room);
   io.to(room.code).emit("game:started", { startedAt: room.startedAt, endsAt: room.endsAt });
   if (room.abyssEngine) startAbyssLoop(room);
+  if (room.rhythmEngine) startRhythmLoop(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
@@ -729,6 +748,8 @@ function finishMatch(room: RoomRuntime, force = false): void {
   if (room.rpsTimer) clearTimeout(room.rpsTimer);
   if (room.abyssTick) clearInterval(room.abyssTick);
   room.abyssTick = null;
+  if (room.rhythmTick) clearInterval(room.rhythmTick);
+  room.rhythmTick = null;
   room.rpsTimer = null;
   room.boardEventTimeout = null;
   clearBotTimers(room);
@@ -1076,6 +1097,8 @@ function maybeActivatePause(room: RoomRuntime): void {
   clearBotTimers(room);
   if (room.abyssTick) clearInterval(room.abyssTick);
   room.abyssTick = null;
+  if (room.rhythmTick) clearInterval(room.rhythmTick);
+  room.rhythmTick = null;
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   room.boardEventTimeout = null;
   room.game.endBoardEvent();
@@ -1101,6 +1124,7 @@ function resumeRoom(room: RoomRuntime): void {
   clearPauseState(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   if (room.abyssEngine) startAbyssLoop(room);
+  if (room.rhythmEngine) startRhythmLoop(room);
   emitRoomState(room);
   io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
 }
@@ -1118,6 +1142,21 @@ function startAbyssLoop(room: RoomRuntime): void {
       room.game.setGenericScore(actor.id, actor.kills * 100 + Math.max(0, actor.kills - actor.deaths) * 20);
     });
     io.to(room.code).volatile.emit("abyss:state", snapshot);
+    if (snapshot.completed) finishMatch(room, true);
+  }, 50);
+}
+
+function startRhythmLoop(room: RoomRuntime): void {
+  if (!room.rhythmEngine || room.rhythmTick) return;
+  let previous = Date.now();
+  room.rhythmTick = setInterval(() => {
+    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.rhythmEngine) return;
+    const now = Date.now();
+    room.rhythmEngine.update((now - previous) / 1_000);
+    previous = now;
+    const snapshot = room.rhythmEngine.snapshot(now);
+    snapshot.players.forEach((player) => room.game.setGenericScore(player.id, Math.round(player.y * 100)));
+    io.to(room.code).volatile.emit("rhythm:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
   }, 50);
 }

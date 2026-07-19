@@ -3,12 +3,14 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `6.0.0` incorpora una interfaz adaptable que cambia en tiempo real
+La versión `7.0.0` incorpora carruseles alfabéticos animados, favoritos persistentes con DataStore
+y una interfaz adaptable que cambia en tiempo real
 entre orientación vertical y horizontal, chat global, Piedra/Papel/Tijeras para
-decidir el primer turno y diecinueve juegos:
+decidir el primer turno y veintiún juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, Nonogram, Timbiriche,
-Kakuro, Mathdoku, Hitori, Rummikub lógico, Nurikabe, Bridges, Slitherlink,
-Criptogramas, Letras Cruzadas, Código Secreto, Capital Arena, Nexo Cero y Abismo Arena. Todos comparten salas, colores de conquista,
+Kakuro, Mathdoku, Hitori, Rummikub Arcade Match, Nurikabe, Bridges, Conecta Puntos Neón,
+El Ahorcado, Flechas en Fuga, Salto Rítmico, Letras Cruzadas, Código Secreto,
+Capital Arena, Nexo Cero y Abismo Arena. Todos comparten salas, colores de conquista,
 Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
 
 Los tableros se generan desde una semilla distinta y admiten dificultad
@@ -35,8 +37,9 @@ siguiente, selector de género y volumen ajustable. Autores y fuentes:
 [`docs/music-credits.md`](docs/music-credits.md).
 Capital Arena admite cuatro participantes, cartas de Suerte con movimiento,
 bonos, multas o cárcel, fichas neón reacomodables y un tablero horizontal al 75 % con estadísticas laterales.
-Abismo Arena utiliza simulación side-scroller cooperativa autoritativa a 20 Hz,
-gravedad, saltos, plataformas, proyectiles y un jefe compartido para hasta cuatro jugadores.
+Abismo Arena 3D usa una matriz autoritativa y raycasting DDA en Compose para
+proyectar pasillos en primera persona. Salto Rítmico sincroniza plataformas a
+128 BPM, cámara vertical y tres vidas mediante un loop de servidor a 20 Hz.
 
 ## Estructura
 
@@ -62,7 +65,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v6.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v7.0.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

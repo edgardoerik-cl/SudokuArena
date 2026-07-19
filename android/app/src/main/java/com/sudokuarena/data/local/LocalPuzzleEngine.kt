@@ -215,10 +215,36 @@ class LocalPuzzleEngine(
         GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.NONOGRAM -> nonogram()
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
         GameType.RUMMIKUB -> logicTiles(); GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges(); GameType.SLITHERLINK -> slitherlink()
-        GameType.CRYPTARITHM -> cryptarithm(); GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
+        GameType.HANGMAN -> hangman(); GameType.ARROWS_ESCAPE -> arrowsEscape()
+        GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
         GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
-        GameType.ABYSS_ARENA -> result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
+        GameType.ABYSS_ARENA, GameType.RHYTHM_JUMP -> result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
+    }
+
+    private fun hangman(): Blueprint {
+        val word = listOf("ARENA", "LABERINTO", "VERTICAL", "FLECHAS").random(random)
+        return result(
+            listOf(word.mapIndexed { index, _ -> GenericCell(meta = mapOf("letterIndex" to index)) }),
+            listOf(word.map { it.toString() }),
+            mapOf("clue" to "Palabra relacionada con la Multi Arena", "maxErrors" to 6),
+        )
+    }
+
+    private fun arrowsEscape(): Blueprint {
+        val size = size(5, 6, 7, 8)
+        val arrows = listOf("UP", "RIGHT", "DOWN", "LEFT")
+        val values = matrix<Any?>(size, size) { row, col ->
+            when {
+                row == 0 -> "UP"; row == size - 1 -> "DOWN"; col == 0 -> "LEFT"; col == size - 1 -> "RIGHT"
+                else -> arrows.random(random)
+            }
+        }
+        return result(
+            values.map { row -> row.map { value -> GenericCell(value = value, isRevealed = true, meta = mapOf("arrow" to value)) } },
+            values,
+            mapOf("totalBlocks" to size * size),
+        )
     }
 
     private fun mines(): Blueprint { val size = size(8,10,12,14); val count=(size*size*when(difficulty){PuzzleDifficulty.EASY->.10;PuzzleDifficulty.MEDIUM->.14;PuzzleDifficulty.HARD->.18;PuzzleDifficulty.EXPERT->.22}).toInt(); val mines=(0 until size*size).shuffled(random).take(count).toSet(); return result(matrix(size,size){_,_->GenericCell()}, matrix(size,size){r,c->r*size+c in mines}, mapOf("mineCount" to count)) }
@@ -383,43 +409,6 @@ class LocalPuzzleEngine(
         }
         return result(board, answers, mapOf("instructions" to "Traza un único lazo según las pistas."))
     }
-    private fun cryptarithm(): Blueprint {
-        val first = random.nextInt(12, 90)
-        val second = random.nextInt(12, 100)
-        val total = first + second
-        val digits = ("$first$second$total").map(Char::digitToInt).distinct()
-        val vowels = listOf('A', 'E')
-        val letters = (vowels + "BCDFGHIJKLMNPQRSTUVWXYZ".toList().shuffled(random)).take(digits.size)
-        val digitLetters = digits.zip(letters).toMap()
-
-        fun encode(value: Int): String = value.toString()
-            .map { digitLetters.getValue(it.digitToInt()) }
-            .joinToString("")
-
-        val answers: List<List<Any?>> = listOf(digits.map { it })
-        val revealCount = if (difficulty == PuzzleDifficulty.EASY) 3 else 2
-        val vowelIndexes = letters.indices.filter { letters[it] in vowels }
-        val revealed = (vowelIndexes + letters.indices.filterNot(vowelIndexes::contains).shuffled(random)).take(revealCount).toSet()
-        val board = listOf(
-            letters.mapIndexed { index, letter ->
-                GenericCell(
-                    value = if (index in revealed) digits[index] else letter.toString(),
-                    isRevealed = true,
-                    isBlocked = index in revealed,
-                    meta = mapOf("cryptLetter" to letter.toString(), "given" to (index in revealed)),
-                )
-            },
-        )
-        return result(
-            board,
-            answers,
-            mapOf(
-                "equation" to "${encode(first)} + ${encode(second)} = ${encode(total)}",
-                "instructions" to "Cada letra representa un dígito diferente. Las equivalencias doradas son pistas iniciales.",
-            ),
-        )
-    }
-
     private fun nexusZero(): Blueprint {
         val rows = size(4, 6, 6, 8)
         val cols = 6

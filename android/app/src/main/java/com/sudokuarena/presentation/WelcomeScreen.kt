@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -39,11 +41,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -69,6 +74,8 @@ fun WelcomeScreen(
     initialXp: Int,
     initialAvatar: String,
     selectedGameType: GameType,
+    favoriteGames: Set<GameType>,
+    onToggleFavorite: (GameType) -> Unit,
     onGameSelected: (GameType) -> Unit,
     leaderboardRepository: LeaderboardRepository,
     onSaveNickname: (String) -> Unit,
@@ -150,15 +157,11 @@ fun WelcomeScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
-                if (landscape) {
-                    CompactGameSelector(selectedGameType, onGameSelected)
-                } else {
-                    GameArenaSelector(selectedGameType, onGameSelected)
-                }
+                GameCarouselSelector(selectedGameType, favoriteGames, onGameSelected, onToggleFavorite)
                 NeonArenaButton(
-                    text = if (selectedGameType == GameType.ABYSS_ARENA) "Abismo · PvP online" else "Modo Solitario",
+                    text = if (selectedGameType in setOf(GameType.ABYSS_ARENA, GameType.RHYTHM_JUMP)) "Disponible online" else "Modo Solitario",
                     onClick = onSoloMode,
-                    enabled = selectedGameType != GameType.ABYSS_ARENA,
+                    enabled = selectedGameType !in setOf(GameType.ABYSS_ARENA, GameType.RHYTHM_JUMP),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(if (landscape) 48.dp else 58.dp),
@@ -323,6 +326,115 @@ private fun NeonArenaButton(
 }
 
 @Composable
+private fun GameCarouselSelector(
+    selected: GameType,
+    favorites: Set<GameType>,
+    onSelected: (GameType) -> Unit,
+    onToggleFavorite: (GameType) -> Unit,
+) {
+    var tab by remember { mutableStateOf(0) }
+    val allGames = remember { GameType.entries.sortedBy(::gameMenuName) }
+    val games = if (tab == 0) allGames else allGames.filter(favorites::contains)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        TabRow(selectedTabIndex = tab, containerColor = Color.Transparent) {
+            Tab(tab == 0, onClick = { tab = 0 }, text = { Text("Todos") })
+            Tab(tab == 1, onClick = { tab = 1 }, text = { Text("♥ Favoritos (${favorites.size})") })
+        }
+        if (games.isEmpty()) {
+            Surface(
+                color = Color.White.copy(alpha = .88f), shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.fillMaxWidth().height(126.dp),
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Guarda un juego tocando ♡", fontWeight = FontWeight.Bold)
+                }
+            }
+            return@Column
+        }
+        val initialPage = games.indexOf(selected).coerceAtLeast(0)
+        val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { games.size })
+        LaunchedEffect(tab, selected, games.size) {
+            val page = games.indexOf(selected)
+            if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
+        }
+        LaunchedEffect(pagerState.currentPage, tab) { games.getOrNull(pagerState.currentPage)?.let(onSelected) }
+        HorizontalPager(
+            state = pagerState,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 42.dp),
+            pageSpacing = 10.dp,
+            modifier = Modifier.fillMaxWidth().height(150.dp),
+        ) { page ->
+            val game = games[page]
+            val offset = kotlin.math.abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
+            val scale = 1f - offset.coerceIn(0f, 1f) * .13f
+            Surface(
+                color = Color.White.copy(alpha = .94f),
+                shape = RoundedCornerShape(22.dp),
+                border = BorderStroke(2.dp, if (game == selected) ArenaColors.ElectricBlue else Color(0xFFCBD5E1)),
+                shadowElevation = if (game == selected) 13.dp else 4.dp,
+                modifier = Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale }
+                    .clickable { onSelected(game) },
+            ) {
+                Box(Modifier.fillMaxSize().padding(10.dp)) {
+                    GameLoopPreview(game, Modifier.align(Alignment.Center).size(84.dp))
+                    Text(
+                        gameMenuName(game), fontWeight = FontWeight.Black, color = ArenaColors.Ink,
+                        modifier = Modifier.align(Alignment.BottomCenter),
+                    )
+                    Text(
+                        if (game in favorites) "♥" else "♡",
+                        color = if (game in favorites) Color(0xFFE91E63) else ArenaColors.Ink,
+                        fontSize = 25.sp,
+                        modifier = Modifier.align(Alignment.TopEnd).clickable { onToggleFavorite(game) }.padding(4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
+    val phase by rememberInfiniteTransition(label = "preview-$game").animateFloat(
+        0f, 1f, infiniteRepeatable(tween(1_600, easing = LinearEasing)), label = "previewPhase",
+    )
+    Canvas(modifier) {
+        val accent = if (game.ordinal % 2 == 0) ArenaColors.ElectricBlue else ArenaColors.Violet
+        drawCircle(accent.copy(alpha = .12f), size.minDimension * .47f, center)
+        when (game) {
+            GameType.ARROWS_ESCAPE -> {
+                val x = size.width * (.25f + phase * .5f)
+                drawLine(accent, Offset(x - 15f, center.y), Offset(x + 15f, center.y), 6f)
+                drawLine(accent, Offset(x + 15f, center.y), Offset(x + 5f, center.y - 9f), 5f)
+                drawLine(accent, Offset(x + 15f, center.y), Offset(x + 5f, center.y + 9f), 5f)
+            }
+            GameType.RHYTHM_JUMP -> {
+                val y = size.height * (.72f - kotlin.math.abs(kotlin.math.sin(phase * 3.14159f)) * .45f)
+                drawCircle(accent, 10f, Offset(center.x, y))
+                drawLine(Color(0xFF00C853), Offset(size.width * .2f, size.height * .78f), Offset(size.width * .8f, size.height * .78f), 7f)
+            }
+            GameType.ABYSS_ARENA -> repeat(12) { ray ->
+                val spread = (ray - 5.5f) / 12f
+                drawLine(accent.copy(alpha = .42f), Offset(center.x, size.height), Offset(center.x + spread * size.width, 0f), 2f)
+            }
+            GameType.HANGMAN -> {
+                drawLine(accent, Offset(size.width * .25f, size.height * .8f), Offset(size.width * .25f, size.height * .18f), 5f)
+                drawCircle(accent, 11f, Offset(size.width * .56f, size.height * .38f))
+                drawLine(accent, Offset(size.width * .56f, size.height * .49f), Offset(size.width * .56f, size.height * (.58f + phase * .08f)), 4f)
+            }
+            else -> repeat(9) { index ->
+                val col = index % 3; val row = index / 3
+                drawRoundRect(
+                    accent.copy(alpha = .25f + ((index + phase * 8).toInt() % 3) * .22f),
+                    Offset(size.width * (.18f + col * .23f), size.height * (.18f + row * .23f)),
+                    Size(size.width * .16f, size.height * .16f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun GameArenaSelector(selected: GameType, onSelected: (GameType) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         GameType.entries.chunked(2).forEach { rowGames ->
@@ -396,7 +508,8 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.SUDOKU -> "9"; GameType.MINESWEEPER -> "✹"; GameType.WORD_SEARCH -> "A↗"; GameType.CROSSWORD -> "✚"
     GameType.NONOGRAM -> "▦"; GameType.DOTS_AND_BOXES -> "□"; GameType.KAKURO -> "Σ"; GameType.MATHDOKU -> "×"
     GameType.HITORI -> "◼"; GameType.RUMMIKUB -> "123"
-    GameType.NURIKABE -> "≈"; GameType.BRIDGES -> "●═●"; GameType.SLITHERLINK -> "□"; GameType.CRYPTARITHM -> "A=7"
+    GameType.NURIKABE -> "≈"; GameType.BRIDGES -> "●═●"; GameType.SLITHERLINK -> "⌁"
+    GameType.HANGMAN -> "A_"; GameType.ARROWS_ESCAPE -> "➜"; GameType.RHYTHM_JUMP -> "♫↑"
     GameType.CROSS_LETTERS -> "AÑ"
     GameType.SECRET_CODE -> "🔐"
     GameType.CAPITAL_ARENA -> "💰"
@@ -408,7 +521,8 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa Letras"
     GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
     GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
-    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Slitherlink"; GameType.CRYPTARITHM -> "Criptogramas"
+    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Conecta Puntos Neón"
+    GameType.HANGMAN -> "El Ahorcado Arena"; GameType.ARROWS_ESCAPE -> "Flechas en Fuga"; GameType.RHYTHM_JUMP -> "Salto Rítmico Arena"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"

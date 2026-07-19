@@ -104,6 +104,7 @@ data class ArenaUiState(
     val rpsWinnerId: String? = null,
     val rpsTie: Boolean = false,
     val abyssState: AbyssState? = null,
+    val rhythmState: com.sudokuarena.domain.RhythmState? = null,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -316,6 +317,10 @@ class ArenaViewModel(
 
     fun sendAbyssInput(moveX: Float, moveY: Float, aimX: Float, aimY: Float, shooting: Boolean) {
         gateway?.sendAbyssInput(System.nanoTime(), moveX, moveY, aimX, aimY, shooting)
+    }
+
+    fun sendRhythmInput(moveX: Float) {
+        gateway?.sendRhythmInput(System.nanoTime(), moveX)
     }
 
     fun chooseRps(choice: String) {
@@ -754,6 +759,9 @@ class ArenaViewModel(
                     abyssState = event.state,
                     message = if (event.state.bossLevel) "JEFE · NIVEL ${event.state.level}" else it.message,
                 )
+            }
+            is RealtimeEvent.RhythmStateUpdated -> mutableState.update {
+                it.copy(rhythmState = event.state, serverNowMs = event.state.serverTime)
             }
             is RealtimeEvent.Failure -> mutableState.update { it.copy(message = event.message) }
         }

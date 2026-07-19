@@ -174,9 +174,17 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("□", "Forma un lazo", "Traza una sola línea cerrada, sin cruces ni ramificaciones."),
         TutorialStep("0–3", "Sigue las pistas", "El número indica cuántos lados de la celda pertenecen al lazo."),
     )
-    GameType.CRYPTARITHM -> listOf(
-        TutorialStep("A=7", "Descifra letras", "Cada letra representa un dígito diferente y una inicial nunca vale cero."),
-        TutorialStep("+", "Haz verdadera la suma", "Asigna los dígitos que hacen correcta toda la ecuación."),
+    GameType.HANGMAN -> listOf(
+        TutorialStep("A _ _", "Adivina la palabra", "Usa la pista y prueba letras. Cada acierto revela todas sus posiciones."),
+        TutorialStep("6×", "Conserva tus intentos", "Con seis errores quedas eliminado; completa la palabra antes que tus rivales."),
+    )
+    GameType.ARROWS_ESCAPE -> listOf(
+        TutorialStep("➜", "Libera los bloques", "Una flecha sale volando si no existe otro bloque frente a ella."),
+        TutorialStep("↩", "Evita rebotes", "Si la trayectoria está ocupada, la ficha rebota y permanece en el tablero."),
+    )
+    GameType.RHYTHM_JUMP -> listOf(
+        TutorialStep("♫", "Sigue el pulso", "Las plataformas aparecen al ritmo de la pista electrónica."),
+        TutorialStep("♥♥♥", "Tres vidas", "Muévete lateralmente; quedar bajo la cámara consume una vida."),
     )
     GameType.CROSS_LETTERS -> listOf(
         TutorialStep("AÑ", "Usa tu atril", "En tu turno forma una palabra española con las siete letras disponibles."),
@@ -198,9 +206,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⚡", "Encadena enlaces", "Resuelve pares rápidamente para multiplicar tu dominio y energía."),
     )
     GameType.ABYSS_ARENA -> listOf(
-        TutorialStep("↥", "Corre y salta", "Arrastra horizontalmente en la mitad izquierda. Desliza hacia arriba para saltar entre plataformas."),
-        TutorialStep("👹", "Derriben al jefe", "Todos los jugadores cooperan: mantén pulsada la mitad derecha para disparar al Guardián del Abismo."),
-        TutorialStep("♥", "Sobrevive al escenario", "Evita sus proyectiles y el vacío. Si caes, reaparecerás después de una breve espera."),
+        TutorialStep("◉", "Explora en primera persona", "Usa el control izquierdo para avanzar y retroceder. Gira con los controles de la derecha para recorrer el laberinto 3D."),
+        TutorialStep("✦", "Combate en equipo", "Lanza hechizos contra el Guardián del Abismo. Los enemigos y aliados cambian de tamaño según su distancia."),
+        TutorialStep("⌂", "Encuentra la salida", "Derriben al jefe y alcancen juntos el portal verde. El servidor valida posiciones, colisiones y proyectiles."),
     )
 }
 

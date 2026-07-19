@@ -125,7 +125,7 @@ fun RoomLobbyScreen(
                             onDismissRequest = { gameMenuOpen = false },
                             modifier = Modifier.fillMaxWidth(if (landscape) .48f else .86f),
                         ) {
-                            GameType.entries.forEach { game ->
+                            GameType.entries.sortedBy(::shortGameTitle).forEach { game ->
                                 DropdownMenuItem(
                                     text = {
                                         Text(
@@ -239,7 +239,8 @@ private fun shortGameTitle(type: GameType): String = when (type) {
     GameType.SUDOKU -> "Sudoku"; GameType.MINESWEEPER -> "Buscaminas"; GameType.WORD_SEARCH -> "Sopa Letras"
     GameType.CROSSWORD -> "Crucigrama"; GameType.NONOGRAM -> "Nonogram"; GameType.DOTS_AND_BOXES -> "Timbiriche"
     GameType.KAKURO -> "Kakuro"; GameType.MATHDOKU -> "Mathdoku"; GameType.HITORI -> "Hitori"; GameType.RUMMIKUB -> "Rummikub"
-    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Slitherlink"; GameType.CRYPTARITHM -> "Criptograma"
+    GameType.NURIKABE -> "Nurikabe"; GameType.BRIDGES -> "Bridges"; GameType.SLITHERLINK -> "Conecta Puntos Neón"
+    GameType.HANGMAN -> "El Ahorcado"; GameType.ARROWS_ESCAPE -> "Flechas en Fuga"; GameType.RHYTHM_JUMP -> "Salto Rítmico"
     GameType.CROSS_LETTERS -> "Letras Cruzadas"
     GameType.SECRET_CODE -> "Código Secreto"
     GameType.CAPITAL_ARENA -> "Capital Arena"

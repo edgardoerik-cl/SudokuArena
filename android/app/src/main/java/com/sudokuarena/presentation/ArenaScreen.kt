@@ -120,17 +120,12 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
     }
 
     if (state.gameType == GameType.ABYSS_ARENA) {
-        AbyssArenaScreen(
-            state,
-            viewModel::sendAbyssInput,
-            viewModel::sendGlobalChat,
-            viewModel::requestPause,
-            viewModel::respondPause,
-            viewModel::resumePausedGame,
-            viewModel::completeTutorial,
-            viewModel::openTutorial,
-            onExit,
-        )
+        AbyssRaycastScreen(state, viewModel::sendAbyssInput, viewModel::requestPause, onExit)
+        return
+    }
+
+    if (state.gameType == GameType.RHYTHM_JUMP) {
+        RhythmJumpScreen(state, viewModel::sendRhythmInput, viewModel::requestPause, onExit)
         return
     }
 

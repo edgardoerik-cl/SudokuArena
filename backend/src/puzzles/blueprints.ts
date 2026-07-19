@@ -18,7 +18,9 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "NURIKABE": return nurikabe(random, difficulty);
     case "BRIDGES": return bridges(random, difficulty);
     case "SLITHERLINK": return slitherlink(random, difficulty);
-    case "CRYPTARITHM": return cryptarithm(random, difficulty);
+    case "HANGMAN": return hangman(random, difficulty);
+    case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty);
+    case "RHYTHM_JUMP": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, bpm: 128, difficulty } };
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
     case "SECRET_CODE": return secretCode(random, difficulty);
     case "CAPITAL_ARENA": return capitalArena(random, difficulty);
@@ -37,23 +39,46 @@ function nexusZero(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBl
   const columns = 6;
   const board = matrix(rows, columns, () => cell(null, true));
   const answers = matrix<CellValue>(rows, columns, () => null);
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < columns; col += 2) {
-      const charge = random.int(1, 9) * (random.next() < .5 ? -1 : 1);
-      const reverse = random.next() < .5;
-      board[row]![col]!.value = reverse ? -charge : charge;
-      board[row]![col + 1]!.value = reverse ? charge : -charge;
-      answers[row]![col] = `${row}:${col + 1}`;
-      answers[row]![col + 1] = `${row}:${col}`;
-      board[row]![col]!.meta = { charge: true };
-      board[row]![col + 1]!.meta = { charge: true };
+  const partner = Array.from({ length: rows * columns }, (_, index) =>
+    index % columns % 2 === 0 ? index + 1 : index - 1
+  );
+  // Barajado profundo por "domino flips": cada transformación 2×2 conserva
+  // parejas ortogonales y, por tanto, garantiza que el puzzle siga resoluble.
+  for (let pass = 0; pass < rows * columns * 12; pass += 1) {
+    const row = random.int(0, rows - 2);
+    const col = random.int(0, columns - 2);
+    const a = row * columns + col;
+    const b = a + 1;
+    const c = a + columns;
+    const d = c + 1;
+    if (partner[a] === b && partner[c] === d) {
+      partner[a] = c; partner[c] = a; partner[b] = d; partner[d] = b;
+    } else if (partner[a] === c && partner[b] === d) {
+      partner[a] = b; partner[b] = a; partner[c] = d; partner[d] = c;
     }
+  }
+  const assigned = new Set<number>();
+  for (let index = 0; index < partner.length; index += 1) {
+    if (assigned.has(index)) continue;
+    const other = partner[index]!;
+    const charge = random.int(1, 9) * (random.next() < .5 ? -1 : 1);
+    const row = Math.floor(index / columns); const col = index % columns;
+    const otherRow = Math.floor(other / columns); const otherCol = other % columns;
+    board[row]![col]!.value = charge;
+    board[otherRow]![otherCol]!.value = -charge;
+    answers[row]![col] = `${otherRow}:${otherCol}`;
+    answers[otherRow]![otherCol] = `${row}:${col}`;
+    board[row]![col]!.meta = { charge: true };
+    board[otherRow]![otherCol]!.meta = { charge: true };
+    assigned.add(index); assigned.add(other);
   }
   return {
     board,
     answers,
     meta: {
       instructions: "Nexo Cero: enlaza dos cargas vecinas que sumen 0. Encadena rápido para dominar la matriz.",
+      shufflePasses: rows * columns * 12,
+      guaranteedSolvable: true,
       difficulty,
     },
   };
@@ -283,45 +308,24 @@ function hitori(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBluep
 }
 
 function logicTiles(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const rows = sizeFor(difficulty, 4, 5, 6, 7);
-  const columns = 5;
+  const rows = sizeFor(difficulty, 6, 8, 10, 12);
+  const columns = 6;
   const colors = ["RED", "BLUE", "GREEN", "ORANGE"] as const;
-  const board = matrix(rows, columns, () => cell(null, false));
   const answers = matrix<CellValue>(rows, columns, () => null);
-  for (let row = 0; row < rows; row += 1) {
-    const isRun = row % 2 === 0;
-    const length = random.int(3, 4);
-    if (isRun) {
-      const color = random.pick(colors);
-      const start = random.int(1, 14 - length);
-      for (let col = 0; col < length; col += 1) {
-        answers[row]![col] = `${color}:${start + col}`;
-        board[row]![col]!.meta = {
-          meldId: row, meldType: "RUN", meldLength: length,
-          validColors: [color],
-          validNumbers: Array.from({ length }, (_, offset) => start + offset),
-        };
-      }
-    } else {
-      const number = random.int(1, 13);
-      const groupColors = random.shuffle([...colors]).slice(0, length);
-      for (let col = 0; col < length; col += 1) {
-        answers[row]![col] = `${groupColors[col]}:${number}`;
-        board[row]![col]!.meta = {
-          meldId: row, meldType: "GROUP", meldLength: length,
-          validColors: groupColors,
-          validNumbers: [number],
-        };
-      }
-    }
-    for (let col = length; col < columns; col += 1) board[row]![col] = blockedCell({ meldId: row });
-  }
+  const board = matrix(rows, columns, (row, col) => {
+    const color = random.pick(colors);
+    const number = random.int(1, 9);
+    answers[row]![col] = `${color}:${number}`;
+    return cell(number, true, { arcadeTile: true, tileColor: color, spawnOrder: row * columns + col });
+  });
   return {
     board,
     answers,
     meta: {
       colors,
-      instructions: "Completa grupos del mismo número con colores distintos y escaleras consecutivas del mismo color.",
+      depositZones: ["RED", "BLUE", "GREEN", "ORANGE", "NUMBER"],
+      fallIntervalMs: sizeFor(difficulty, 1_600, 1_250, 950, 700),
+      instructions: "Arcade Match: arrastra fichas a depósitos y encadena tres del mismo color o número.",
       difficulty,
     },
   };
@@ -408,6 +412,8 @@ function bridges(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlue
 }
 
 function slitherlink(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  return connectDotsNeon(random, difficulty);
+  /*
   const size = sizeFor(difficulty, 5, 7, 9, 11);
   // Construimos primero un lazo rectangular válido y después derivamos las pistas.
   // Los márgenes aleatorios cambian la solución sin arriesgar la continuidad del lazo.
@@ -430,39 +436,72 @@ function slitherlink(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzle
     return cell(null, false, { ...edgeMeta(), clue: random.next() < hideChance ? -1 : clue });
   });
   return { board, answers, meta: { instructions: "Traza un único lazo; cada pista indica cuántos lados usa.", difficulty } };
+  */
 }
 
-function cryptarithm(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const a = random.int(12, 89); const b = random.int(12, 99); const result = a + b;
-  const digits = [...new Set(`${a}${b}${result}`.split("").map(Number))];
-  const anchors = ["A", "E", "O"];
-  const letters = [...anchors, ...random.shuffle("BCDFGHIJKLMNPQRSTUVWXYZ".split(""))].slice(0, digits.length);
-  const map = new Map(digits.map((digit, index) => [digit, letters[index]!]));
-  const encode = (value: number) => [...String(value)].map((digit) => map.get(Number(digit))).join("");
-  const equation = `${encode(a)} + ${encode(b)} = ${encode(result)}`;
-  const answers = [letters.map((_, index) => digits[index] as CellValue)];
-  // Al menos 35 % de las incógnitas y siempre A/E/O cuando estén presentes.
-  const revealCount = Math.max(3, Math.ceil(letters.length * .35));
-  const anchorIndexes = letters.map((letter, index) => anchors.includes(letter) ? index : -1).filter((index) => index >= 0);
-  const extraIndexes = random.shuffle(letters.map((_, index) => index).filter((index) => !anchorIndexes.includes(index)));
-  const revealedIndexes = new Set([...anchorIndexes, ...extraIndexes].slice(0, revealCount));
-  const revealedValues: Record<string, number> = {};
-  const board = [letters.map((letter, index) => {
-    if (!revealedIndexes.has(index)) return cell(letter, true, { cryptLetter: letter });
-    revealedValues[letter] = digits[index]!;
-    return { ...cell(digits[index]!, true, { cryptLetter: letter, given: true }), isBlocked: true };
-  })];
+function connectDotsNeon(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const size = sizeFor(difficulty, 5, 6, 7, 8);
+  const order: Array<[number, number]> = [];
+  for (let row = 0; row < size; row += 1) {
+    const columns = Array.from({ length: size }, (_, col) => col);
+    if (row % 2 === 1) columns.reverse();
+    for (const col of columns) order.push([row, col]);
+  }
+  if (random.next() < .5) order.reverse();
+  const answers = matrix<CellValue>(size, size, () => null);
+  const board = matrix(size, size, () => cell(null, true, { neonPoint: true }));
+  order.forEach(([row, col], index) => {
+    const next = order[index + 1];
+    answers[row]![col] = next ? `${next[0]}:${next[1]}` : "END";
+    board[row]![col]!.meta.pathIndex = index;
+    board[row]![col]!.meta.start = index === 0;
+  });
   return {
     board,
     answers,
-    meta: {
-      equation,
-      letters,
-      revealedValues,
-      instructions: `Cada letra representa un dígito distinto. Pistas iniciales: ${Object.entries(revealedValues).map(([letter, value]) => `${letter}=${value}`).join(" · ")}.`,
-      difficulty
-    }
+    meta: { pathLength: order.length, instructions: "Conecta todos los puntos con una sola línea continua, sin cruzarla.", difficulty },
   };
+}
+
+function hangman(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const minimum = sizeFor(difficulty, 4, 6, 8, 10);
+  const candidates = SPANISH_DICTIONARY.filter((entry) => entry.word.length >= minimum && entry.word.length <= 14);
+  const entry = random.pick(candidates) ?? { word: "LABERINTO", clue: "Red de caminos con una salida." };
+  const word = normalizeWord(entry.word);
+  return {
+    board: [[...word].map((_, index) => cell(null, false, { letterIndex: index }))],
+    answers: [[...word]],
+    meta: { wordLength: word.length, clue: entry.clue, maxErrors: 6, instructions: "Adivina letras. Seis errores eliminan al jugador.", difficulty },
+  };
+}
+
+function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const size = sizeFor(difficulty, 5, 6, 7, 8);
+  const board = matrix(size, size, () => cell(null, true));
+  const answers = matrix<CellValue>(size, size, () => null);
+  for (let row = 0; row < size; row += 1) for (let col = 0; col < size; col += 1) {
+    const distances = [
+      { direction: "UP", value: row }, { direction: "RIGHT", value: size - 1 - col },
+      { direction: "DOWN", value: size - 1 - row }, { direction: "LEFT", value: col },
+    ];
+    const minimum = Math.min(...distances.map(({ value }) => value));
+    const direction = random.pick(distances.filter(({ value }) => value === minimum)).direction;
+    board[row]![col] = cell(direction, true, { arrow: direction, escapeDepth: minimum });
+    answers[row]![col] = direction;
+  }
+  return {
+    board,
+    answers,
+    meta: { totalBlocks: size * size, instructions: "Toca una flecha cuando toda su trayectoria esté libre.", difficulty },
+  };
+}
+
+function rayCells(row: number, col: number, direction: string, size: number): Array<[number, number]> {
+  const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
+    : direction === "DOWN" ? [1, 0] : [0, -1];
+  const result: Array<[number, number]> = [];
+  for (let y = row + dy, x = col + dx; y >= 0 && y < size && x >= 0 && x < size; y += dy, x += dx) result.push([y, x]);
+  return result;
 }
 
 export const SCRABBLE_SCORES: Record<string, number> = {

@@ -18,6 +18,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -25,6 +27,7 @@ import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 import com.sudokuarena.data.SocketGameClient
 import com.sudokuarena.data.HttpLeaderboardRepository
 import com.sudokuarena.data.local.PlayerPreferences
@@ -80,6 +83,8 @@ class MainActivity : ComponentActivity() {
 private fun MultiArenaApp() {
     val context = LocalContext.current
     val preferences = remember(context) { PlayerPreferences(context) }
+    val favoriteGames by preferences.favoriteGamesFlow().collectAsState(initial = emptySet())
+    val appScope = rememberCoroutineScope()
     val leaderboardRepository = remember { HttpLeaderboardRepository(BuildConfig.SOCKET_URL) }
     var screen by rememberSaveable { mutableStateOf("SPLASH") }
     var mode by rememberSaveable { mutableStateOf<String?>(null) }
@@ -105,6 +110,8 @@ private fun MultiArenaApp() {
                 initialXp = preferences.totalXp(),
                 initialAvatar = preferences.avatarId(),
                 selectedGameType = selectedGameType,
+                favoriteGames = favoriteGames,
+                onToggleFavorite = { game -> appScope.launch { preferences.toggleFavorite(game) } },
                 onGameSelected = { selectedGameType = it },
                 leaderboardRepository = leaderboardRepository,
                 onSaveNickname = preferences::saveNickname,
