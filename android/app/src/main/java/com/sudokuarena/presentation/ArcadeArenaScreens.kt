@@ -1,16 +1,8 @@
 package com.sudokuarena.presentation
 
-import androidx.compose.animation.core.animateOffsetAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.IconButton
@@ -40,17 +31,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalDensity
-import com.sudokuarena.domain.PacmanActorState
-import kotlin.math.roundToInt
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.abs
 import kotlin.math.sin
 
@@ -122,12 +109,6 @@ fun PacmanArenaScreen(
 ) {
     val arena = state.pacmanState
     val me = arena?.players?.firstOrNull { it.id == state.playerId } ?: arena?.players?.firstOrNull()
-    val motionPhase by rememberInfiniteTransition(label = "pacmanMotion").animateFloat(
-        0f,
-        1f,
-        infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Restart),
-        label = "chomp",
-    )
     val hitShake = remember(me?.id) { androidx.compose.animation.core.Animatable(0f) }
     val scorePulse = remember(me?.id) { androidx.compose.animation.core.Animatable(0f) }
     var previousLives by remember(me?.id) { mutableIntStateOf(me?.lives ?: 3) }
@@ -190,32 +171,22 @@ fun PacmanArenaScreen(
             val columns = map.firstOrNull()?.size?.coerceAtLeast(1) ?: 15
             val rows = map.size.coerceAtLeast(1)
             val tile = minOf(maxWidth / columns, maxHeight / rows)
-            val tilePx = with(LocalDensity.current) { tile.toPx() }
             val boardWidth = tile * columns
             val boardHeight = tile * rows
-            Box(Modifier.size(boardWidth, boardHeight)) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val px = size.width / columns
-                    val py = size.height / rows
-                    map.forEachIndexed { row, values -> values.forEachIndexed { col, value ->
-                        if (value == 0) {
-                            drawRoundRect(Color(0xFF143DFF), Offset(col * px, row * py), Size(px, py), style = Stroke(maxOf(1.5f, px * .12f)))
-                        } else {
-                            val key = "$col:$row"
-                            when {
-                                key in (arena?.powerPills ?: emptySet()) -> {
-                                    val radius = px * (.13f + abs(sin(motionPhase * Math.PI.toFloat() * 2f)) * .10f)
-                                    drawCircle(Color.White.copy(alpha = .42f), radius * 1.8f, Offset((col + .5f) * px, (row + .5f) * py))
-                                    drawCircle(Color.White, radius, Offset((col + .5f) * px, (row + .5f) * py))
-                                }
-                                key in (arena?.pills ?: emptySet()) -> drawCircle(Color(0xFFFFE082), px * .07f, Offset((col + .5f) * px, (row + .5f) * py))
-                            }
-                        }
-                    } }
-                }
-                arena?.players?.forEach { actor -> AnimatedPacActor(actor, tilePx, tile, true, motionPhase) }
-                arena?.ghosts?.forEach { actor -> AnimatedPacActor(actor, tilePx, tile, false, motionPhase) }
-            }
+            AndroidView(
+                factory = { context ->
+                    PacmanSurfaceView(context).apply {
+                        onDirection = onInput
+                        updateState(arena)
+                    }
+                },
+                update = { view ->
+                    view.onDirection = onInput
+                    view.updateState(arena)
+                },
+                onRelease = PacmanSurfaceView::stopRenderer,
+                modifier = Modifier.size(boardWidth, boardHeight),
+            )
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             Button(onClick = { onInput("UP") }) { Text("▲") }
@@ -223,75 +194,6 @@ fun PacmanArenaScreen(
                 Button(onClick = { onInput("LEFT") }) { Text("◀") }
                 Button(onClick = { onInput("DOWN") }) { Text("▼") }
                 Button(onClick = { onInput("RIGHT") }) { Text("▶") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AnimatedPacActor(
-    actor: PacmanActorState,
-    tilePx: Float,
-    tileDp: androidx.compose.ui.unit.Dp,
-    pacman: Boolean,
-    phase: Float,
-) {
-    val target = Offset(actor.x * tilePx, actor.y * tilePx)
-    val animated by animateOffsetAsState(target, spring(stiffness = 520f, dampingRatio = .82f), label = "actor-${actor.id}")
-    val color = if (pacman) parseArcadeColor(actor.colorHex, Color.Yellow)
-    else when (actor.mode) {
-        "FRIGHTENED" -> Color(0xFF2962FF)
-        "EATEN" -> Color.White
-        else -> listOf(Color.Red, Color.Magenta, Color.Cyan, Color(0xFFFF8F00))[kotlin.math.abs(actor.id.hashCode()) % 4]
-    }
-    Canvas(
-        Modifier
-            .size(tileDp * .82f)
-            .offset { IntOffset((animated.x + tilePx * .09f).roundToInt(), (animated.y + tilePx * .09f).roundToInt()) }
-            .graphicsLayer {
-                val bounce = sin((phase + (kotlin.math.abs(actor.id.hashCode()) % 5) * .11f) * Math.PI.toFloat() * 2f)
-                translationY = bounce * if (pacman) 1.5f else 3f
-                scaleX = if (actor.mode == "FRIGHTENED") .92f + abs(bounce) * .08f else 1f
-                scaleY = scaleX
-            },
-    ) {
-        if (pacman) {
-            val mouth = 8f + abs(sin(phase * Math.PI.toFloat() * 2f)) * 31f
-            val facing = when (actor.direction) {
-                "DOWN" -> 90f
-                "LEFT" -> 180f
-                "UP" -> 270f
-                else -> 0f
-            }
-            drawArc(color, facing + mouth, 360f - mouth * 2f, true)
-            drawCircle(Color.Black, size.minDimension * .045f, Offset(size.width * .57f, size.height * .27f))
-        } else {
-            val bodyTop = size.height * .08f
-            val bodyBottom = size.height * .84f
-            val path = Path().apply {
-                moveTo(size.width * .08f, bodyBottom)
-                lineTo(size.width * .08f, size.height * .45f)
-                cubicTo(size.width * .08f, bodyTop, size.width * .92f, bodyTop, size.width * .92f, size.height * .45f)
-                lineTo(size.width * .92f, bodyBottom)
-                val wave = size.width / 4f
-                for (index in 4 downTo 0) {
-                    val x = index * wave
-                    val y = if ((index + (phase * 4).toInt()) % 2 == 0) bodyBottom else size.height * .96f
-                    lineTo(x, y)
-                }
-                close()
-            }
-            if (actor.mode != "EATEN") drawPath(path, color)
-            val eyeY = size.height * .43f
-            for (eyeX in listOf(size.width * .36f, size.width * .66f)) {
-                drawCircle(Color.White, size.minDimension * .12f, Offset(eyeX, eyeY))
-                val look = when (actor.direction) {
-                    "LEFT" -> Offset(-size.width * .035f, 0f)
-                    "RIGHT" -> Offset(size.width * .035f, 0f)
-                    "UP" -> Offset(0f, -size.height * .035f)
-                    else -> Offset(0f, size.height * .035f)
-                }
-                drawCircle(Color(0xFF0D47A1), size.minDimension * .055f, Offset(eyeX, eyeY) + look)
             }
         }
     }
@@ -308,7 +210,3 @@ private fun ArcadeTopBar(title: String, subtitle: String, onPause: () -> Unit, o
         IconButton(onClick = onExit) { Text("✕", color = Color(0xFFFF5577), fontSize = 20.sp) }
     }
 }
-
-private fun parseArcadeColor(value: String?, fallback: Color): Color = runCatching {
-    Color(android.graphics.Color.parseColor(value))
-}.getOrDefault(fallback)
