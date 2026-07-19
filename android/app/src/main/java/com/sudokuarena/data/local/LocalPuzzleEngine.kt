@@ -5,6 +5,7 @@ import com.sudokuarena.domain.GenericBoardState
 import com.sudokuarena.domain.GenericCell
 import com.sudokuarena.domain.PuzzleDifficulty
 import kotlin.random.Random
+import kotlin.math.abs
 
 data class LocalPuzzleMoveResult(
     val accepted: Boolean,
@@ -26,6 +27,8 @@ class LocalPuzzleEngine(
     private var board = blueprint.board
     private var revision = 0L
     private val foundWords = mutableSetOf<String>()
+    private val guessedLetters = mutableSetOf<String>()
+    private var hangmanErrors = 0
     private var capitalPosition = 0
     private var capitalBalance = 1_500
     private var capitalStage = "ROLL"
@@ -35,18 +38,32 @@ class LocalPuzzleEngine(
     private var capitalCard: Map<String, Any?>? = null
     private val capitalOwners = mutableMapOf<Int, String>()
     private val capitalLevels = mutableMapOf<Int, Int>()
+    private var localTurnTeam = "BLUE"
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
         revision = revision, serverTime = System.currentTimeMillis(), rows = board.size,
         columns = board.firstOrNull()?.size ?: 0, board = board, completed = isComplete(),
-        meta = blueprint.meta + if (gameType == GameType.CAPITAL_ARENA) mapOf(
+        meta = blueprint.meta +
+            if (gameType == GameType.HANGMAN) mapOf(
+                "guessedLetters" to guessedLetters.sorted(),
+                "wrongGuesses" to guessedLetters.filter { guess ->
+                    blueprint.answers.flatten().none { it?.toString() == guess }
+                },
+                "mistakesMade" to hangmanErrors,
+                "hiddenWord" to board.firstOrNull().orEmpty().map { it.value?.toString() ?: "_" },
+            ) else emptyMap<String, Any?>() +
+            if (gameType in setOf(GameType.CHECKERS, GameType.CHESS_TACTICS)) mapOf(
+                "localTurnTeam" to localTurnTeam,
+                "instructions" to "Modo Hotseat: entrega el teléfono al equipo ${if (localTurnTeam == "BLUE") "Azul" else "Rojo"}.",
+            ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
             "dice" to capitalDice, "lastEvent" to capitalEvent, "surpriseCard" to capitalCard,
             "balances" to mapOf(OWNER to capitalBalance), "positions" to mapOf(OWNER to capitalPosition),
             "propertyOwners" to capitalOwners.mapKeys { it.key.toString() },
             "propertyLevels" to capitalLevels.mapKeys { it.key.toString() },
-        ) else emptyMap(),
+        ) else emptyMap<String, Any?>(),
     )
 
     fun letterRack(): List<String> = (blueprint.meta["rack"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty()
@@ -73,6 +90,43 @@ class LocalPuzzleEngine(
             replace(row, col, cell.copy(ownerId = OWNER, meta = cell.meta + ("revealedColor" to identity)))
             return accept(if (identity == "RED") 20 else 0)
         }
+        if (gameType == GameType.HANGMAN) {
+            val letter = value?.toString()?.uppercase()?.takeIf { it.length == 1 && it[0] in "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ" }
+                ?: return reject("Selecciona una letra")
+            if (!guessedLetters.add(letter)) return reject("Letra ya utilizada")
+            var hits = 0
+            blueprint.answers.first().forEachIndexed { index, answer ->
+                if (answer?.toString() == letter) {
+                    replace(0, index, board[0][index].copy(value = letter, isRevealed = true, ownerId = OWNER))
+                    hits += 1
+                }
+            }
+            if (hits == 0) hangmanErrors += 1
+            revision += 1
+            return LocalPuzzleMoveResult(
+                accepted = true,
+                state = snapshot(),
+                points = hits * 12,
+                message = if (hits > 0) "¡Letra correcta!" else "Esa letra no aparece",
+            )
+        }
+        if (gameType == GameType.ARROWS_ESCAPE) {
+            val direction = cell.value?.toString() ?: return reject("Flecha inválida")
+            val (dy, dx) = when (direction) {
+                "UP" -> -1 to 0; "RIGHT" -> 0 to 1; "DOWN" -> 1 to 0; else -> 0 to -1
+            }
+            var y = row + dy
+            var x = col + dx
+            while (board.getOrNull(y)?.getOrNull(x) != null) {
+                if (board[y][x].ownerId == null) return reject("La trayectoria está bloqueada")
+                y += dy
+                x += dx
+            }
+            replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
+            return accept(10)
+        }
+        if (gameType == GameType.CHECKERS) return checkersMove(row, col, value, cell)
+        if (gameType == GameType.CHESS_TACTICS) return chessHotseatMove(row, col, value, cell)
         if (gameType == GameType.NURIKABE) {
             val action = value?.toString()?.uppercase().orEmpty()
             if (action !in setOf("RIVER", "ISLAND", "CLEAR") || cell.meta["islandClue"] == true) return reject("Casilla no disponible")
@@ -180,6 +234,10 @@ class LocalPuzzleEngine(
         GameType.CROSS_LETTERS -> listOf(6, 8, 9, 10).all { board[it][7].ownerId != null }
         GameType.SECRET_CODE -> board.flatten().count { it.ownerId != null && it.meta["revealedColor"] == "RED" } == 8
         GameType.CAPITAL_ARENA -> false
+        GameType.CHECKERS -> board.flatten().count { it.meta["team"] == "BLUE" } == 0 ||
+            board.flatten().count { it.meta["team"] == "RED" } == 0
+        GameType.CHESS_TACTICS -> board.flatten().count { it.value == "KING" } < 2
+        GameType.HANGMAN -> board.first().all { it.value != null } || hangmanErrors >= 6
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -192,7 +250,9 @@ class LocalPuzzleEngine(
         GameType.HANGMAN -> hangman(); GameType.ARROWS_ESCAPE -> arrowsEscape()
         GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
         GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
-        GameType.CHESS_TACTICS, GameType.TETRIS_ARENA, GameType.CHECKERS, GameType.PACMAN_ARENA, GameType.DEMOLITION_ARCADE ->
+        GameType.CHECKERS -> checkers()
+        GameType.CHESS_TACTICS -> chessHotseat()
+        GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.DEMOLITION_ARCADE ->
             result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }
@@ -212,6 +272,120 @@ class LocalPuzzleEngine(
         return lines.any { line -> line.all { (row, col) -> board[row][col].value == mark } }
     }
 
+    private fun checkers(): Blueprint = result(
+        matrix(8, 8) { row, col ->
+            val playable = (row + col) % 2 == 1
+            val team = when {
+                playable && row <= 2 -> "BLUE"
+                playable && row >= 5 -> "RED"
+                else -> null
+            }
+            GenericCell(
+                value = team?.let { "${it}_MAN" },
+                isRevealed = team != null,
+                isBlocked = !playable,
+                meta = mapOf("playable" to playable, "team" to team, "king" to false),
+            )
+        },
+        matrix(8, 8) { _, _ -> null },
+        mapOf("hotseat" to true),
+    )
+
+    private fun checkersMove(row: Int, col: Int, value: Any?, source: GenericCell): LocalPuzzleMoveResult {
+        val payload = value as? Map<*, *> ?: return reject("Selecciona origen y destino")
+        val targetRow = payload["targetRow"]?.toString()?.toIntOrNull() ?: return reject("Destino inválido")
+        val targetCol = payload["targetCol"]?.toString()?.toIntOrNull() ?: return reject("Destino inválido")
+        val target = board.getOrNull(targetRow)?.getOrNull(targetCol) ?: return reject("Destino inválido")
+        if (source.meta["team"] != localTurnTeam || source.value == null || target.isBlocked || target.value != null) {
+            return reject("Movimiento inválido; el turno se conserva")
+        }
+        val dy = targetRow - row
+        val dx = targetCol - col
+        val king = source.meta["king"] == true
+        val forward = if (localTurnTeam == "BLUE") 1 else -1
+        var capture: Pair<Int, Int>? = null
+        if (abs(dx) == 1 && (dy == forward || king && abs(dy) == 1)) {
+            // Paso simple.
+        } else if (abs(dx) == 2 && abs(dy) == 2) {
+            val middle = board[row + dy / 2][col + dx / 2]
+            if (middle.meta["team"] == null || middle.meta["team"] == localTurnTeam) return reject("No hay rival para capturar")
+            capture = row + dy / 2 to col + dx / 2
+        } else return reject("Movimiento diagonal no permitido")
+        val crowned = king || (localTurnTeam == "BLUE" && targetRow == 7) || (localTurnTeam == "RED" && targetRow == 0)
+        replace(targetRow, targetCol, source.copy(
+            value = if (crowned) "${localTurnTeam}_KING" else "${localTurnTeam}_MAN",
+            meta = source.meta + ("king" to crowned),
+        ))
+        replace(row, col, source.copy(value = null, ownerId = null, isRevealed = false, meta = source.meta + ("team" to null) + ("king" to false)))
+        capture?.let { (captureRow, captureCol) ->
+            val captured = board[captureRow][captureCol]
+            replace(captureRow, captureCol, captured.copy(value = null, ownerId = null, isRevealed = false, meta = captured.meta + ("team" to null) + ("king" to false)))
+        }
+        localTurnTeam = if (localTurnTeam == "BLUE") "RED" else "BLUE"
+        return accept(if (capture != null) 35 else 5)
+    }
+
+    private fun chessHotseat(): Blueprint {
+        val back = listOf("ROOK", "KNIGHT", "BISHOP", "QUEEN", "KING", "BISHOP", "KNIGHT", "ROOK")
+        return result(
+            matrix(8, 8) { row, col ->
+                val team = when (row) { 0, 1 -> "BLUE"; 6, 7 -> "RED"; else -> null }
+                val type = when (row) { 0, 7 -> back[col]; 1, 6 -> "PAWN"; else -> null }
+                GenericCell(
+                    value = type,
+                    isRevealed = type != null,
+                    meta = mapOf(
+                        "team" to team, "type" to type, "hp" to 3, "maxHp" to 3,
+                        "ap" to 2, "maxAp" to 2, "statusEffects" to emptyList<String>(),
+                    ),
+                )
+            },
+            matrix(8, 8) { _, _ -> null },
+            mapOf("hotseat" to true),
+        )
+    }
+
+    private fun chessHotseatMove(row: Int, col: Int, value: Any?, source: GenericCell): LocalPuzzleMoveResult {
+        val payload = value as? Map<*, *> ?: return reject("Selecciona una pieza y su destino")
+        val targetRow = payload["targetRow"]?.toString()?.toIntOrNull() ?: return reject("Destino inválido")
+        val targetCol = payload["targetCol"]?.toString()?.toIntOrNull() ?: return reject("Destino inválido")
+        val target = board.getOrNull(targetRow)?.getOrNull(targetCol) ?: return reject("Destino inválido")
+        if (source.meta["team"] != localTurnTeam || source.value == null || target.meta["team"] == localTurnTeam) {
+            return reject("Movimiento inválido; el turno se conserva")
+        }
+        val dy = targetRow - row
+        val dx = targetCol - col
+        val valid = when (source.value) {
+            "PAWN" -> abs(dx) <= 1 && dy == if (localTurnTeam == "BLUE") 1 else -1
+            "KNIGHT" -> setOf(abs(dy), abs(dx)) == setOf(1, 2)
+            "BISHOP" -> abs(dy) == abs(dx)
+            "ROOK" -> dy == 0 || dx == 0
+            "QUEEN" -> dy == 0 || dx == 0 || abs(dy) == abs(dx)
+            "KING" -> maxOf(abs(dy), abs(dx)) == 1
+            else -> false
+        }
+        if (!valid || !chessPathClear(row, col, targetRow, targetCol, source.value.toString())) {
+            return reject("La pieza no puede llegar allí")
+        }
+        replace(targetRow, targetCol, source.copy(ownerId = OWNER, isRevealed = true))
+        replace(row, col, GenericCell(meta = mapOf("team" to null, "type" to null)))
+        localTurnTeam = if (localTurnTeam == "BLUE") "RED" else "BLUE"
+        return accept(if (target.value != null) 30 else 8)
+    }
+
+    private fun chessPathClear(row: Int, col: Int, targetRow: Int, targetCol: Int, type: String): Boolean {
+        if (type in setOf("PAWN", "KNIGHT", "KING")) return true
+        val dy = (targetRow - row).coerceIn(-1, 1)
+        val dx = (targetCol - col).coerceIn(-1, 1)
+        var y = row + dy
+        var x = col + dx
+        while (y != targetRow || x != targetCol) {
+            if (board[y][x].value != null) return false
+            y += dy; x += dx
+        }
+        return true
+    }
+
     private fun hangman(): Blueprint {
         val word = listOf("ARENA", "LABERINTO", "VERTICAL", "FLECHAS").random(random)
         return result(
@@ -223,12 +397,9 @@ class LocalPuzzleEngine(
 
     private fun arrowsEscape(): Blueprint {
         val size = size(5, 6, 7, 8)
-        val arrows = listOf("UP", "RIGHT", "DOWN", "LEFT")
         val values = matrix<Any?>(size, size) { row, col ->
-            when {
-                row == 0 -> "UP"; row == size - 1 -> "DOWN"; col == 0 -> "LEFT"; col == size - 1 -> "RIGHT"
-                else -> arrows.random(random)
-            }
+            val distances = listOf(row to "UP", size - 1 - col to "RIGHT", size - 1 - row to "DOWN", col to "LEFT")
+            distances.minBy { it.first }.second
         }
         return result(
             values.map { row -> row.map { value -> GenericCell(value = value, isRevealed = true, meta = mapOf("arrow" to value)) } },

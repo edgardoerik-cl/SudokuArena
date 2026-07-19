@@ -79,6 +79,33 @@ import kotlin.math.floor
 import kotlin.math.roundToInt
 
 @Composable
+private fun BoardErrorScreen(detail: String?, onRetry: () -> Unit, onExit: () -> Unit) {
+    Box(
+        Modifier.fillMaxSize().background(Color(0xFFF7F9FF)).padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(22.dp),
+            color = Color.White,
+            shadowElevation = 14.dp,
+            border = BorderStroke(2.dp, Color(0xFFFF5577)),
+        ) {
+            Column(
+                Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("⚠", fontSize = 46.sp)
+                Text("Error al cargar el tablero", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                if (!detail.isNullOrBlank()) Text(detail, color = Color(0xFF526581))
+                Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("Reintentar") }
+                TextButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) { Text("Volver al menú") }
+            }
+        }
+    }
+}
+
+@Composable
 fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
@@ -94,6 +121,15 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
                 },
             )
         }
+    }
+
+    if (state.boardError != null) {
+        BoardErrorScreen(
+            detail = state.message,
+            onRetry = viewModel::retryBoardLoad,
+            onExit = onExit,
+        )
+        return
     }
 
     val roomState = state.roomState
@@ -120,17 +156,23 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
     }
 
     if (state.gameType == GameType.TETRIS_ARENA) {
-        TetrisArenaScreen(state, viewModel::sendTetrisInput, viewModel::requestPause, onExit)
+        ArcadeGameHost(state, viewModel::resumePausedGame, viewModel::newSoloGame, viewModel::requestRematch, onExit) {
+            TetrisArenaScreen(state, viewModel::sendTetrisInput, viewModel::requestPause, onExit)
+        }
         return
     }
 
     if (state.gameType == GameType.PACMAN_ARENA) {
-        PacmanArenaScreen(state, viewModel::sendPacmanInput, viewModel::requestPause, onExit)
+        ArcadeGameHost(state, viewModel::resumePausedGame, viewModel::newSoloGame, viewModel::requestRematch, onExit) {
+            PacmanArenaScreen(state, viewModel::sendPacmanInput, viewModel::requestPause, onExit)
+        }
         return
     }
 
     if (state.gameType == GameType.DEMOLITION_ARCADE) {
-        DemolitionArenaScreen(state, viewModel::sendDemolitionInput, viewModel::requestPause, onExit)
+        ArcadeGameHost(state, viewModel::resumePausedGame, viewModel::newSoloGame, viewModel::requestRematch, onExit) {
+            DemolitionArenaScreen(state, viewModel::sendDemolitionInput, viewModel::requestPause, onExit)
+        }
         return
     }
 
@@ -179,6 +221,30 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
         onResume = viewModel::resumePausedGame,
         onExit = onExit,
     )
+}
+
+@Composable
+private fun ArcadeGameHost(
+    state: ArenaUiState,
+    onResume: () -> Unit,
+    onNewSoloGame: () -> Unit,
+    onRematch: () -> Unit,
+    onExit: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().blur(if (state.isLocallyPaused) 18.dp else 0.dp)) { content() }
+        if (state.soloCompleted || state.matchResults.isNotEmpty()) {
+            MatchResultsOverlay(
+                state,
+                onNewSoloGame = onNewSoloGame,
+                onRematch = onRematch,
+                onExit = onExit,
+                modifier = Modifier.zIndex(30f),
+            )
+        }
+        if (state.isLocallyPaused) PauseLayer(state, onResume, Modifier.zIndex(50f))
+    }
 }
 
 @Composable

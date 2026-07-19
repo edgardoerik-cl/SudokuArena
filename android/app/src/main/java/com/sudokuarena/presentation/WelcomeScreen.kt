@@ -163,9 +163,9 @@ fun WelcomeScreen(
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
                 GameCarouselSelector(selectedGameType, favoriteGames, onGameSelected, onToggleFavorite)
                 NeonArenaButton(
-                    text = if (selectedGameType in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS, GameType.DEMOLITION_ARCADE)) "Disponible online" else "Modo Solitario",
+                    text = "Modo Solitario",
                     onClick = onSoloMode,
-                    enabled = selectedGameType !in setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.CHECKERS, GameType.CHESS_TACTICS, GameType.DEMOLITION_ARCADE),
+                    enabled = true,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(if (landscape) 48.dp else 58.dp),

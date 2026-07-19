@@ -12,11 +12,13 @@ android {
         applicationId = "com.sudokuarena"
         minSdk = 26
         targetSdk = 36
-        versionCode = 29
-        versionName = "8.2.0"
+        versionCode = 30
+        versionName = "8.2.1"
 
         val socketUrl = providers.gradleProperty("SOCKET_URL")
-            .getOrElse("http://10.0.2.2:3000")
+            // La APK normal siempre apunta a producción. Para desarrollo local:
+            // ./gradlew assembleDebug -PSOCKET_URL=http://10.0.2.2:3000
+            .getOrElse("https://sudoku-arena.bonto.run")
         buildConfigField("String", "SOCKET_URL", "\"$socketUrl\"")
     }
 

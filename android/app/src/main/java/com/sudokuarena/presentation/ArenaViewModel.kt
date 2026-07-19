@@ -26,6 +26,9 @@ import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.SudokuGenerator
 import com.sudokuarena.domain.SudokuPuzzle
 import com.sudokuarena.data.local.LocalPuzzleEngine
+import com.sudokuarena.data.local.LocalTetrisEngine
+import com.sudokuarena.data.local.LocalPacmanEngine
+import com.sudokuarena.data.local.LocalDemolitionEngine
 import java.util.UUID
 import java.time.LocalDate
 import kotlinx.coroutines.channels.BufferOverflow
@@ -39,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 
 data class CellPosition(val row: Int, val column: Int)
 
@@ -105,6 +109,7 @@ data class ArenaUiState(
     val tetrisState: com.sudokuarena.domain.TetrisArenaState? = null,
     val pacmanState: com.sudokuarena.domain.PacmanArenaState? = null,
     val demolitionState: com.sudokuarena.domain.DemolitionArenaState? = null,
+    val boardError: String? = null,
 ) {
     val canPlay: Boolean
         get() = connected && (isSoloMode || (playerId != null && roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH))) && selected != null &&
@@ -178,15 +183,23 @@ class ArenaViewModel(
     private var explosionUntil = 0L
     private var initialGameConfigured = false
     private var localPuzzleEngine: LocalPuzzleEngine? = null
+    private var localTetrisEngine: LocalTetrisEngine? = null
+    private var localPacmanEngine: LocalPacmanEngine? = null
+    private var localDemolitionEngine: LocalDemolitionEngine? = null
+    private var localArcadeJob: Job? = null
     private var soloPausedAt = 0L
     private var soloPausedAccumulatedMs = 0L
 
     init {
         if (isSoloMode) {
-            startSoloGame()
+            runCatching(::startSoloGame).onFailure(::reportBoardFailure)
         } else {
             val onlineGateway = requireNotNull(gateway) { "El modo online requiere GameRealtimeGateway" }
-            viewModelScope.launch { onlineGateway.events.collect(::handleEvent) }
+            viewModelScope.launch {
+                onlineGateway.events.collect { event ->
+                    runCatching { handleEvent(event) }.onFailure(::reportBoardFailure)
+                }
+            }
             onlineGateway.connect()
         }
         viewModelScope.launch {
@@ -246,7 +259,21 @@ class ArenaViewModel(
     }
 
     fun newSoloGame() {
-        if (isSoloMode) startSoloGame()
+        if (isSoloMode) runCatching(::startSoloGame).onFailure(::reportBoardFailure)
+    }
+
+    fun retryBoardLoad() {
+        mutableState.update { it.copy(boardError = null, message = "Recargando arena…") }
+        if (isSoloMode) {
+            runCatching(::startSoloGame).onFailure(::reportBoardFailure)
+        } else {
+            roomRequestSent = false
+            gateway?.disconnect()
+            viewModelScope.launch {
+                delay(250)
+                gateway?.connect()
+            }
+        }
     }
 
     fun completeTutorial() {
@@ -316,15 +343,18 @@ class ArenaViewModel(
     }
 
     fun sendTetrisInput(action: String) {
-        gateway?.sendTetrisInput(action)
+        if (isSoloMode) {
+            localTetrisEngine?.input(action)
+            publishLocalTetris()
+        } else gateway?.sendTetrisInput(action)
     }
 
     fun sendPacmanInput(direction: String) {
-        gateway?.sendPacmanInput(direction)
+        if (isSoloMode) localPacmanEngine?.input(direction) else gateway?.sendPacmanInput(direction)
     }
 
     fun sendDemolitionInput(paddleX: Float) {
-        gateway?.sendDemolitionInput(paddleX)
+        if (isSoloMode) localDemolitionEngine?.input(paddleX) else gateway?.sendDemolitionInput(paddleX)
     }
 
     fun chooseRps(choice: String) {
@@ -492,12 +522,22 @@ class ArenaViewModel(
     }
 
     private fun startSoloGame() {
+        localArcadeJob?.cancel()
+        localArcadeJob = null
+        localTetrisEngine = null
+        localPacmanEngine = null
+        localDemolitionEngine = null
         soloChallengeToken = null
         viewModelScope.launch {
             soloChallengeToken = runCatching { leaderboardRepository.beginSoloChallenge() }.getOrNull()
         }
         soloPuzzle = if (initialGameType == GameType.SUDOKU) sudokuGenerator.generate(if (isDailyChallenge) LocalDate.now().toEpochDay() else null, initialPuzzleDifficulty) else null
-        localPuzzleEngine = if (initialGameType == GameType.SUDOKU) null else LocalPuzzleEngine(initialGameType, initialPuzzleDifficulty)
+        val arcadeTypes = setOf(GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.DEMOLITION_ARCADE)
+        localPuzzleEngine = if (initialGameType == GameType.SUDOKU || initialGameType in arcadeTypes) null
+            else LocalPuzzleEngine(initialGameType, initialPuzzleDifficulty)
+        if (initialGameType == GameType.TETRIS_ARENA) localTetrisEngine = LocalTetrisEngine(playerName)
+        if (initialGameType == GameType.PACMAN_ARENA) localPacmanEngine = LocalPacmanEngine(playerName)
+        if (initialGameType == GameType.DEMOLITION_ARCADE) localDemolitionEngine = LocalDemolitionEngine(playerName)
         soloStartedAt = System.currentTimeMillis()
         soloPausedAt = 0L
         soloPausedAccumulatedMs = 0L
@@ -522,12 +562,74 @@ class ArenaViewModel(
             totalXp = recordStore.totalXp(),
             activeGameType = initialGameType,
             genericBoard = localPuzzleEngine?.snapshot(),
+            tetrisState = localTetrisEngine?.snapshot(),
+            pacmanState = localPacmanEngine?.snapshot(),
+            demolitionState = localDemolitionEngine?.snapshot(),
             letterRack = localPuzzleEngine?.letterRack().orEmpty(),
             activeLetterPlayerId = SOLO_PLAYER_ID,
             secretTeam = if (initialGameType == GameType.SECRET_CODE) "RED" else null,
             secretRole = if (initialGameType == GameType.SECRET_CODE) "OPERATIVE" else null,
             secretCurrentTeam = if (initialGameType == GameType.SECRET_CODE) "RED" else null,
         )
+        startLocalArcadeLoop()
+    }
+
+    private fun startLocalArcadeLoop() {
+        localArcadeJob = when (initialGameType) {
+            GameType.TETRIS_ARENA -> viewModelScope.launch {
+                while (isActive && !mutableState.value.soloCompleted) {
+                    delay(430)
+                    if (!mutableState.value.isLocallyPaused) {
+                        localTetrisEngine?.tick()
+                        publishLocalTetris()
+                    }
+                }
+            }
+            GameType.PACMAN_ARENA -> viewModelScope.launch {
+                while (isActive && !mutableState.value.soloCompleted) {
+                    delay(170)
+                    if (!mutableState.value.isLocallyPaused) {
+                        localPacmanEngine?.tick()
+                        val snapshot = localPacmanEngine?.snapshot() ?: continue
+                        mutableState.update {
+                            it.copy(
+                                pacmanState = snapshot,
+                                players = listOf(soloPlayer(snapshot.players.firstOrNull()?.score ?: 0)),
+                            )
+                        }
+                        if (snapshot.completed) finishSoloGame()
+                    }
+                }
+            }
+            GameType.DEMOLITION_ARCADE -> viewModelScope.launch {
+                while (isActive && !mutableState.value.soloCompleted) {
+                    delay(48)
+                    if (!mutableState.value.isLocallyPaused) {
+                        repeat(3) { localDemolitionEngine?.tick() }
+                        val snapshot = localDemolitionEngine?.snapshot() ?: continue
+                        mutableState.update {
+                            it.copy(
+                                demolitionState = snapshot,
+                                players = listOf(soloPlayer(snapshot.players.firstOrNull()?.score ?: 0)),
+                            )
+                        }
+                        if (snapshot.completed) finishSoloGame()
+                    }
+                }
+            }
+            else -> null
+        }
+    }
+
+    private fun publishLocalTetris() {
+        val snapshot = localTetrisEngine?.snapshot() ?: return
+        mutableState.update {
+            it.copy(
+                tetrisState = snapshot,
+                players = listOf(soloPlayer(snapshot.players.firstOrNull()?.score ?: 0)),
+            )
+        }
+        if (snapshot.completed && !mutableState.value.soloCompleted) finishSoloGame()
     }
 
     private fun placeSolo(position: CellPosition, value: Int) {
@@ -707,6 +809,7 @@ class ArenaViewModel(
             is RealtimeEvent.BoardEventEnded -> mutableState.update { it.copy(boardEvent = null, boardEventRemainingMs = 0) }
             is RealtimeEvent.ReactionReceived -> showReaction(event)
             is RealtimeEvent.GenericStateUpdated -> mutableState.update { current ->
+                requireValidBoard(event.state)
                 current.copy(
                     genericBoard = event.state,
                     revision = event.state.revision,
@@ -771,6 +874,22 @@ class ArenaViewModel(
         }
     }
 
+    private fun requireValidBoard(state: GenericBoardState) {
+        require(state.rows > 0 && state.columns > 0) { "El tablero llegó vacío" }
+        require(state.board.size == state.rows) { "Cantidad de filas inconsistente" }
+        require(state.board.all { it.size == state.columns }) { "Cantidad de columnas inconsistente" }
+    }
+
+    private fun reportBoardFailure(error: Throwable) {
+        mutableState.update {
+            it.copy(
+                pendingRequestId = null,
+                boardError = "Error al cargar el tablero",
+                message = error.message?.take(160),
+            )
+        }
+    }
+
     private fun showConquest(event: RealtimeEvent.SectionConquered) {
         val winner = mutableState.value.players.firstOrNull { it.id == event.playerId }?.name ?: "Un jugador"
         val sections = event.sections.joinToString(" + ") { sectionLabel(it) }
@@ -827,6 +946,7 @@ class ArenaViewModel(
     private fun serverNow(): Long = System.currentTimeMillis() + serverClockOffsetMs
 
     override fun onCleared() {
+        localArcadeJob?.cancel()
         gateway?.disconnect()
         super.onCleared()
     }

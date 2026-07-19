@@ -49,13 +49,16 @@ class SocketGameClient(
     override val events: Flow<RealtimeEvent> = mutableEvents
 
     private val socket: Socket = IO.socket(
-        serverUrl,
+        serverUrl.trim().trimEnd('/'),
         IO.Options.builder()
+            // Sin long-polling: evita que proxies cloud separen dos sesiones
+            // Engine.IO durante el upgrade HTTP -> WebSocket.
             .setTransports(arrayOf(WebSocket.NAME))
             .setReconnection(true)
-            .setReconnectionAttempts(10)
+            .setReconnectionAttempts(Int.MAX_VALUE)
             .setReconnectionDelay(1_000)
             .setReconnectionDelayMax(5_000)
+            .setTimeout(15_000)
             .setAuth(mapOf("name" to playerName, "clientId" to clientId, "avatarId" to avatarId))
             .build(),
     )

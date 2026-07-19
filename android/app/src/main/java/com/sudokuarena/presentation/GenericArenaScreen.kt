@@ -398,6 +398,11 @@ private fun AnimatedArrowsGrid(
 ) {
     val textMeasurer = rememberTextMeasurer()
     val spatialShapes = remember(state.meta) { parseSpatialArrowShapes(state) }
+    if (spatialShapes.isEmpty()) {
+        if (state.meta["freeSpace"] == true) ArrowGeometryLoading(modifier)
+        else LegacyArrowGrid(state, enabled, onDirectMove, modifier)
+        return
+    }
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
             ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
@@ -504,6 +509,88 @@ private fun AnimatedArrowsGrid(
                     textMeasurer,
                     color.copy(alpha = alpha),
                 )
+        }
+    }
+}
+
+@Composable
+private fun ArrowGeometryLoading(modifier: Modifier = Modifier) {
+    val pulse by rememberInfiniteTransition(label = "arrowLoading").animateFloat(
+        .35f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "arrowLoadingPulse",
+    )
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = Color(0xFFF8FAFF),
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF00A8FF)),
+    ) {
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text("➜", fontSize = 52.sp, color = Color(0xFF7C3AED), modifier = Modifier.graphicsLayer {
+                alpha = pulse
+                scaleX = .82f + pulse * .18f
+                scaleY = scaleX
+            })
+            Text("Calculando geometrías…", fontWeight = FontWeight.Black, color = Color(0xFF102A56))
+            Text("La arena aparecerá en un instante", fontSize = 12.sp, color = Color(0xFF526581))
+        }
+    }
+}
+
+@Composable
+private fun LegacyArrowGrid(
+    state: GenericBoardState,
+    enabled: Boolean,
+    onDirectMove: (Int, Int, Any?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val textMeasurer = rememberTextMeasurer()
+    Canvas(
+        modifier.fillMaxSize()
+            .background(Color(0xFFF8FAFF), RoundedCornerShape(16.dp))
+            .pointerInput(state.revision, enabled) {
+                detectTapGestures { tap ->
+                    if (!enabled || state.rows <= 0 || state.columns <= 0) return@detectTapGestures
+                    val col = (tap.x / size.width * state.columns).toInt().coerceIn(0, state.columns - 1)
+                    val row = (tap.y / size.height * state.rows).toInt().coerceIn(0, state.rows - 1)
+                    if (state.board[row][col].ownerId == null) onDirectMove(row, col, "ESCAPE")
+                }
+            },
+    ) {
+        if (state.rows <= 0 || state.columns <= 0) return@Canvas
+        val cellWidth = size.width / state.columns
+        val cellHeight = size.height / state.rows
+        state.board.forEachIndexed { row, cells ->
+            cells.forEachIndexed { col, cell ->
+                if (cell.ownerId != null) return@forEachIndexed
+                val origin = Offset(col * cellWidth, row * cellHeight)
+                drawRoundRect(
+                    Color(0xFF00A8FF).copy(alpha = .16f),
+                    origin + Offset(3f, 3f),
+                    Size(cellWidth - 6f, cellHeight - 6f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f),
+                )
+                drawRoundRect(
+                    Color(0xFF7C3AED),
+                    origin + Offset(3f, 3f),
+                    Size(cellWidth - 6f, cellHeight - 6f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f),
+                    style = Stroke(2.5f),
+                )
+                val glyph = when (cell.value?.toString()) {
+                    "UP" -> "↑"; "RIGHT" -> "→"; "DOWN" -> "↓"; else -> "←"
+                }
+                drawCenteredText(
+                    glyph,
+                    origin + Offset(cellWidth / 2f, cellHeight / 2f),
+                    min(cellWidth, cellHeight) * .72f,
+                    textMeasurer,
+                    Color(0xFF102A56),
+                )
+            }
         }
     }
 }
@@ -1401,11 +1488,18 @@ private fun GenericMoveControls(
         GameType.HANGMAN -> {
             val letters = ('A'..'Z').map(Char::toString) + "Ñ"
             val guessed = (state.genericBoard?.meta?.get("guessedLetters") as? List<*>)?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+            val targetColumn = state.genericBoard?.board?.firstOrNull()
+                ?.indexOfFirst { it.value == null }
+                ?.coerceAtLeast(0) ?: 0
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 letters.chunked(9).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         row.forEach { letter ->
-                            Button({ onMove(letter) }, enabled = enabled && letter !in guessed, modifier = Modifier.weight(1f)) { Text(letter, fontSize = 10.sp) }
+                            Button(
+                                { onMoveAt(0, targetColumn, letter) },
+                                enabled = enabled && letter !in guessed,
+                                modifier = Modifier.weight(1f),
+                            ) { Text(letter, fontSize = 10.sp) }
                         }
                         repeat(9 - row.size) { Spacer(Modifier.weight(1f)) }
                     }

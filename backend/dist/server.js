@@ -23,9 +23,18 @@ const disconnectTimers = new Map();
 const leaderboard = new LeaderboardStore();
 const soloChallenges = new Map();
 const httpServer = createServer((request, response) => void handleHttp(request, response));
+const corsOrigins = allowedOrigin === "*"
+    ? true
+    : allowedOrigin.split(",").map((origin) => origin.trim()).filter(Boolean);
 const io = new Server(httpServer, {
-    cors: { origin: allowedOrigin },
-    transports: ["websocket", "polling"]
+    cors: {
+        origin: corsOrigins,
+        methods: ["GET", "POST"],
+    },
+    transports: ["websocket", "polling"],
+    allowUpgrades: true,
+    pingInterval: 25_000,
+    pingTimeout: 20_000,
 });
 const reactionEmojis = new Set(["LAUGH", "CRY", "ANGRY", "SURPRISED"]);
 const botNames = ["Bot_Androide", "Bot_Pro", "Bot_Neón", "Bot_Lógico", "Bot_Turbo", "Bot_Arena"];
