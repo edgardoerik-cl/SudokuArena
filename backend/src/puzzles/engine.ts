@@ -3,7 +3,7 @@ import type { ArenaGame } from "../game.js";
 import { createPuzzleBlueprint } from "./blueprints.js";
 import { SCRABBLE_SCORES } from "./blueprints.js";
 import { SPANISH_DICTIONARY } from "./spanishDictionary.js";
-import { attackRange, calculateDamage, movementRange, skillCost, skillFor, type Piece } from "./chessTactics.js";
+import { attackRange, calculateDamage, cooldownFor, movementRange, skillCost, skillFor, type Piece } from "./chessTactics.js";
 import type {
   CellValue,
   GameType,
@@ -137,6 +137,9 @@ export class GenericPuzzleEngine {
           maskedWord: this.board[0]!.map((cell) => cell.value?.toString() ?? "_"),
           eliminated: [...this.hangmanErrors].filter(([, errors]) => errors >= 6).map(([id]) => id),
           currentPlayerTurn: this.activePlayerId,
+          ...(this.completed && this.board[0]!.some((cell) => cell.value === null)
+            ? { answerOnGameOver: this.hiddenWord }
+            : {}),
         } : {}),
         ...(this.gameType === "ARROWS_ESCAPE" ? {
           progress: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, removed.size])),
@@ -221,6 +224,9 @@ export class GenericPuzzleEngine {
     }
 
     const outcome = this.applySpecificMove(playerId, move, cell, game, now);
+    if (!outcome.correct && outcome.neutral === true) {
+      return this.reject(move.requestId, "INVALID_MOVE", outcome.message ?? "Entrada no válida");
+    }
     if (!outcome.correct) {
       const penaltyMs = this.gameType === "MINESWEEPER" && outcome.hitMine ? 5_000 : 3_000;
       game.applyGenericPenalty(playerId, now + penaltyMs);
@@ -428,16 +434,22 @@ export class GenericPuzzleEngine {
     cell: GenericCell,
     game: ArenaGame,
     now: number,
-  ): { correct: boolean; hitMine?: boolean; points?: number; extraTurn?: boolean } {
+  ): { correct: boolean; hitMine?: boolean; points?: number; extraTurn?: boolean; neutral?: boolean; message?: string } {
     if (this.gameType === "CROSS_LETTERS") return this.applyCrossLettersMove(playerId, move);
     if (this.gameType === "SECRET_CODE") return this.applySecretCodeMove(playerId, move, cell);
     if (this.gameType === "CAPITAL_ARENA") return this.applyCapitalMove(playerId, move, game);
 
     if (this.gameType === "HANGMAN") {
-      if ((this.hangmanErrors.get(playerId) ?? 0) >= 6) return { correct: false, points: 0 };
-      const letter = String(move.val ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 1);
-      if (!/^[A-ZÑ]$/.test(letter)) return { correct: false };
-      if (this.hangmanGuesses.has(letter)) return { correct: false, points: 0 };
+      if ((this.hangmanErrors.get(playerId) ?? 0) >= 6) {
+        return { correct: false, neutral: true, points: 0, message: "Ya no te quedan vidas en esta ronda" };
+      }
+      const letter = String(move.val ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      if (!/^[A-ZÑ]$/.test(letter)) {
+        return { correct: false, neutral: true, message: "Ingresa exactamente una letra" };
+      }
+      if (this.hangmanGuesses.has(letter)) {
+        return { correct: false, neutral: true, message: `La letra ${letter} ya fue utilizada` };
+      }
       this.hangmanGuesses.add(letter);
       let hits = 0;
       [...this.hiddenWord].forEach((answer, col) => {
@@ -677,68 +689,189 @@ export class GenericPuzzleEngine {
   ): { correct: boolean; points?: number; extraTurn?: boolean } {
     const payload = typeof move.val === "object" && move.val !== null ? move.val as Record<string, unknown> : {};
     const action = String(payload.action ?? "MOVE").toUpperCase();
-    let targetRow = Number(payload.targetRow); let targetCol = Number(payload.targetCol);
+    const targetRow = Number(payload.targetRow); const targetCol = Number(payload.targetCol);
     const target = this.board[targetRow]?.[targetCol];
     const piece = pieceFromCell(source);
     if (!piece || piece.team !== this.activeTeam(playerId) || !target) return { correct: false };
+    if (piece.statusEffects.some((effect) => effect.toUpperCase() === "STUNNED")) return { correct: false };
     const origin = { row: move.row, col: move.col };
-    if (action === "MOVE") {
+    if (action === "MOVE" || action === "ATTACK") {
+      const ambusher = this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({
+        cell,
+        row: rowIndex,
+        col: colIndex,
+        piece: pieceFromCell(cell),
+      }))).find((entry) =>
+        entry.piece?.team !== piece.team
+        && entry.piece?.type === "KNIGHT"
+        && entry.piece.ambushTarget?.row === targetRow
+        && entry.piece.ambushTarget?.col === targetCol
+      );
+      if (ambusher?.piece && target.value === null) {
+        const ambusherOwnerId = ambusher.cell.ownerId;
+        clearPiece(source);
+        clearPiece(ambusher.cell);
+        ambusher.piece.ambushTarget = null;
+        ambusher.piece.statusEffects = ambusher.piece.statusEffects.filter((effect) => !effect.toUpperCase().includes("AMBUSH"));
+        writePiece(target, ambusher.piece, ambusherOwnerId);
+        this.meta.lastChessAction = {
+          action: "SKILL",
+          skill: "AMBUSH",
+          sourceRow: ambusher.row,
+          sourceCol: ambusher.col,
+          targetRow,
+          targetCol,
+          pieceType: "KNIGHT",
+          at: Date.now(),
+        };
+        return { correct: true, points: 0 };
+      }
       const valid = movementRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
-      const cost = Math.abs(targetRow - move.row) + Math.abs(targetCol - move.col);
-      if (!valid || target.value !== null || cost > piece.ap) return { correct: false };
-      piece.ap -= cost;
-      writePiece(target, piece, playerId);
-      clearPiece(source);
-      return { correct: true, points: 4, extraTurn: piece.ap > 0 };
-    }
-    if (action === "ATTACK") {
       const enemy = pieceFromCell(target);
-      const valid = attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
-      if (!enemy || enemy.team === piece.team || piece.ap < 2 || !valid) return { correct: false };
-      enemy.hp -= calculateDamage(piece.type === "ROOK" ? 42 : piece.type === "KNIGHT" ? 36 : 28, enemy.defense);
-      piece.ap -= 2;
-      writePiece(source, piece, playerId);
-      if (enemy.hp <= 0) clearPiece(target); else writePiece(target, enemy, target.ownerId);
-      return { correct: true, points: enemy.hp <= 0 ? 45 : 18, extraTurn: piece.ap > 0 };
+      const expectsAttack = enemy !== null;
+      const attackValid = attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
+      if ((!expectsAttack && !valid) || (expectsAttack && !attackValid) || !this.chessPathClear(origin, { row: targetRow, col: targetCol }, piece.type)) {
+        return { correct: false };
+      }
+      if (enemy && enemy.team === piece.team) return { correct: false };
+      if (enemy?.statusEffects.some((effect) => effect.toUpperCase() === "INVULNERABLE")) return { correct: false };
+      if (enemy?.isShielded && !["PAWN", "KNIGHT", "BISHOP"].includes(piece.type)) return { correct: false };
+      if (piece.ap < 1) return { correct: false };
+      if (enemy) {
+        enemy.hp -= calculateDamage(
+          piece.type === "QUEEN" ? 48 : piece.type === "ROOK" ? 42 : piece.type === "KNIGHT" ? 36 : 30,
+          enemy.defense,
+        );
+        if (enemy.hp <= 0) {
+          if (enemy.type === "KING") {
+            this.meta.winnerTeam = piece.team;
+            this.completed = true;
+          }
+          clearPiece(target);
+        } else writePiece(target, enemy, target.ownerId);
+      } else {
+        writePiece(target, piece, playerId);
+        clearPiece(source);
+      }
+      piece.ap -= 1;
+      if (enemy) writePiece(source, piece, playerId);
+      this.meta.lastChessAction = {
+        action: enemy ? "ATTACK" : "MOVE",
+        sourceRow: move.row,
+        sourceCol: move.col,
+        targetRow,
+        targetCol,
+        pieceType: piece.type,
+        at: Date.now(),
+      };
+      this.updateChessPassives();
+      return { correct: true, points: enemy ? (enemy.hp <= 0 ? 45 : 18) : 4 };
     }
     if (action !== "SKILL") return { correct: false };
     const skill = skillFor(piece); const cost = skillCost(skill);
-    if (piece.ap < cost) return { correct: false };
-    if (skill === "PHALANX") {
-      piece.ap -= cost;
-      piece.defense *= 2;
-      piece.statusEffects = [...new Set([...piece.statusEffects, "PHALANX"])];
+    if (piece.ap < cost || piece.currentCooldown > 0) return { correct: false };
+    if (skill === "FORCED_MARCH") {
+      const direction = piece.team === "BLUE" ? 1 : -1;
+      if (targetRow !== move.row + direction || targetCol !== move.col || target.value !== null) return { correct: false };
+      writePiece(target, piece, playerId);
+      clearPiece(source);
+      const support = this.board[move.row - direction]?.[move.col];
+      const ally = support ? pieceFromCell(support) : null;
+      if (support && ally && ally.team === piece.team && ["KNIGHT", "BISHOP"].includes(ally.type)) {
+        ally.canActThisTurn = true;
+        writePiece(support, ally, support.ownerId);
+      }
+    } else if (skill === "AMBUSH") {
+      const valid = attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
+      if (!valid) return { correct: false };
+      piece.statusEffects = [...new Set([...piece.statusEffects, "Ambushing"])];
+      piece.ambushTarget = { row: targetRow, col: targetCol };
       writePiece(source, piece, playerId);
-      return { correct: true, points: 8 };
-    }
-    if (skill === "PIERCING_RAY" && targetRow === move.row && targetCol === move.col) {
-      targetRow += piece.team === "BLUE" ? 1 : -1;
-    }
-    const validTarget = skill === "EARTHQUAKE" && targetRow === move.row && targetCol === move.col
-      || attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
-    if (!validTarget) return { correct: false };
-    piece.ap -= cost; writePiece(source, piece, playerId);
-    if (skill === "EARTHQUAKE") {
-      for (let row = targetRow - 1; row <= targetRow + 1; row += 1) for (let col = targetCol - 1; col <= targetCol + 1; col += 1) {
+    } else if (skill === "PIERCING_RAY") {
+      const dy = Math.sign(targetRow - move.row); const dx = Math.sign(targetCol - move.col);
+      if (Math.abs(targetRow - move.row) !== Math.abs(targetCol - move.col) || Math.abs(targetRow - move.row) > 3) {
+        return { correct: false };
+      }
+      for (let row = move.row + dy, col = move.col + dx, distance = 1;
+        distance <= 3 && row >= 0 && row < 8 && col >= 0 && col < 8;
+        row += dy, col += dx, distance += 1) {
+        const victimCell = this.board[row]![col]!;
+        const victim = pieceFromCell(victimCell);
+        if (!victim) continue;
+        if (victim.team !== piece.team && !victim.statusEffects.some((effect) => effect.toUpperCase() === "INVULNERABLE")) {
+          if (victim.type === "KNIGHT" && victim.hasEvasion) {
+            victim.hasEvasion = false;
+            writePiece(victimCell, victim, victimCell.ownerId);
+          } else clearPiece(victimCell);
+        }
+        break;
+      }
+      writePiece(source, piece, playerId);
+    } else if (skill === "SHOCKWAVE") {
+      for (let row = move.row - 1; row <= move.row + 1; row += 1) for (let col = move.col - 1; col <= move.col + 1; col += 1) {
         const victimCell = this.board[row]?.[col]; const victim = victimCell ? pieceFromCell(victimCell) : null;
         if (!victimCell || !victim || victim.team === piece.team) continue;
-        victim.hp -= calculateDamage(40, victim.defense, .5);
-        if (victim.hp <= 0) clearPiece(victimCell); else writePiece(victimCell, victim, victimCell.ownerId);
+        victim.statusEffects = [...new Set([...victim.statusEffects, "Stunned"])];
+        writePiece(victimCell, victim, victimCell.ownerId);
       }
+      writePiece(source, piece, playerId);
+    } else if (skill === "TACTICAL_TRANSPOSITION") {
+      const ally = pieceFromCell(target);
+      if (!ally || ally.team !== piece.team || ally.type === "KING") return { correct: false };
+      const owner = target.ownerId;
+      writePiece(source, ally, owner);
+      writePiece(target, piece, playerId);
     } else {
-      const dy = Math.sign(targetRow - move.row); const dx = Math.sign(targetCol - move.col);
-      let hit = 0;
-      for (let row = move.row + dy, col = move.col + dx;
-        row >= 0 && row < 8 && col >= 0 && col < 8;
-        row += dy, col += dx) {
-        const victimCell = this.board[row]![col]!; const victim = pieceFromCell(victimCell);
-        if (!victim || victim.team === piece.team) continue;
-        victim.hp -= calculateDamage(58, victim.defense, hit++ === 0 ? 1 : .55);
-        if (victim.hp <= 0) clearPiece(victimCell); else writePiece(victimCell, victim, victimCell.ownerId);
-        if (hit >= 2) break;
-      }
+      if (targetRow !== move.row || targetCol !== move.col) return { correct: false };
+      piece.statusEffects = [...new Set([...piece.statusEffects, "Invulnerable"])];
+      writePiece(source, piece, playerId);
     }
+    piece.ap -= cost;
+    piece.currentCooldown = cooldownFor(skill) + 1;
+    const currentCell = this.board.flat().find((cell) => cell.meta.pieceId === piece.id);
+    if (currentCell) writePiece(currentCell, piece, currentCell.ownerId);
+    this.meta.lastChessAction = {
+      action: "SKILL",
+      skill,
+      sourceRow: move.row,
+      sourceCol: move.col,
+      targetRow,
+      targetCol,
+      pieceType: piece.type,
+      at: Date.now(),
+    };
+    this.updateChessPassives();
     return { correct: true, points: 32 };
+  }
+
+  private chessPathClear(origin: { row: number; col: number }, target: { row: number; col: number }, type: Piece["type"]): boolean {
+    if (["PAWN", "KNIGHT", "KING"].includes(type)) return true;
+    const dy = Math.sign(target.row - origin.row); const dx = Math.sign(target.col - origin.col);
+    for (let row = origin.row + dy, col = origin.col + dx; row !== target.row || col !== target.col; row += dy, col += dx) {
+      if (this.board[row]?.[col]?.value != null) return false;
+    }
+    return true;
+  }
+
+  private updateChessPassives(): void {
+    this.board.flat().forEach((cell) => {
+      const piece = pieceFromCell(cell);
+      if (!piece) return;
+      piece.isShielded = false;
+      writePiece(cell, piece, cell.ownerId);
+    });
+    this.board.forEach((row, rowIndex) => row.forEach((cell, colIndex) => {
+      const piece = pieceFromCell(cell);
+      if (!piece || piece.type !== "PAWN") return;
+      const shielded = [colIndex - 1, colIndex + 1].some((col) => {
+        const ally = this.board[rowIndex]?.[col] ? pieceFromCell(this.board[rowIndex]![col]!) : null;
+        return ally?.team === piece.team && ally.type === "PAWN";
+      });
+      if (shielded) {
+        piece.isShielded = true;
+        writePiece(cell, piece, cell.ownerId);
+      }
+    }));
   }
 
   private arrowShapeMembers(shapeId: string): Array<{ row: number; col: number; cell: GenericCell }> {
@@ -852,8 +985,11 @@ export class GenericPuzzleEngine {
       return teams.size <= 1;
     }
     if (this.gameType === "CHESS_TACTICS") {
-      const teams = new Set(this.board.flat().map((cell) => cell.meta.team).filter(Boolean));
-      return teams.size <= 1;
+      const kings = new Set(this.board.flat()
+        .filter((cell) => cell.meta.type === "KING")
+        .map((cell) => cell.meta.team)
+        .filter(Boolean));
+      return this.completed || kings.size <= 1;
     }
     if (this.gameType === "DOTS_AND_BOXES") return this.board.every((row) => row.every((cell) => cell.ownerId !== null));
     if (this.gameType === "NURIKABE") {
@@ -1132,19 +1268,40 @@ export class GenericPuzzleEngine {
   private advanceStrictTurn(): void {
     if (!this.turnOrder.length) return;
     const index = Math.max(0, this.turnOrder.indexOf(this.activePlayerId ?? ""));
+    const previousTeam = this.gameType === "CHESS_TACTICS" && this.activePlayerId
+      ? this.activeTeam(this.activePlayerId)
+      : null;
     this.activePlayerId = this.turnOrder[(index + 1) % this.turnOrder.length]!;
     if (this.gameType === "CHESS_TACTICS") {
       const nextTeam = this.activeTeam(this.activePlayerId);
+      // Fin de turno: enfría habilidades del equipo que actuó y consume Stun.
+      this.board.flat().forEach((cell) => {
+        const piece = pieceFromCell(cell);
+        if (!piece || piece.team !== previousTeam) return;
+        piece.currentCooldown = Math.max(0, piece.currentCooldown - 1);
+        piece.statusEffects = piece.statusEffects.filter((effect) => effect.toUpperCase() !== "STUNNED");
+        writePiece(cell, piece, cell.ownerId);
+      });
+      // Aura de liderazgo: la reina acelera un turno adicional a aliados cercanos.
+      this.board.forEach((row, rowIndex) => row.forEach((cell, colIndex) => {
+        const queen = pieceFromCell(cell);
+        if (!queen || queen.team !== previousTeam || queen.type !== "QUEEN") return;
+        for (let y = rowIndex - 1; y <= rowIndex + 1; y += 1) for (let x = colIndex - 1; x <= colIndex + 1; x += 1) {
+          const allyCell = this.board[y]?.[x]; const ally = allyCell ? pieceFromCell(allyCell) : null;
+          if (!allyCell || !ally || ally.team !== queen.team || ally.id === queen.id) continue;
+          ally.currentCooldown = Math.max(0, ally.currentCooldown - 1);
+          writePiece(allyCell, ally, allyCell.ownerId);
+        }
+      }));
       this.board.flat().forEach((cell) => {
         const piece = pieceFromCell(cell);
         if (!piece || piece.team !== nextTeam) return;
         piece.ap = piece.maxAp;
-        if (piece.statusEffects.includes("PHALANX")) {
-          piece.defense = Math.max(1, Math.round(piece.defense / 2));
-          piece.statusEffects = piece.statusEffects.filter((effect) => effect !== "PHALANX");
-        }
+        piece.canActThisTurn = false;
+        piece.statusEffects = piece.statusEffects.filter((effect) => effect.toUpperCase() !== "INVULNERABLE");
         writePiece(cell, piece, cell.ownerId);
       });
+      this.updateChessPassives();
     }
   }
 
@@ -1340,10 +1497,11 @@ function normalizeValue(value: unknown, expected: CellValue): CellValue {
 function pieceFromCell(cell: GenericCell): Piece | null {
   const type = String(cell.meta.type ?? "");
   const team = String(cell.meta.team ?? "");
-  if (!["PAWN", "KNIGHT", "ROOK"].includes(type) || !["BLUE", "RED"].includes(team)) return null;
+  if (!["PAWN", "KNIGHT", "BISHOP", "ROOK", "QUEEN", "KING"].includes(type) || !["BLUE", "RED"].includes(team)) return null;
   return {
     id: String(cell.meta.pieceId ?? ""),
     team: team as Piece["team"],
+    owner: team as Piece["team"],
     type: type as Piece["type"],
     hp: Number(cell.meta.hp ?? 0),
     maxHp: Number(cell.meta.maxHp ?? 1),
@@ -1351,6 +1509,16 @@ function pieceFromCell(cell: GenericCell): Piece | null {
     maxAp: Number(cell.meta.maxAp ?? 0),
     defense: Number(cell.meta.defense ?? 0),
     statusEffects: Array.isArray(cell.meta.statusEffects) ? cell.meta.statusEffects.map(String) : [],
+    currentCooldown: Number(cell.meta.currentCooldown ?? 0),
+    isShielded: cell.meta.isShielded === true,
+    hasEvasion: cell.meta.hasEvasion !== false,
+    canActThisTurn: cell.meta.canActThisTurn === true,
+    ambushTarget: typeof cell.meta.ambushTarget === "string" && cell.meta.ambushTarget.includes(":")
+      ? (() => {
+        const [row, col] = cell.meta.ambushTarget.split(":").map(Number);
+        return Number.isInteger(row) && Number.isInteger(col) ? { row: row!, col: col! } : null;
+      })()
+      : null,
   };
 }
 
@@ -1361,6 +1529,7 @@ function writePiece(cell: GenericCell, piece: Piece, ownerId: string | null): vo
   cell.meta = {
     pieceId: piece.id,
     team: piece.team,
+    owner: piece.owner,
     type: piece.type,
     hp: piece.hp,
     maxHp: piece.maxHp,
@@ -1368,6 +1537,11 @@ function writePiece(cell: GenericCell, piece: Piece, ownerId: string | null): vo
     maxAp: piece.maxAp,
     defense: piece.defense,
     statusEffects: piece.statusEffects,
+    currentCooldown: piece.currentCooldown,
+    isShielded: piece.isShielded,
+    hasEvasion: piece.hasEvasion,
+    canActThisTurn: piece.canActThisTurn,
+    ambushTarget: piece.ambushTarget ? `${piece.ambushTarget.row}:${piece.ambushTarget.col}` : null,
   };
 }
 

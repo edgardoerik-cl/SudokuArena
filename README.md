@@ -3,7 +3,8 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `8.0.0` incorpora carruseles alfabéticos con portadas locales, favoritos persistentes con DataStore
+La versión `8.1.0` incorpora animaciones dedicadas para Flechas en Fuga, Chess Tactics RPG,
+Pac-Man Arena y El Ahorcado, además de carruseles alfabéticos con portadas locales y favoritos persistentes con DataStore
 y una interfaz adaptable que cambia en tiempo real
 entre orientación vertical y horizontal, chat global, Piedra/Papel/Tijeras para
 decidir el primer turno y veintiún juegos:
@@ -65,7 +66,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.0.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.1.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

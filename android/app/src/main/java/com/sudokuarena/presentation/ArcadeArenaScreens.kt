@@ -1,10 +1,17 @@
 package com.sudokuarena.presentation
 
 import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,13 +30,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -37,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalDensity
 import com.sudokuarena.domain.PacmanActorState
 import kotlin.math.roundToInt
+import kotlin.math.abs
+import kotlin.math.sin
 
 @Composable
 fun TetrisArenaScreen(
@@ -106,10 +122,68 @@ fun PacmanArenaScreen(
 ) {
     val arena = state.pacmanState
     val me = arena?.players?.firstOrNull { it.id == state.playerId } ?: arena?.players?.firstOrNull()
-    Column(Modifier.fillMaxSize().background(Color.Black).padding(8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+    val motionPhase by rememberInfiniteTransition(label = "pacmanMotion").animateFloat(
+        0f,
+        1f,
+        infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Restart),
+        label = "chomp",
+    )
+    val hitShake = remember(me?.id) { androidx.compose.animation.core.Animatable(0f) }
+    val scorePulse = remember(me?.id) { androidx.compose.animation.core.Animatable(0f) }
+    var previousLives by remember(me?.id) { mutableIntStateOf(me?.lives ?: 3) }
+    var previousScore by remember(me?.id) { mutableIntStateOf(me?.score ?: 0) }
+    LaunchedEffect(me?.lives) {
+        val lives = me?.lives ?: return@LaunchedEffect
+        if (lives < previousLives) {
+            hitShake.snapTo(1f)
+            hitShake.animateTo(0f, tween(620))
+        }
+        previousLives = lives
+    }
+    LaunchedEffect(me?.score) {
+        val score = me?.score ?: return@LaunchedEffect
+        if (score > previousScore) {
+            scorePulse.snapTo(1f)
+            scorePulse.animateTo(0f, tween(430))
+        }
+        previousScore = score
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .padding(8.dp)
+            .graphicsLayer {
+                translationX = sin((1f - hitShake.value) * Math.PI.toFloat() * 8f) * hitShake.value * 18f
+                scaleX = 1f + scorePulse.value * .012f
+                scaleY = scaleX
+            },
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
         ArcadeTopBar("Pac-Man Arena", "♥ ${me?.lives ?: 3} · ${me?.score ?: 0} pts", onPause, onExit)
         BoxWithConstraints(
-            Modifier.weight(1f).fillMaxWidth().background(Color(0xFF02030F), RoundedCornerShape(16.dp)),
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color(0xFF02030F), RoundedCornerShape(16.dp))
+                .pointerInput(arena?.tick) {
+                    var totalDrag = Offset.Zero
+                    detectDragGestures(
+                        onDragStart = { totalDrag = Offset.Zero },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            totalDrag += amount
+                        },
+                        onDragEnd = {
+                            if (totalDrag.getDistance() < 24f) return@detectDragGestures
+                            onInput(
+                                if (abs(totalDrag.x) > abs(totalDrag.y)) {
+                                    if (totalDrag.x > 0f) "RIGHT" else "LEFT"
+                                } else if (totalDrag.y > 0f) "DOWN" else "UP",
+                            )
+                        },
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) {
             val map = arena?.tilemap.orEmpty()
@@ -129,14 +203,18 @@ fun PacmanArenaScreen(
                         } else {
                             val key = "$col:$row"
                             when {
-                                key in (arena?.powerPills ?: emptySet()) -> drawCircle(Color.White, px * .18f, Offset((col + .5f) * px, (row + .5f) * py))
+                                key in (arena?.powerPills ?: emptySet()) -> {
+                                    val radius = px * (.13f + abs(sin(motionPhase * Math.PI.toFloat() * 2f)) * .10f)
+                                    drawCircle(Color.White.copy(alpha = .42f), radius * 1.8f, Offset((col + .5f) * px, (row + .5f) * py))
+                                    drawCircle(Color.White, radius, Offset((col + .5f) * px, (row + .5f) * py))
+                                }
                                 key in (arena?.pills ?: emptySet()) -> drawCircle(Color(0xFFFFE082), px * .07f, Offset((col + .5f) * px, (row + .5f) * py))
                             }
                         }
                     } }
                 }
-                arena?.players?.forEach { actor -> AnimatedPacActor(actor, tilePx, true) }
-                arena?.ghosts?.forEach { actor -> AnimatedPacActor(actor, tilePx, false) }
+                arena?.players?.forEach { actor -> AnimatedPacActor(actor, tilePx, tile, true, motionPhase) }
+                arena?.ghosts?.forEach { actor -> AnimatedPacActor(actor, tilePx, tile, false, motionPhase) }
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -151,20 +229,72 @@ fun PacmanArenaScreen(
 }
 
 @Composable
-private fun AnimatedPacActor(actor: PacmanActorState, tilePx: Float, pacman: Boolean) {
+private fun AnimatedPacActor(
+    actor: PacmanActorState,
+    tilePx: Float,
+    tileDp: androidx.compose.ui.unit.Dp,
+    pacman: Boolean,
+    phase: Float,
+) {
     val target = Offset(actor.x * tilePx, actor.y * tilePx)
     val animated by animateOffsetAsState(target, spring(stiffness = 520f, dampingRatio = .82f), label = "actor-${actor.id}")
     val color = if (pacman) parseArcadeColor(actor.colorHex, Color.Yellow)
     else when (actor.mode) {
         "FRIGHTENED" -> Color(0xFF2962FF)
+        "EATEN" -> Color.White
         else -> listOf(Color.Red, Color.Magenta, Color.Cyan, Color(0xFFFF8F00))[kotlin.math.abs(actor.id.hashCode()) % 4]
     }
-    Box(
+    Canvas(
         Modifier
-            .size((tilePx * .82f).dp)
+            .size(tileDp * .82f)
             .offset { IntOffset((animated.x + tilePx * .09f).roundToInt(), (animated.y + tilePx * .09f).roundToInt()) }
-            .background(color, if (pacman) CircleShape else RoundedCornerShape(45)),
-    )
+            .graphicsLayer {
+                val bounce = sin((phase + (kotlin.math.abs(actor.id.hashCode()) % 5) * .11f) * Math.PI.toFloat() * 2f)
+                translationY = bounce * if (pacman) 1.5f else 3f
+                scaleX = if (actor.mode == "FRIGHTENED") .92f + abs(bounce) * .08f else 1f
+                scaleY = scaleX
+            },
+    ) {
+        if (pacman) {
+            val mouth = 8f + abs(sin(phase * Math.PI.toFloat() * 2f)) * 31f
+            val facing = when (actor.direction) {
+                "DOWN" -> 90f
+                "LEFT" -> 180f
+                "UP" -> 270f
+                else -> 0f
+            }
+            drawArc(color, facing + mouth, 360f - mouth * 2f, true)
+            drawCircle(Color.Black, size.minDimension * .045f, Offset(size.width * .57f, size.height * .27f))
+        } else {
+            val bodyTop = size.height * .08f
+            val bodyBottom = size.height * .84f
+            val path = Path().apply {
+                moveTo(size.width * .08f, bodyBottom)
+                lineTo(size.width * .08f, size.height * .45f)
+                cubicTo(size.width * .08f, bodyTop, size.width * .92f, bodyTop, size.width * .92f, size.height * .45f)
+                lineTo(size.width * .92f, bodyBottom)
+                val wave = size.width / 4f
+                for (index in 4 downTo 0) {
+                    val x = index * wave
+                    val y = if ((index + (phase * 4).toInt()) % 2 == 0) bodyBottom else size.height * .96f
+                    lineTo(x, y)
+                }
+                close()
+            }
+            if (actor.mode != "EATEN") drawPath(path, color)
+            val eyeY = size.height * .43f
+            for (eyeX in listOf(size.width * .36f, size.width * .66f)) {
+                drawCircle(Color.White, size.minDimension * .12f, Offset(eyeX, eyeY))
+                val look = when (actor.direction) {
+                    "LEFT" -> Offset(-size.width * .035f, 0f)
+                    "RIGHT" -> Offset(size.width * .035f, 0f)
+                    "UP" -> Offset(0f, -size.height * .035f)
+                    else -> Offset(0f, size.height * .035f)
+                }
+                drawCircle(Color(0xFF0D47A1), size.minDimension * .055f, Offset(eyeX, eyeY) + look)
+            }
+        }
+    }
 }
 
 @Composable

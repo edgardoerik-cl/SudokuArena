@@ -212,6 +212,12 @@ describe("motor genérico de puzzles", () => {
     const correct = engine.createBotMove(1, "p1")!;
     assert.equal(engine.makeMove("p1", correct, players).accepted, true);
     assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p1");
+    const invalid = engine.makeMove("p1", { requestId: "invalid-format", row: 0, col: 0, val: "AB" }, players);
+    assert.equal(invalid.code, "INVALID_MOVE");
+    assert.equal(invalid.penaltyMs, 0);
+    const repeated = engine.makeMove("p1", { ...correct, requestId: "repeated-letter" }, players);
+    assert.equal(repeated.code, "INVALID_MOVE");
+    assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p1");
     for (const letter of "ZXQWVUTSRPONMLKJIHGFEDCBA") {
       const result = engine.makeMove("p1", { requestId: `miss-${letter}`, row: 0, col: 0, val: letter }, players);
       if (result.accepted && result.points === 0) break;
@@ -227,12 +233,22 @@ describe("motor genérico de puzzles", () => {
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
   });
 
-  it("Chess Tactics calcula AP, rangos y daño mitigado", () => {
-    const knight: Piece = { id: "n", team: "BLUE", type: "KNIGHT", hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12, statusEffects: [] };
-    assert.equal(skillFor(knight), "EARTHQUAKE");
-    assert.ok(movementRange(knight, { row: 4, col: 4 }).length > 8);
+  it("Chess Tactics configura las seis clases, cooldowns y rangos clásicos", () => {
+    const knight: Piece = {
+      id: "n", team: "BLUE", owner: "BLUE", type: "KNIGHT",
+      hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12,
+      statusEffects: [], currentCooldown: 0, isShielded: false,
+      hasEvasion: true, canActThisTurn: false, ambushTarget: null,
+    };
+    assert.equal(skillFor(knight), "AMBUSH");
+    assert.equal(movementRange(knight, { row: 4, col: 4 }).length, 8);
     assert.equal(attackRange(knight, { row: 4, col: 4 }).length, 8);
     assert.ok(calculateDamage(40, 20) < calculateDamage(40, 0));
+    const blueprint = createPuzzleBlueprint("CHESS_TACTICS", { seed: "six-classes" });
+    assert.deepEqual(
+      new Set(blueprint.board.flat().map((cell) => cell.meta.type).filter(Boolean)),
+      new Set(["PAWN", "KNIGHT", "BISHOP", "ROOK", "QUEEN", "KING"]),
+    );
   });
 
   it("Buscaminas aplica cinco segundos al pisar una mina", () => {

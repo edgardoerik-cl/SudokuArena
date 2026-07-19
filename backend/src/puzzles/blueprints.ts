@@ -65,26 +65,43 @@ function checkers(difficulty: PuzzleDifficulty): PuzzleBlueprint {
 function chessTactics(difficulty: PuzzleDifficulty): PuzzleBlueprint {
   const board = matrix(8, 8, () => cell(null, false));
   let id = 0;
-  const add = (row: number, col: number, team: "BLUE" | "RED", type: "PAWN" | "KNIGHT" | "ROOK") => {
-    const stats = type === "PAWN"
-      ? { hp: 70, maxHp: 70, ap: 3, maxAp: 3, defense: 8 }
-      : type === "KNIGHT"
-        ? { hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12 }
-        : { hp: 135, maxHp: 135, ap: 3, maxAp: 3, defense: 18 };
+  const add = (
+    row: number,
+    col: number,
+    team: "BLUE" | "RED",
+    type: "PAWN" | "KNIGHT" | "BISHOP" | "ROOK" | "QUEEN" | "KING",
+  ) => {
+    const stats = {
+      PAWN: { hp: 70, maxHp: 70, ap: 3, maxAp: 3, defense: 8 },
+      KNIGHT: { hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12 },
+      BISHOP: { hp: 85, maxHp: 85, ap: 4, maxAp: 4, defense: 9 },
+      ROOK: { hp: 135, maxHp: 135, ap: 3, maxAp: 3, defense: 18 },
+      QUEEN: { hp: 110, maxHp: 110, ap: 5, maxAp: 5, defense: 11 },
+      KING: { hp: 160, maxHp: 160, ap: 2, maxAp: 2, defense: 20 },
+    }[type];
     board[row]![col] = cell(type, true, {
       pieceId: `${team}-${type}-${++id}`,
       team,
+      owner: team,
       type,
       ...stats,
       statusEffects: [],
+      currentCooldown: 0,
+      isShielded: false,
+      hasEvasion: type === "KNIGHT",
+      canActThisTurn: false,
+      ambushTarget: null,
     });
   };
-  for (const col of [1, 3, 4, 6]) {
+  for (const col of [0, 1, 2, 3, 4, 5, 6, 7]) {
     add(1, col, "BLUE", "PAWN");
     add(6, col, "RED", "PAWN");
   }
-  add(0, 0, "BLUE", "ROOK"); add(0, 2, "BLUE", "KNIGHT");
-  add(7, 7, "RED", "ROOK"); add(7, 5, "RED", "KNIGHT");
+  const backRank = ["ROOK", "KNIGHT", "BISHOP", "QUEEN", "KING", "BISHOP", "KNIGHT", "ROOK"] as const;
+  backRank.forEach((type, col) => {
+    add(0, col, "BLUE", type);
+    add(7, col, "RED", type);
+  });
   return {
     board,
     answers: matrix<CellValue>(8, 8, () => null),
@@ -92,7 +109,7 @@ function chessTactics(difficulty: PuzzleDifficulty): PuzzleBlueprint {
       turnBased: true,
       blueMoves: "movimiento",
       redMoves: "ataque",
-      instructions: "Gasta AP para mover y atacar. Azul indica movimiento; rojo, alcance de combate.",
+      instructions: "Una acción por turno. Mantén pulsada una pieza para usar su habilidad cuando CD llegue a 0.",
       difficulty,
     },
   };

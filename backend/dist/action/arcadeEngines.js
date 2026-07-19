@@ -179,7 +179,9 @@ export class PacmanArenaEngine {
         const player = this.players.get(playerId);
         if (!player || !["UP", "RIGHT", "DOWN", "LEFT", "STOP"].includes(direction))
             return false;
-        player.direction = direction;
+        // Buffer de giro: conserva la dirección solicitada hasta alcanzar una
+        // intersección donde sea válida, sin frenar el movimiento actual.
+        player.queuedDirection = direction;
         return true;
     }
     tick(now = Date.now()) {
@@ -187,6 +189,10 @@ export class PacmanArenaEngine {
             return;
         this.tickNumber += 1;
         for (const player of this.players.values()) {
+            if (player.queuedDirection && this.canMove(player, player.queuedDirection)) {
+                player.direction = player.queuedDirection;
+                delete player.queuedDirection;
+            }
             this.moveActor(player, player.direction);
             const key = `${player.x}:${player.y}`;
             if (this.pills.delete(key))
@@ -197,12 +203,22 @@ export class PacmanArenaEngine {
             }
         }
         this.ghosts.forEach((ghost, index) => {
-            ghost.mode = now < this.frightenedUntil ? "FRIGHTENED" : Math.floor(now / 8_000) % 2 === 0 ? "CHASE" : "SCATTER";
-            const target = ghost.mode === "SCATTER"
-                ? { x: ghost.homeX, y: ghost.homeY }
-                : this.closestPlayer(ghost) ?? { x: 7, y: 7 };
+            ghost.mode = (ghost.eatenUntil ?? 0) > now
+                ? "EATEN"
+                : now < this.frightenedUntil
+                    ? "FRIGHTENED"
+                    : Math.floor(now / 8_000) % 2 === 0 ? "CHASE" : "SCATTER";
+            if (ghost.mode === "FRIGHTENED" && this.tickNumber % 2 === 1)
+                return;
+            const target = ghost.mode === "EATEN"
+                ? { x: 7, y: 7 }
+                : ghost.mode === "SCATTER"
+                    ? { x: ghost.homeX, y: ghost.homeY }
+                    : this.ghostTarget(ghost, index);
             ghost.direction = this.bestGhostDirection(ghost, target, ghost.mode === "FRIGHTENED", index);
             this.moveActor(ghost, ghost.direction);
+            if (ghost.mode === "EATEN" && ghost.x === 7 && ghost.y === 7)
+                ghost.eatenUntil = 0;
         });
         for (const player of this.players.values())
             for (const ghost of this.ghosts) {
@@ -210,13 +226,17 @@ export class PacmanArenaEngine {
                     continue;
                 if (ghost.mode === "FRIGHTENED") {
                     player.score = (player.score ?? 0) + 200;
-                    ghost.x = 7;
-                    ghost.y = 7;
+                    ghost.mode = "EATEN";
+                    ghost.eatenUntil = now + 3_000;
                 }
                 else {
+                    if (ghost.mode === "EATEN")
+                        continue;
                     player.lives = Math.max(0, (player.lives ?? 0) - 1);
                     player.x = 7;
                     player.y = 11;
+                    player.direction = "STOP";
+                    delete player.queuedDirection;
                 }
             }
         this.completed = this.pills.size === 0 || [...this.players.values()].every((player) => (player.lives ?? 0) <= 0);
@@ -231,16 +251,50 @@ export class PacmanArenaEngine {
     moveActor(actor, direction) {
         const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
             : direction === "DOWN" ? [1, 0] : direction === "LEFT" ? [0, -1] : [0, 0];
-        const x = actor.x + dx;
+        let x = actor.x + dx;
         const y = actor.y + dy;
+        // Túnel horizontal clásico en la fila central.
+        if (actor.y === 7 && x < 0)
+            x = PACMAN_MAP[0].length - 1;
+        if (actor.y === 7 && x >= PACMAN_MAP[0].length)
+            x = 0;
         if (PACMAN_MAP[y]?.[x] && PACMAN_MAP[y][x] !== 0) {
             actor.x = x;
             actor.y = y;
         }
     }
+    canMove(actor, direction) {
+        const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
+            : direction === "DOWN" ? [1, 0] : direction === "LEFT" ? [0, -1] : [0, 0];
+        let x = actor.x + dx;
+        const y = actor.y + dy;
+        if (actor.y === 7 && (x < 0 || x >= PACMAN_MAP[0].length))
+            return true;
+        return Boolean(PACMAN_MAP[y]?.[x] && PACMAN_MAP[y][x] !== 0);
+    }
     closestPlayer(actor) {
         return [...this.players.values()].filter((player) => (player.lives ?? 0) > 0)
             .sort((a, b) => manhattan(actor, a) - manhattan(actor, b))[0] ?? null;
+    }
+    ghostTarget(ghost, index) {
+        const player = this.closestPlayer(ghost);
+        if (!player)
+            return { x: 7, y: 7 };
+        const vector = player.direction === "UP" ? { x: 0, y: -1 }
+            : player.direction === "RIGHT" ? { x: 1, y: 0 }
+                : player.direction === "DOWN" ? { x: 0, y: 1 }
+                    : player.direction === "LEFT" ? { x: -1, y: 0 }
+                        : { x: 0, y: 0 };
+        if (index === 0)
+            return { x: player.x, y: player.y }; // Blinky: directo.
+        if (index === 1)
+            return { x: player.x + vector.x * 4, y: player.y + vector.y * 4 }; // Pinky: adelantado.
+        if (index === 2) { // Inky: flanquea usando a Blinky como vector.
+            const blinky = this.ghosts[0];
+            const pivot = { x: player.x + vector.x * 2, y: player.y + vector.y * 2 };
+            return { x: pivot.x * 2 - blinky.x, y: pivot.y * 2 - blinky.y };
+        }
+        return manhattan(ghost, player) > 5 ? { x: player.x, y: player.y } : { x: ghost.homeX, y: ghost.homeY };
     }
     bestGhostDirection(ghost, target, flee, salt) {
         const options = ["UP", "RIGHT", "DOWN", "LEFT"];

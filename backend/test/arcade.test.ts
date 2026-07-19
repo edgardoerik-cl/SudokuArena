@@ -30,6 +30,7 @@ describe("Pac-Man Arena", () => {
     const state = engine.snapshot();
     assert.equal(state.tilemap.length, 15);
     assert.equal(state.ghosts.length, 4);
-    assert.ok(state.ghosts.every((ghost: { mode: string }) => ["CHASE", "SCATTER", "FRIGHTENED"].includes(ghost.mode)));
+    assert.ok(state.ghosts.every((ghost: { mode: string }) => ["CHASE", "SCATTER", "FRIGHTENED", "EATEN"].includes(ghost.mode)));
+    assert.ok(["LEFT", "UP", "DOWN", "RIGHT", "STOP"].includes(state.players[0].direction));
   });
 });

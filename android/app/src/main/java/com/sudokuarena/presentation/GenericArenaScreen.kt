@@ -4,8 +4,10 @@ import android.graphics.Color as AndroidColor
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -27,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +70,8 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlinx.coroutines.launch
 
 @Composable
 fun GenericArenaScreen(
@@ -128,7 +134,10 @@ fun GenericArenaScreen(
                     if (generic == null) {
                         Text("Preparando matriz compartida…")
                     } else {
-                        val boardRatio = generic.columns.toFloat() / generic.rows.toFloat()
+                        val boardRatio = when (generic.gameType) {
+                            GameType.HANGMAN -> 1.65f
+                            else -> generic.columns.toFloat() / generic.rows.toFloat()
+                        }
                         val boardWidth = minOf(maxWidth, maxHeight * boardRatio)
                         val boardHeight = boardWidth / boardRatio
                         Box(Modifier.size(boardWidth, boardHeight), contentAlignment = Alignment.Center) {
@@ -229,6 +238,297 @@ private fun ArrowRaceProgress(state: ArenaUiState) {
 }
 
 @Composable
+private fun AnimatedHangmanBoard(
+    state: GenericBoardState,
+    localPlayerId: String?,
+    modifier: Modifier = Modifier,
+) {
+    val word = state.board.firstOrNull().orEmpty()
+    val signature = word.joinToString("") { it.value?.toString() ?: "_" }
+    val reveal = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(signature) {
+        reveal.snapTo(.25f)
+        reveal.animateTo(1f, spring(dampingRatio = .58f, stiffness = 420f))
+    }
+    val errors = state.meta["errors"] as? Map<*, *>
+    val ownErrors = (errors?.get(localPlayerId) as? Number)?.toInt()
+        ?: (state.meta["mistakesMade"] as? Number)?.toInt()
+        ?: 0
+    val animatedErrors by animateFloatAsState(
+        targetValue = ownErrors.coerceIn(0, 6).toFloat(),
+        animationSpec = tween(520),
+        label = "hangmanBody",
+    )
+    val pulse by rememberInfiniteTransition(label = "hangmanRope").animateFloat(
+        initialValue = .72f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(780), RepeatMode.Reverse),
+        label = "ropePulse",
+    )
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = Color(0xFFF8FAFF),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF7C3AED).copy(alpha = .55f)),
+        shadowElevation = 10.dp,
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize().padding(12.dp)) {
+            val landscape = maxWidth > maxHeight * 1.25f
+            val content: @Composable (Modifier, Modifier) -> Unit = { gallowsModifier, wordModifier ->
+                HangmanGallows(animatedErrors, pulse, gallowsModifier)
+                Column(
+                    wordModifier,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        "VIDAS ${6 - ownErrors.coerceIn(0, 6)}",
+                        color = if (ownErrors >= 5) Color(0xFFD50000) else Color(0xFF102A56),
+                        fontWeight = FontWeight.Black,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                    ) {
+                        word.forEachIndexed { index, cell ->
+                            val visible = cell.value != null
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .width(34.dp)
+                                    .height(48.dp)
+                                    .graphicsLayer {
+                                        val delay = (index % 4) * .06f
+                                        val progress = ((reveal.value - delay) / (1f - delay)).coerceIn(0f, 1f)
+                                        scaleX = if (visible) progress else 1f
+                                        scaleY = .88f + progress * .12f
+                                        rotationY = if (visible) (1f - progress) * 90f else 0f
+                                    },
+                                shape = RoundedCornerShape(9.dp),
+                                color = if (visible) Color(0xFFEDE9FE) else Color.White,
+                                border = androidx.compose.foundation.BorderStroke(
+                                    2.dp,
+                                    if (visible) Color(0xFF7C3AED) else Color(0xFFB8C7E8),
+                                ),
+                            ) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        cell.value?.toString() ?: "_",
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color(0xFF102A56),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    val used = (state.meta["guessedLetters"] as? List<*>)
+                        ?.joinToString("  ") { it.toString() }.orEmpty()
+                    if (used.isNotBlank()) {
+                        Text("USADAS · $used", Modifier.padding(top = 10.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            if (landscape) {
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    content(Modifier.weight(.42f).fillMaxHeight(), Modifier.weight(.58f).fillMaxHeight())
+                }
+            } else {
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    content(Modifier.weight(.55f).fillMaxWidth(), Modifier.weight(.45f).fillMaxWidth())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HangmanGallows(errors: Float, pulse: Float, modifier: Modifier = Modifier) {
+    Canvas(modifier.padding(8.dp)) {
+        val ink = Color(0xFF102A56)
+        val danger = Color(0xFFE53935)
+        val stroke = maxOf(4f, size.minDimension * .025f)
+        val baseY = size.height * .88f
+        val poleX = size.width * .22f
+        val beamY = size.height * .10f
+        val bodyX = size.width * .64f
+        drawLine(ink, Offset(size.width * .08f, baseY), Offset(size.width * .46f, baseY), stroke)
+        drawLine(ink, Offset(poleX, baseY), Offset(poleX, beamY), stroke)
+        drawLine(ink, Offset(poleX, beamY), Offset(bodyX, beamY), stroke)
+        drawLine(
+            danger.copy(alpha = pulse),
+            Offset(bodyX, beamY),
+            Offset(bodyX, size.height * .24f),
+            stroke * .75f,
+        )
+        fun segment(index: Int): Float = (errors - index).coerceIn(0f, 1f)
+        val headProgress = segment(0)
+        if (headProgress > 0f) {
+            drawCircle(
+                danger.copy(alpha = headProgress),
+                size.minDimension * .095f * headProgress,
+                Offset(bodyX, size.height * .33f),
+                style = Stroke(stroke),
+            )
+        }
+        val neck = Offset(bodyX, size.height * .425f)
+        val hip = Offset(bodyX, size.height * .64f)
+        if (segment(1) > 0f) drawLine(danger, neck, Offset(bodyX, neck.y + (hip.y - neck.y) * segment(1)), stroke)
+        if (segment(2) > 0f) drawLine(danger, Offset(bodyX, size.height * .48f), Offset(bodyX - size.width * .16f * segment(2), size.height * .57f), stroke)
+        if (segment(3) > 0f) drawLine(danger, Offset(bodyX, size.height * .48f), Offset(bodyX + size.width * .16f * segment(3), size.height * .57f), stroke)
+        if (segment(4) > 0f) drawLine(danger, hip, Offset(bodyX - size.width * .15f * segment(4), size.height * .80f), stroke)
+        if (segment(5) > 0f) drawLine(danger, hip, Offset(bodyX + size.width * .15f * segment(5), size.height * .80f), stroke)
+    }
+}
+
+@Composable
+private fun AnimatedArrowsGrid(
+    state: GenericBoardState,
+    players: Map<String, Player>,
+    enabled: Boolean,
+    localPlayerId: String?,
+    onDirectMove: (Int, Int, Any?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val textMeasurer = rememberTextMeasurer()
+    val removed = remember(state.meta, localPlayerId) {
+        ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
+            ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+    }
+    var previousRemoved by remember(state.gameId, localPlayerId) { mutableStateOf(removed) }
+    var flying by remember(state.gameId, localPlayerId) { mutableStateOf(emptySet<String>()) }
+    val flight = remember(state.gameId, localPlayerId) { androidx.compose.animation.core.Animatable(1f) }
+    var blockedKey by remember(state.gameId) { mutableStateOf<String?>(null) }
+    val shake = remember(state.gameId) { androidx.compose.animation.core.Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(removed) {
+        val newlyRemoved = removed - previousRemoved
+        previousRemoved = removed
+        if (newlyRemoved.isNotEmpty()) {
+            flying = newlyRemoved
+            flight.snapTo(0f)
+            flight.animateTo(1f, tween(560, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            flying = emptySet()
+        }
+    }
+    val colors = remember(players) { players.values.map { parseGenericColor(it.colorHex) } }
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .aspectRatio(state.columns.toFloat() / state.rows.toFloat())
+            .background(Color(0xFFF8FAFF), RoundedCornerShape(14.dp))
+            .pointerInput(state.board, removed, enabled) {
+                detectTapGestures { offset ->
+                    if (!enabled) return@detectTapGestures
+                    val row = floor(offset.y / (size.height / state.rows)).toInt().coerceIn(0, state.rows - 1)
+                    val col = floor(offset.x / (size.width / state.columns)).toInt().coerceIn(0, state.columns - 1)
+                    val key = "$row:$col"
+                    if (key in removed) return@detectTapGestures
+                    if (canArrowEscapeClient(state, row, col, removed)) {
+                        onDirectMove(row, col, "ESCAPE")
+                    } else {
+                        blockedKey = key
+                        scope.launch {
+                            shake.snapTo(0f)
+                            shake.animateTo(1f, tween(340))
+                            blockedKey = null
+                        }
+                    }
+                }
+            },
+    ) {
+        val cellWidth = size.width / state.columns
+        val cellHeight = size.height / state.rows
+        state.board.forEachIndexed { row, cells ->
+            cells.forEachIndexed { col, cell ->
+                val key = "$row:$col"
+                if (key in removed && key !in flying) return@forEachIndexed
+                val direction = cell.meta["arrow"]?.toString() ?: cell.value?.toString().orEmpty()
+                val vector = when (direction) {
+                    "UP" -> Offset(0f, -1f)
+                    "RIGHT" -> Offset(1f, 0f)
+                    "DOWN" -> Offset(0f, 1f)
+                    else -> Offset(-1f, 0f)
+                }
+                val escape = if (key in flying) flight.value else 0f
+                val distance = max(size.width, size.height) * 1.15f * escape
+                val blockedOffset = if (blockedKey == key) {
+                    sin(shake.value * Math.PI.toFloat() * 8f) * cellWidth * .10f
+                } else 0f
+                val origin = Offset(
+                    col * cellWidth + vector.x * distance + blockedOffset,
+                    row * cellHeight + vector.y * distance,
+                )
+                val shapeId = cell.meta["shapeId"]?.toString().orEmpty()
+                val color = colors.getOrNull(kotlin.math.abs(shapeId.hashCode()) % maxOf(1, colors.size))
+                    ?: listOf(Color(0xFF00A8FF), Color(0xFF7C3AED), Color(0xFFE91E63))[kotlin.math.abs(shapeId.hashCode()) % 3]
+                val alpha = 1f - escape
+                val inset = min(cellWidth, cellHeight) * .06f
+                drawRoundRect(
+                    color.copy(alpha = .22f * alpha),
+                    origin + Offset(inset, inset),
+                    Size(cellWidth - inset * 2, cellHeight - inset * 2),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(inset * 1.8f),
+                )
+                drawRoundRect(
+                    color.copy(alpha = alpha),
+                    origin + Offset(inset, inset),
+                    Size(cellWidth - inset * 2, cellHeight - inset * 2),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(inset * 1.8f),
+                    style = Stroke(maxOf(2f, inset * .55f)),
+                )
+                if (cell.meta["shapeAnchor"] == true || cell.meta["shapeId"] == null) {
+                    drawCenteredText(
+                        when (direction) { "UP" -> "↑"; "RIGHT" -> "→"; "DOWN" -> "↓"; else -> "←" },
+                        Offset(origin.x + cellWidth / 2f, origin.y + cellHeight / 2f),
+                        cellWidth * .82f,
+                        textMeasurer,
+                        color.copy(alpha = alpha),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun canArrowEscapeClient(
+    state: GenericBoardState,
+    row: Int,
+    col: Int,
+    removed: Set<String>,
+): Boolean {
+    val shapeId = state.board[row][col].meta["shapeId"]?.toString() ?: "$row:$col"
+    val members = buildList {
+        state.board.forEachIndexed { y, cells ->
+            cells.forEachIndexed { x, cell ->
+                if ((cell.meta["shapeId"]?.toString() ?: "$y:$x") == shapeId) add(CellPosition(y, x))
+            }
+        }
+    }
+    if (members.isEmpty()) return false
+    val own = members.map { "${it.row}:${it.column}" }.toSet()
+    val direction = state.board[members.first().row][members.first().column].meta["arrow"]?.toString()
+        ?: state.board[members.first().row][members.first().column].value?.toString()
+    val (dy, dx) = when (direction) {
+        "UP" -> -1 to 0
+        "RIGHT" -> 0 to 1
+        "DOWN" -> 1 to 0
+        else -> 0 to -1
+    }
+    return members.all { member ->
+        var y = member.row + dy
+        var x = member.column + dx
+        while (y in 0 until state.rows && x in 0 until state.columns) {
+            val key = "$y:$x"
+            if (key !in own && key !in removed) return@all false
+            y += dy
+            x += dx
+        }
+        true
+    }
+}
+
+@Composable
 fun GenericPuzzleGrid(
     state: GenericBoardState,
     players: Map<String, Player>,
@@ -254,6 +554,14 @@ fun GenericPuzzleGrid(
         NexusSpatialGrid(state, players, enabled, onCellSelected, onDirectMove, modifier)
         return
     }
+    if (state.gameType == GameType.HANGMAN) {
+        AnimatedHangmanBoard(state, localPlayerId, modifier)
+        return
+    }
+    if (state.gameType == GameType.ARROWS_ESCAPE) {
+        AnimatedArrowsGrid(state, players, enabled, localPlayerId, onDirectMove, modifier)
+        return
+    }
     val textMeasurer = rememberTextMeasurer()
     var dragStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var dragEnd by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
@@ -261,6 +569,7 @@ fun GenericPuzzleGrid(
     var selectedBridgeIsland by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var nexusStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     var tacticalStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
+    var tacticalSkillStart by remember(state.gameId) { mutableStateOf<CellPosition?>(null) }
     val illegalWater = remember(state.board, state.gameType) { if (state.gameType == GameType.NURIKABE) illegalWaterCells(state) else emptySet() }
     val warningAlpha by rememberInfiniteTransition(label = "nurikabeWarning").animateFloat(
         initialValue = .35f, targetValue = .9f,
@@ -271,6 +580,17 @@ fun GenericPuzzleGrid(
         animationSpec = infiniteRepeatable(tween(1_200, easing = androidx.compose.animation.core.LinearEasing)),
         label = "fallingTiles",
     )
+    val chessAction = state.meta["lastChessAction"] as? Map<*, *>
+    val chessActionProgress = remember(state.gameId) { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(state.revision, chessAction) {
+        if (state.gameType == GameType.CHESS_TACTICS && chessAction != null) {
+            chessActionProgress.snapTo(0f)
+            chessActionProgress.animateTo(
+                1f,
+                tween(620, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            )
+        }
+    }
     val gestureModifier = if (state.gameType == GameType.WORD_SEARCH) {
         Modifier.pointerInput(state.board, enabled) {
             fun position(offset: Offset): CellPosition = CellPosition(
@@ -316,14 +636,24 @@ fun GenericPuzzleGrid(
                     val row = floor(offset.y / (size.height / state.rows)).toInt().coerceIn(0, state.rows - 1)
                     val col = floor(offset.x / (size.width / state.columns)).toInt().coerceIn(0, state.columns - 1)
                     if (state.board[row][col].value != null) {
-                        onDirectMove(row, col, mapOf("action" to "SKILL", "targetRow" to row, "targetCol" to col))
-                        tacticalStart = null
+                        tacticalStart = CellPosition(row, col)
+                        tacticalSkillStart = tacticalStart
                     }
                 },
                 onTap = { offset ->
                 if (!enabled) return@detectTapGestures
                 val row = floor(offset.y / (size.height / state.rows)).toInt().coerceIn(0, state.rows - 1)
                 val col = floor(offset.x / (size.width / state.columns)).toInt().coerceIn(0, state.columns - 1)
+                tacticalSkillStart?.takeIf { state.gameType == GameType.CHESS_TACTICS }?.let { source ->
+                    onDirectMove(
+                        source.row,
+                        source.column,
+                        mapOf("action" to "SKILL", "targetRow" to row, "targetCol" to col),
+                    )
+                    tacticalSkillStart = null
+                    tacticalStart = null
+                    return@detectTapGestures
+                }
                 when (state.gameType) {
                     GameType.MINESWEEPER -> onDirectMove(row, col, "REVEAL")
                     GameType.ARROWS_ESCAPE -> onDirectMove(row, col, "ESCAPE")
@@ -428,6 +758,7 @@ fun GenericPuzzleGrid(
                     state.gameType == GameType.SECRET_CODE && secretKey.size == 25 -> secretColor(secretKey[row * 5 + col]).copy(alpha = .42f)
                     state.gameType == GameType.BRIDGES && selectedBridgeIsland == CellPosition(row, col) -> Color(0xFF00A8FF).copy(alpha = .28f)
                     cell.meta["given"] == true -> Color(0xFFFFD54F).copy(alpha = .62f)
+                    tacticalSkillStart == CellPosition(row, col) -> Color(0xFFE1BEE7)
                     (tacticalStart ?: selected) == CellPosition(row, col) -> Color(0xFFFFF59D)
                     ownerColor != null -> ownerColor.copy(alpha = 0.25f)
                     state.gameType == GameType.CHECKERS -> if ((row + col) % 2 == 0) Color(0xFFE7D7C1) else Color(0xFF704D38)
@@ -447,9 +778,54 @@ fun GenericPuzzleGrid(
                         "_${side}Color" to (cell.meta["${side}OwnerId"]?.toString()?.let(identityColors::get) ?: Color(0xFF00A8FF))
                     }
                 } else cell.meta
-                renderGenericCell(state.gameType, cell.value, renderMeta, cell.isBlocked, origin, cellWidth, cellHeight, textMeasurer)
+                renderGenericCell(
+                    state.gameType,
+                    cell.value,
+                    renderMeta,
+                    cell.isBlocked,
+                    origin,
+                    cellWidth,
+                    cellHeight,
+                    textMeasurer,
+                    arcadeFall,
+                )
                 drawRect(Color(0xFFB0BEC5), origin, Size(cellWidth, cellHeight), style = Stroke(1.2f))
                 if (ownerColor != null) drawRect(ownerColor, origin, Size(cellWidth, cellHeight), style = Stroke(2.4f))
+            }
+        }
+        if (state.gameType == GameType.CHESS_TACTICS && chessAction != null) {
+            val sourceRow = (chessAction["sourceRow"] as? Number)?.toInt() ?: -1
+            val sourceCol = (chessAction["sourceCol"] as? Number)?.toInt() ?: -1
+            val targetRow = (chessAction["targetRow"] as? Number)?.toInt() ?: sourceRow
+            val targetCol = (chessAction["targetCol"] as? Number)?.toInt() ?: sourceCol
+            if (sourceRow >= 0 && sourceCol >= 0 && targetRow >= 0 && targetCol >= 0) {
+                val start = Offset((sourceCol + .5f) * cellWidth, (sourceRow + .5f) * cellHeight)
+                val end = Offset((targetCol + .5f) * cellWidth, (targetRow + .5f) * cellHeight)
+                val progress = chessActionProgress.value
+                val head = start + (end - start) * progress
+                val skill = chessAction["skill"]?.toString()
+                val action = chessAction["action"]?.toString()
+                val effectColor = if (action == "SKILL") Color(0xFFAA00FF) else Color(0xFFFF1744)
+                drawLine(
+                    effectColor.copy(alpha = 1f - progress * .45f),
+                    start,
+                    head,
+                    maxOf(4f, cellWidth * .09f),
+                )
+                drawCircle(
+                    effectColor.copy(alpha = (1f - progress).coerceAtLeast(.08f)),
+                    min(cellWidth, cellHeight) * (.18f + progress * .52f),
+                    end,
+                    style = Stroke(maxOf(3f, cellWidth * .055f)),
+                )
+                if (skill == "EARTHQUAKE" || skill == "SHOCKWAVE") {
+                    drawCircle(
+                        Color(0xFFFF6D00).copy(alpha = 1f - progress),
+                        min(cellWidth, cellHeight) * progress * 1.7f,
+                        end,
+                        style = Stroke(maxOf(4f, cellWidth * .08f)),
+                    )
+                }
             }
         }
     }
@@ -621,29 +997,49 @@ private fun composeTacticalRanges(
     }
     if (state.gameType != GameType.CHESS_TACTICS) return emptySet<CellPosition>() to emptySet()
     val ap = (cell.meta["ap"] as? Number)?.toInt() ?: 0
-    val team = cell.meta["team"]?.toString()
-    val moves = buildSet {
-        for (row in state.board.indices) for (col in state.board[row].indices) {
-            val distance = kotlin.math.abs(row - source.row) + kotlin.math.abs(col - source.column)
-            if (distance in 1..ap && state.board[row][col].value == null) add(CellPosition(row, col))
-        }
+    if (ap <= 0 || (cell.meta["statusEffects"] as? List<*>)?.any { it.toString().equals("Stunned", true) } == true) {
+        return emptySet<CellPosition>() to emptySet()
     }
+    val team = cell.meta["team"]?.toString()
+    val moves = mutableSetOf<CellPosition>()
     val attacks = mutableSetOf<CellPosition>()
     val type = cell.meta["type"]?.toString()
-    val offsets = when (type) {
+    val stepOffsets = when (type) {
         "KNIGHT" -> listOf(-2 to -1, -2 to 1, -1 to -2, -1 to 2, 1 to -2, 1 to 2, 2 to -1, 2 to 1)
-        "PAWN" -> listOf((if (team == "BLUE") 1 else -1) to -1, (if (team == "BLUE") 1 else -1) to 0, (if (team == "BLUE") 1 else -1) to 1)
+        "KING" -> listOf(-1 to -1, -1 to 0, -1 to 1, 0 to -1, 0 to 1, 1 to -1, 1 to 0, 1 to 1)
         else -> emptyList()
     }
-    offsets.forEach { (dy, dx) ->
+    stepOffsets.forEach { (dy, dx) ->
         val row = source.row + dy; val col = source.column + dx
-        if (row in state.board.indices && col in state.board[row].indices) attacks += CellPosition(row, col)
+        if (row !in state.board.indices || col !in state.board[row].indices) return@forEach
+        val target = state.board[row][col]
+        if (target.value == null) moves += CellPosition(row, col)
+        else if (target.meta["team"] != team) attacks += CellPosition(row, col)
     }
-    if (type == "ROOK") for ((dy, dx) in listOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)) {
+    if (type == "PAWN") {
+        val direction = if (team == "BLUE") 1 else -1
+        val forward = state.board.getOrNull(source.row + direction)?.getOrNull(source.column)
+        if (forward?.value == null) moves += CellPosition(source.row + direction, source.column)
+        for (dx in listOf(-1, 1)) {
+            val target = state.board.getOrNull(source.row + direction)?.getOrNull(source.column + dx)
+            if (target?.value != null && target.meta["team"] != team) attacks += CellPosition(source.row + direction, source.column + dx)
+        }
+    }
+    val directions = when (type) {
+        "BISHOP" -> listOf(-1 to -1, -1 to 1, 1 to -1, 1 to 1)
+        "ROOK" -> listOf(-1 to 0, 1 to 0, 0 to -1, 0 to 1)
+        "QUEEN" -> listOf(-1 to -1, -1 to 0, -1 to 1, 0 to -1, 0 to 1, 1 to -1, 1 to 0, 1 to 1)
+        else -> emptyList()
+    }
+    for ((dy, dx) in directions) {
         var row = source.row + dy; var col = source.column + dx
         while (row in state.board.indices && col in state.board[row].indices) {
-            attacks += CellPosition(row, col)
-            if (state.board[row][col].value != null) break
+            val target = state.board[row][col]
+            if (target.value == null) moves += CellPosition(row, col)
+            else {
+                if (target.meta["team"] != team) attacks += CellPosition(row, col)
+                break
+            }
             row += dy; col += dx
         }
     }
@@ -666,7 +1062,7 @@ private fun PuzzleHints(state: GenericBoardState) {
         GameType.NURIKABE -> Text("Toca las casillas de río; conserva blancas las islas numeradas.")
         GameType.BRIDGES -> Text("Toca los segmentos entre islas para construir la red.")
         GameType.CHECKERS -> Text("Las capturas son obligatorias. Si capturas, puedes encadenar otro salto.")
-        GameType.CHESS_TACTICS -> Text("Azul: movimiento posible · Rojo: alcance de ataque · Cada acción consume AP.")
+        GameType.CHESS_TACTICS -> Text("Azul: movimiento · Rojo: ataque · Mantén pulsada una pieza y toca el objetivo para activar su habilidad.")
         GameType.HANGMAN -> Text("Pista: ${state.meta["clue"] ?: "Sin pista"} · Errores máximos: 6", fontWeight = FontWeight.Black)
         GameType.ARROWS_ESCAPE -> Text("Libera todas las flechas. Progreso: ${state.meta["progress"] ?: emptyMap<String, Int>()}")
         GameType.NEXUS_ZERO -> Text("Toca dos cargas vinculadas que sumen exactamente cero.", fontWeight = FontWeight.Black)
@@ -691,6 +1087,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
     width: Float,
     height: Float,
     textMeasurer: androidx.compose.ui.text.TextMeasurer,
+    animationPhase: Float = 0f,
 ) {
     val center = Offset(origin.x + width / 2f, origin.y + height / 2f)
     when (gameType) {
@@ -713,9 +1110,35 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
         GameType.CHESS_TACTICS -> {
             if (value != null) {
                 val teamColor = if (meta["team"] == "BLUE") Color(0xFF1565C0) else Color(0xFFE53935)
-                val glyph = when (value.toString()) { "PAWN" -> "♟"; "KNIGHT" -> "♞"; else -> "♜" }
-                drawCircle(teamColor.copy(alpha = .18f), min(width, height) * .39f, center)
-                drawCenteredText(glyph, center, width * .92f, textMeasurer, teamColor)
+                val glyph = when (value.toString()) {
+                    "PAWN" -> "♟"
+                    "KNIGHT" -> "♞"
+                    "BISHOP" -> "♝"
+                    "ROOK" -> "♜"
+                    "QUEEN" -> "♛"
+                    else -> "♚"
+                }
+                val bob = sin(animationPhase * Math.PI.toFloat() * 2f) * height * .025f
+                val animatedCenter = center + Offset(0f, bob)
+                val status = (meta["statusEffects"] as? List<*>)?.map { it.toString() }.orEmpty()
+                val auraColor = when {
+                    status.any { it.equals("Invulnerable", true) } -> Color(0xFFFFD600)
+                    status.any { it.equals("Ambushing", true) } -> Color(0xFFAA00FF)
+                    status.any { it.equals("Stunned", true) } -> Color(0xFF00B8D4)
+                    meta["isShielded"] == true -> Color(0xFF00C853)
+                    else -> teamColor
+                }
+                val auraPulse = .36f + sin(animationPhase * Math.PI.toFloat() * 2f) * .025f
+                drawCircle(auraColor.copy(alpha = .18f), min(width, height) * auraPulse, animatedCenter)
+                if (status.isNotEmpty() || meta["isShielded"] == true) {
+                    drawCircle(
+                        auraColor.copy(alpha = .72f),
+                        min(width, height) * (auraPulse + .02f),
+                        animatedCenter,
+                        style = Stroke(maxOf(2f, width * .035f)),
+                    )
+                }
+                drawCenteredText(glyph, animatedCenter, width * .92f, textMeasurer, teamColor)
                 val hp = (meta["hp"] as? Number)?.toFloat() ?: 0f
                 val maxHp = (meta["maxHp"] as? Number)?.toFloat()?.coerceAtLeast(1f) ?: 1f
                 val barOrigin = origin + Offset(width * .08f, height * .07f)
@@ -724,6 +1147,20 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
                 val ap = (meta["ap"] as? Number)?.toInt() ?: 0
                 val apLayout = textMeasurer.measure("AP $ap", TextStyle(color = teamColor, fontSize = 7.sp, fontWeight = FontWeight.Black))
                 drawText(apLayout, topLeft = origin + Offset(width - apLayout.size.width - 2f, height - apLayout.size.height - 1f))
+                val cooldown = (meta["currentCooldown"] as? Number)?.toInt() ?: 0
+                if (cooldown > 0) {
+                    val cooldownLayout = textMeasurer.measure(
+                        "CD $cooldown",
+                        TextStyle(color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Black),
+                    )
+                    drawRoundRect(
+                        Color(0xFF311B92).copy(alpha = .90f),
+                        origin + Offset(2f, height - cooldownLayout.size.height - 4f),
+                        Size(cooldownLayout.size.width + 5f, cooldownLayout.size.height + 2f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f),
+                    )
+                    drawText(cooldownLayout, topLeft = origin + Offset(4f, height - cooldownLayout.size.height - 3f))
+                }
             }
         }
         GameType.NURIKABE -> if (meta["islandClue"] == true) {
