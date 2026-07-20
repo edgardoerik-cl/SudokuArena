@@ -29,6 +29,7 @@ interface TetrisPlayer {
   id: string; name: string; colorHex: string; board: number[][]; piece: FallingPiece;
   bag: TetrominoName[]; next: TetrominoName; score: number; lines: number; gameOver: boolean;
   lockDeadline: number; impact: number; hold: TetrominoName | null; canHold: boolean; cleanBombUsed: boolean;
+  abilityEnergy: number; bombsUsed: number; garbageSent: number;
 }
 
 export class TetrisArenaEngine {
@@ -47,6 +48,7 @@ export class TetrisArenaEngine {
         board: grid(20, 10, 0), piece: { type: first, rotation: 0, row: -1, col: 3 },
         bag, next, score: 0, lines: 0, gameOver: false, lockDeadline: 0, impact: 0,
         hold: null, canHold: true, cleanBombUsed: false,
+        abilityEnergy: 0, bombsUsed: 0, garbageSent: 0,
       });
     }
   }
@@ -55,7 +57,7 @@ export class TetrisArenaEngine {
     const player = this.players.get(playerId);
     if (!player || player.gameOver || this.completed) return false;
     if (action === "HOLD") {
-      if (!player.canHold) return false;
+      if (!player.canHold || player.abilityEnergy < 1) return false;
       const current = player.piece.type;
       if (player.hold === null) {
         player.piece = { type: player.next, rotation: 0, row: -1, col: 3 };
@@ -66,15 +68,18 @@ export class TetrisArenaEngine {
       }
       player.hold = current;
       player.canHold = false;
+      player.abilityEnergy -= 1;
       player.lockDeadline = 0;
       if (this.collides(player)) player.gameOver = true;
       return true;
     }
     if (action === "CLEAN_BOMB") {
-      if (player.cleanBombUsed) return false;
+      if (player.abilityEnergy < 4) return false;
       player.board.splice(17, 3);
       player.board.unshift(...grid(3, 10, 0));
       player.cleanBombUsed = true;
+      player.bombsUsed += 1;
+      player.abilityEnergy -= 4;
       player.score += 150;
       return true;
     }
@@ -152,9 +157,15 @@ export class TetrisArenaEngine {
     player.board = remaining;
     if (kineticImpact && Math.random() < .10) this.settleLooseBlocks(player.board);
     player.lines += cleared;
+    player.abilityEnergy = Math.min(8, player.abilityEnergy + cleared);
     player.score += [0, 100, 300, 500, 800][cleared] ?? 0;
-    if (cleared >= 2) for (const rival of this.players.values()) {
-      if (rival.id !== player.id && !rival.gameOver) this.addGarbage(rival, cleared - 1);
+    // Cada línea completada genera una línea de presión en cada rival. La
+    // misma acción también carga las habilidades del jugador.
+    if (cleared > 0 && this.players.size > 1) for (const rival of this.players.values()) {
+      if (rival.id !== player.id && !rival.gameOver) {
+        this.addGarbage(rival, cleared);
+        player.garbageSent += cleared;
+      }
     }
     if (!player.bag.length) player.bag = shuffledBag();
     player.piece = { type: player.next, rotation: 0, row: -1, col: 3 };

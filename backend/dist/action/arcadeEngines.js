@@ -24,6 +24,7 @@ export class TetrisArenaEngine {
                     board: grid(20, 10, 0), piece: { type: first, rotation: 0, row: -1, col: 3 },
                     bag, next, score: 0, lines: 0, gameOver: false, lockDeadline: 0, impact: 0,
                     hold: null, canHold: true, cleanBombUsed: false,
+                    abilityEnergy: 0, bombsUsed: 0, garbageSent: 0,
                 });
             }
     }
@@ -32,7 +33,7 @@ export class TetrisArenaEngine {
         if (!player || player.gameOver || this.completed)
             return false;
         if (action === "HOLD") {
-            if (!player.canHold)
+            if (!player.canHold || player.abilityEnergy < 1)
                 return false;
             const current = player.piece.type;
             if (player.hold === null) {
@@ -46,17 +47,20 @@ export class TetrisArenaEngine {
             }
             player.hold = current;
             player.canHold = false;
+            player.abilityEnergy -= 1;
             player.lockDeadline = 0;
             if (this.collides(player))
                 player.gameOver = true;
             return true;
         }
         if (action === "CLEAN_BOMB") {
-            if (player.cleanBombUsed)
+            if (player.abilityEnergy < 4)
                 return false;
             player.board.splice(17, 3);
             player.board.unshift(...grid(3, 10, 0));
             player.cleanBombUsed = true;
+            player.bombsUsed += 1;
+            player.abilityEnergy -= 4;
             player.score += 150;
             return true;
         }
@@ -155,11 +159,16 @@ export class TetrisArenaEngine {
         if (kineticImpact && Math.random() < .10)
             this.settleLooseBlocks(player.board);
         player.lines += cleared;
+        player.abilityEnergy = Math.min(8, player.abilityEnergy + cleared);
         player.score += [0, 100, 300, 500, 800][cleared] ?? 0;
-        if (cleared >= 2)
+        // Cada línea completada genera una línea de presión en cada rival. La
+        // misma acción también carga las habilidades del jugador.
+        if (cleared > 0 && this.players.size > 1)
             for (const rival of this.players.values()) {
-                if (rival.id !== player.id && !rival.gameOver)
-                    this.addGarbage(rival, cleared - 1);
+                if (rival.id !== player.id && !rival.gameOver) {
+                    this.addGarbage(rival, cleared);
+                    player.garbageSent += cleared;
+                }
             }
         if (!player.bag.length)
             player.bag = shuffledBag();

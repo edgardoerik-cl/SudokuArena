@@ -27,6 +27,8 @@ export function createPuzzleBlueprint(gameType, options = {}) {
         case "DEMOLITION_ARCADE": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "BREAKOUT_PHYSICS", difficulty } };
         case "MEMORY_NEON": return memoryNeon(random, difficulty);
         case "MERGE_2048": return merge2048(random, difficulty);
+        case "TOWER_DEFENSE": return towerDefense(random, difficulty);
+        case "REACTOR_CHAIN": return reactorChain(random, difficulty);
         case "SUDOKU": return latinPuzzle(random, 9);
     }
 }
@@ -174,6 +176,8 @@ function nexusZero(random, difficulty) {
             engine: "NEXUS_SWIPE",
             instructions: "Desliza todas las cargas. Solo +N y -N se fusionan; cada Nexo Cero elimina ambas fichas.",
             pairCount,
+            nexusRound: 1,
+            nexusTargetRounds: sizeFor(difficulty, 3, 4, 5, 6),
             guaranteedSolvable: true,
             difficulty,
         },
@@ -503,16 +507,20 @@ function arrowsEscape(random, difficulty) {
         const y = .48 - heartY / 46 + (random.next() - .5) * .025 - height / 2;
         const centerX = x + width / 2;
         const centerY = y + height / 2;
-        const direction = Math.abs(centerX - .5) > Math.abs(centerY - .5)
-            ? centerX < .5 ? "LEFT" : "RIGHT"
-            : centerY < .5 ? "UP" : "DOWN";
+        const z = .18 + random.next() * .64;
+        const depth = Math.max(width, height) * (1.1 + random.next() * 1.8);
+        const distances = [
+            { axis: Math.abs(centerX - .5), direction: centerX < .5 ? "LEFT" : "RIGHT" },
+            { axis: Math.abs(centerY - .5), direction: centerY < .5 ? "UP" : "DOWN" },
+            { axis: Math.abs(z - .5), direction: z < .5 ? "FRONT" : "BACK" },
+        ];
+        const direction = distances.sort((a, b) => b.axis - a.axis)[0].direction;
         const id = `shape-${index}`;
         const pathType = difficulty === "EXPERT" && index % 5 === 0
             ? (index % 2 === 0 ? "CURVE_LEFT" : "CURVE_RIGHT")
             : "STRAIGHT";
         const blockType = index % 13 === 0 ? "TIMER" : index % 11 === 0 ? "BOMB" : index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL";
-        const z = .18 + random.next() * .64;
-        shapes.push({ id, x, y, z, width, height, depth: Math.max(width, height), offsets, direction, pathType, blockType, memberKeys: [`0:${index}`] });
+        shapes.push({ id, x, y, z, width, height, depth, offsets, direction, pathType, blockType, memberKeys: [`0:${index}`] });
         board[0][index] = cell(direction, true, {
             arrow: direction,
             shapeId: id,
@@ -537,7 +545,7 @@ function arrowsEscape(random, difficulty) {
             rotatePowerUses: 2,
             missilePowerUses: 1,
             shapes,
-            instructions: "Toca una pieza flotante. Toda su geometría debe recorrer la trayectoria de salida sin tocar otra forma.",
+            instructions: "Orbita la figura 3D y toca un bloque. Debe escapar por X, Y o profundidad Z sin atravesar otro volumen.",
             difficulty,
         },
     };
@@ -645,6 +653,66 @@ function capitalArena(random, difficulty) {
         meta: {
             spaces,
             instructions: "Lanza dos dados, compra distritos, cobra rentas y construye mejoras de hackeo.",
+            difficulty,
+        },
+    };
+}
+function towerDefense(random, difficulty) {
+    const rows = 9;
+    const columns = 14;
+    const path = [];
+    for (let col = 0; col < columns; col += 1)
+        path.push({ row: 1, col });
+    for (let row = 2; row <= 4; row += 1)
+        path.push({ row, col: columns - 1 });
+    for (let col = columns - 2; col >= 1; col -= 1)
+        path.push({ row: 4, col });
+    for (let row = 5; row <= 7; row += 1)
+        path.push({ row, col: 1 });
+    for (let col = 2; col < columns; col += 1)
+        path.push({ row: 7, col });
+    const pathIndex = new Map(path.map((point, index) => [`${point.row}:${point.col}`, index]));
+    const board = matrix(rows, columns, (row, col) => {
+        const index = pathIndex.get(`${row}:${col}`);
+        return index == null
+            ? cell(null, false, { buildable: true, terrain: random.int(0, 3) })
+            : blockedCell({ path: true, pathIndex: index, spawn: index === 0, base: index === path.length - 1 });
+    });
+    return {
+        board,
+        answers: matrix(rows, columns, () => null),
+        meta: {
+            actionMode: true,
+            engine: "COOP_TOWER_DEFENSE",
+            path,
+            maxWaves: 20,
+            startingCredits: difficulty === "EASY" ? 500 : difficulty === "EXPERT" ? 320 : 400,
+            instructions: "Construye torres junto al camino, elige prioridades y lanza 20 oleadas cooperativas.",
+            difficulty,
+        },
+    };
+}
+function reactorChain(random, difficulty) {
+    const size = sizeFor(difficulty, 7, 8, 9, 10);
+    const colors = difficulty === "EASY" ? 4 : difficulty === "EXPERT" ? 6 : 5;
+    const board = matrix(size, size, () => cell(random.int(1, colors), true, { reactorOrb: true }));
+    // Toda ronda comienza con al menos una cadena jugable; así nunca se presenta
+    // un tablero muerto ni la IA queda sin una acción válida.
+    const guaranteedColor = random.int(1, colors);
+    board[0][0].value = guaranteedColor;
+    board[0][1].value = guaranteedColor;
+    board[1][0].value = guaranteedColor;
+    return {
+        board,
+        answers: matrix(size, size, () => null),
+        meta: {
+            actionMode: true,
+            engine: "REACTOR_CHAIN",
+            colors,
+            targetRemoved: size * size * 2,
+            removed: 0,
+            combo: 1,
+            instructions: "Toca grupos de 3 o más núcleos iguales. Las cadenas grandes multiplican la puntuación y recargan el reactor.",
             difficulty,
         },
     };

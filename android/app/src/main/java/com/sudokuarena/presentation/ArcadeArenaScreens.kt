@@ -131,19 +131,38 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
             Column(Modifier.weight(.44f).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Actual: ${me?.current ?: "—"}", color = Color.White, fontWeight = FontWeight.Black)
                 Text("Siguiente: ${me?.next ?: "—"}", color = Color.White, fontWeight = FontWeight.Black)
+                Text(
+                    "ENERGÍA ${me?.abilityEnergy ?: 0}/8",
+                    color = Color(0xFFFFD54F),
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                )
                 Button(
                     onClick = { onInput("HOLD") },
-                    enabled = me?.canHold == true && me?.gameOver != true,
+                    enabled = me?.canHold == true && (me.abilityEnergy >= 1) && me.gameOver != true,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("HOLD ${me?.hold ?: "—"}", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                ) { Text("HOLD · 1 línea\n${me?.hold ?: "—"}", fontSize = 10.sp, fontWeight = FontWeight.Black) }
                 Button(
                     onClick = { onInput("CLEAN_BOMB") },
-                    enabled = me?.cleanBombUsed == false && me?.gameOver != true,
+                    enabled = (me?.abilityEnergy ?: 0) >= 4 && me?.gameOver != true,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text(if (me?.cleanBombUsed == true) "Bomba usada" else "💣 Limpiar 3 filas", fontSize = 10.sp) }
+                ) { Text("💣 Limpiar 3 · 4 líneas", fontSize = 9.sp) }
                 arena?.players?.filter { it.id != me?.id }?.forEach { rival ->
-                    Surface(color = Color.White.copy(alpha = .09f), shape = RoundedCornerShape(10.dp)) {
-                        Text("${rival.name}: ${rival.lines}", color = Color.White, modifier = Modifier.padding(7.dp), fontSize = 11.sp)
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Color.White.copy(alpha = .09f),
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Column(Modifier.padding(5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "${rival.name} · ${rival.lines} líneas",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                maxLines = 1,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            MiniTetrisBoard(rival.board, Modifier.size(64.dp, 104.dp))
+                        }
                     }
                 }
             }
@@ -154,6 +173,31 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
             fontSize = 11.sp,
             modifier = Modifier.align(Alignment.CenterHorizontally),
         )
+    }
+}
+
+@Composable
+private fun MiniTetrisBoard(board: List<List<Int>>, modifier: Modifier = Modifier) {
+    Canvas(modifier.background(Color(0xFF020617), RoundedCornerShape(6.dp))) {
+        val rows = board.size.coerceAtLeast(20)
+        val columns = board.firstOrNull()?.size?.coerceAtLeast(10) ?: 10
+        val cell = minOf(size.width / columns, size.height / rows)
+        val left = (size.width - cell * columns) / 2f
+        val palette = listOf(
+            Color.Transparent, Color.Cyan, Color(0xFF2962FF), Color(0xFFFF8F00),
+            Color.Yellow, Color.Green, Color.Magenta, Color.Red, Color.Gray,
+        )
+        board.forEachIndexed { row, cells ->
+            cells.forEachIndexed { col, value ->
+                if (value > 0) {
+                    drawRect(
+                        palette.getOrElse(value) { Color.White },
+                        Offset(left + col * cell + .5f, row * cell + .5f),
+                        Size((cell - 1f).coerceAtLeast(.5f), (cell - 1f).coerceAtLeast(.5f)),
+                    )
+                }
+            }
+        }
     }
 }
 

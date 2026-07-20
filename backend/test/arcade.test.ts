@@ -19,10 +19,9 @@ describe("Tetris Arena", () => {
     assert.equal(state.players[0].board[0].length, 10);
     assert.ok(state.players[0].next);
     assert.equal(state.players[0].impact, 1);
-    assert.equal(engine.input("p1", "HOLD"), true);
-    assert.ok(engine.snapshot().players[0].hold);
-    assert.equal(engine.input("p1", "CLEAN_BOMB"), true);
-    assert.equal(engine.snapshot().players[0].cleanBombUsed, true);
+    assert.equal(state.players[0].abilityEnergy, 0);
+    assert.equal(engine.input("p1", "HOLD"), false, "Hold debe ganarse completando una línea");
+    assert.equal(engine.input("p1", "CLEAN_BOMB"), false, "La bomba requiere cuatro líneas de energía");
   });
 });
 

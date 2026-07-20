@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -156,22 +157,31 @@ fun ArenaRoute(viewModel: ArenaViewModel, onExit: () -> Unit) {
     }
 
     if (state.gameType == GameType.TETRIS_ARENA) {
-        ArcadeGameHost(state, viewModel::resumePausedGame, viewModel::newSoloGame, viewModel::requestRematch, onExit) {
-            TetrisArenaScreen(state, viewModel::sendTetrisInput, viewModel::requestPause, onExit)
+        ArcadeGameHost(
+            state, viewModel::resumePausedGame, viewModel::newSoloGame,
+            viewModel::requestRematch, viewModel::sendGlobalChat, onExit,
+        ) { requestExit ->
+            TetrisArenaScreen(state, viewModel::sendTetrisInput, viewModel::requestPause, requestExit)
         }
         return
     }
 
     if (state.gameType == GameType.PACMAN_ARENA) {
-        ArcadeGameHost(state, viewModel::resumePausedGame, viewModel::newSoloGame, viewModel::requestRematch, onExit) {
-            PacmanArenaScreen(state, viewModel::sendPacmanInput, viewModel::requestPause, onExit)
+        ArcadeGameHost(
+            state, viewModel::resumePausedGame, viewModel::newSoloGame,
+            viewModel::requestRematch, viewModel::sendGlobalChat, onExit,
+        ) { requestExit ->
+            PacmanArenaScreen(state, viewModel::sendPacmanInput, viewModel::requestPause, requestExit)
         }
         return
     }
 
     if (state.gameType == GameType.DEMOLITION_ARCADE) {
-        ArcadeGameHost(state, viewModel::resumePausedGame, viewModel::newSoloGame, viewModel::requestRematch, onExit) {
-            DemolitionArenaScreen(state, viewModel::sendDemolitionInput, viewModel::requestPause, onExit)
+        ArcadeGameHost(
+            state, viewModel::resumePausedGame, viewModel::newSoloGame,
+            viewModel::requestRematch, viewModel::sendGlobalChat, onExit,
+        ) { requestExit ->
+            DemolitionArenaScreen(state, viewModel::sendDemolitionInput, viewModel::requestPause, requestExit)
         }
         return
     }
@@ -229,11 +239,39 @@ private fun ArcadeGameHost(
     onResume: () -> Unit,
     onNewSoloGame: () -> Unit,
     onRematch: () -> Unit,
+    onGlobalChat: (String) -> Unit,
     onExit: () -> Unit,
-    content: @Composable () -> Unit,
+    content: @Composable (requestExit: () -> Unit) -> Unit,
 ) {
+    var confirmExit by remember { mutableStateOf(false) }
+    var showChat by remember { mutableStateOf(false) }
+    BackHandler { confirmExit = true }
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().blur(if (state.isLocallyPaused) 18.dp else 0.dp)) { content() }
+        Box(Modifier.fillMaxSize().blur(if (state.isLocallyPaused) 18.dp else 0.dp)) {
+            content { confirmExit = true }
+        }
+        if (!state.isSoloMode) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp).zIndex(20f),
+                color = Color.White.copy(alpha = .96f),
+                shape = RoundedCornerShape(18.dp),
+                shadowElevation = 10.dp,
+            ) {
+                if (showChat) {
+                    Column(Modifier.widthIn(max = 320.dp).padding(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Chat de Arena", Modifier.weight(1f), fontWeight = FontWeight.Black)
+                            TextButton(onClick = { showChat = false }) { Text("Cerrar") }
+                        }
+                        GlobalGameChat(state, onGlobalChat)
+                    }
+                } else {
+                    TextButton(onClick = { showChat = true }) {
+                        Text("💬 ${state.globalChat.size}", fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+        }
         if (state.soloCompleted || state.matchResults.isNotEmpty()) {
             MatchResultsOverlay(
                 state,
@@ -244,6 +282,7 @@ private fun ArcadeGameHost(
             )
         }
         if (state.isLocallyPaused) PauseLayer(state, onResume, Modifier.zIndex(50f))
+        ConfirmExitDialog(confirmExit, onDismiss = { confirmExit = false }, onConfirm = onExit)
     }
 }
 

@@ -62,6 +62,10 @@ export class GenericPuzzleEngine {
     capturedPawns = new Map([["BLUE", 0], ["RED", 0]]);
     memoryFirstPicks = new Map();
     nurikabeSonarUses = new Map();
+    towerCredits = new Map();
+    towerWave = 0;
+    towerBaseHealth = 20;
+    towerLastReport = null;
     mergeBotStep = 0;
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
@@ -85,6 +89,8 @@ export class GenericPuzzleEngine {
             this.syncSecretPlayers(game);
         if (this.gameType === "CAPITAL_ARENA")
             this.syncCapitalPlayers(game);
+        if (this.gameType === "TOWER_DEFENSE")
+            this.syncTowerPlayers(game);
         return {
             gameId: this.gameId,
             gameType: this.gameType,
@@ -161,6 +167,12 @@ export class GenericPuzzleEngine {
                 } : {}),
                 ...(this.gameType === "NURIKABE" ? {
                     sonarUses: Object.fromEntries(this.nurikabeSonarUses),
+                } : {}),
+                ...(this.gameType === "TOWER_DEFENSE" ? {
+                    wave: this.towerWave,
+                    baseHealth: this.towerBaseHealth,
+                    credits: Object.fromEntries(this.towerCredits),
+                    lastWave: this.towerLastReport,
                 } : {})
             }
         };
@@ -228,7 +240,7 @@ export class GenericPuzzleEngine {
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
         }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048"].includes(this.gameType))) {
+        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048", "TOWER_DEFENSE"].includes(this.gameType))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
         const outcome = this.applySpecificMove(playerId, move, cell, game, now);
@@ -264,7 +276,7 @@ export class GenericPuzzleEngine {
         return {
             accepted: true,
             requestId: move.requestId,
-            message: this.completed ? "Puzzle completado" : "Movimiento aceptado",
+            message: this.completed ? "Puzzle completado" : outcome.message ?? "Movimiento aceptado",
             points,
             penaltyMs: 0,
             completed: this.completed
@@ -313,6 +325,26 @@ export class GenericPuzzleEngine {
         if (this.gameType === "NEXUS_ZERO") {
             const directions = ["LEFT", "DOWN", "RIGHT", "UP"];
             return { requestId: `nexus-bot-${randomUUID()}`, row: 0, col: 0, val: directions[this.mergeBotStep++ % 4] };
+        }
+        if (this.gameType === "TOWER_DEFENSE") {
+            const buildable = this.board.flatMap((row, rowIndex) => row.map((cell, colIndex) => ({ cell, row: rowIndex, col: colIndex }))).filter(({ cell }) => cell.meta.buildable === true && cell.meta.towerType == null);
+            if (buildable.length > 0 && (this.towerCredits.get(playerId ?? "") ?? 0) >= 100) {
+                const target = buildable[Math.floor(Math.random() * buildable.length)];
+                return {
+                    requestId: `tower-bot-${randomUUID()}`, row: target.row, col: target.col,
+                    val: { action: "BUILD", towerType: ["RAPID", "BLAST", "SNIPER", "FROST"][this.mergeBotStep++ % 4] },
+                };
+            }
+            return { requestId: `tower-wave-${randomUUID()}`, row: 0, col: 0, val: { action: "START_WAVE" } };
+        }
+        if (this.gameType === "REACTOR_CHAIN") {
+            for (let row = 0; row < this.board.length; row += 1)
+                for (let col = 0; col < this.board[row].length; col += 1) {
+                    if (this.reactorGroupSize(row, col) >= 3) {
+                        return { requestId: `reactor-bot-${randomUUID()}`, row, col, val: "CHAIN" };
+                    }
+                }
+            return null;
         }
         if (this.gameType === "HANGMAN") {
             const target = this.board[0].findIndex((cell) => cell.value === null);
@@ -484,6 +516,10 @@ export class GenericPuzzleEngine {
             return this.applyCapitalMove(playerId, move, game);
         if (this.gameType === "MERGE_2048")
             return this.applyMerge2048Move(playerId, move);
+        if (this.gameType === "TOWER_DEFENSE")
+            return this.applyTowerDefenseMove(playerId, move, game);
+        if (this.gameType === "REACTOR_CHAIN")
+            return this.applyReactorChainMove(playerId, move);
         if (this.gameType === "MEMORY_NEON") {
             // La pareja fallida permanece visible hasta el siguiente intento para que
             // el jugador pueda memorizarla; el próximo toque la limpia sin temporizadores.
@@ -614,7 +650,10 @@ export class GenericPuzzleEngine {
                 const shape = this.meta.shapes.find((candidate) => candidate.id === shapeId);
                 if (!shape)
                     return { correct: false, neutral: true };
-                const next = { UP: "RIGHT", RIGHT: "DOWN", DOWN: "LEFT", LEFT: "UP" }[String(shape.direction)] ?? "UP";
+                const next = {
+                    UP: "RIGHT", RIGHT: "DOWN", DOWN: "LEFT", LEFT: "FRONT",
+                    FRONT: "BACK", BACK: "UP",
+                }[String(shape.direction)] ?? "UP";
                 shape.direction = next;
                 members.forEach(({ cell: member }) => { member.value = next; member.meta.arrow = next; });
                 this.arrowRotateUses.set(playerId, used + 1);
@@ -642,7 +681,10 @@ export class GenericPuzzleEngine {
                 return { correct: true, points: 0, message: "¡Cronómetro agotado! Bloqueo de 3 segundos" };
             }
             const primary = String(shape?.direction ?? cell.meta.arrow);
-            const opposite = { UP: "DOWN", DOWN: "UP", LEFT: "RIGHT", RIGHT: "LEFT" }[primary];
+            const opposite = {
+                UP: "DOWN", DOWN: "UP", LEFT: "RIGHT", RIGHT: "LEFT",
+                FRONT: "BACK", BACK: "FRONT",
+            }[primary];
             const canEscape = this.canArrowShapeEscape(shapeId, removed, primary)
                 || (shape?.blockType === "BIDIRECTIONAL" && this.canArrowShapeEscape(shapeId, removed, opposite));
             if (!canEscape) {
@@ -910,7 +952,194 @@ export class GenericPuzzleEngine {
         }));
         this.meta.lastNexus = nexuses > 0 ? { playerId, count: nexuses, at: Date.now() } : null;
         this.meta.nexusesCreated = Number(this.meta.nexusesCreated ?? 0) + nexuses;
+        const boardIsEmpty = this.board.flat().every((cell) => cell.value === null);
+        const round = Number(this.meta.nexusRound ?? 1);
+        const targetRounds = Number(this.meta.nexusTargetRounds ?? 3);
+        if (boardIsEmpty && round < targetRounds) {
+            this.meta.nexusRound = round + 1;
+            this.spawnNexusWave(Math.max(2, Math.floor(size * .34)));
+            return {
+                correct: true,
+                points: nexuses * 25 + 40,
+                message: `Nexo ${round} superado. Nueva onda ${round + 1}/${targetRounds}`,
+            };
+        }
         return { correct: true, points: nexuses * 25 };
+    }
+    spawnNexusWave(pairCount) {
+        const positions = this.board.flatMap((row, rowIndex) => row.map((_, colIndex) => ({ row: rowIndex, col: colIndex })));
+        for (let index = positions.length - 1; index > 0; index -= 1) {
+            const target = Math.floor(Math.random() * (index + 1));
+            [positions[index], positions[target]] = [positions[target], positions[index]];
+        }
+        this.board.forEach((row) => row.forEach((cell) => {
+            cell.value = null;
+            cell.isRevealed = false;
+            cell.ownerId = null;
+            cell.meta = {};
+        }));
+        for (let pair = 0; pair < Math.min(pairCount, Math.floor(positions.length / 2)); pair += 1) {
+            const value = 1 + Math.floor(Math.random() * 9);
+            const first = positions[pair * 2];
+            const second = positions[pair * 2 + 1];
+            const sign = Math.random() < .5 ? 1 : -1;
+            for (const [position, charge] of [[first, value * sign], [second, -value * sign]]) {
+                const cell = this.board[position.row][position.col];
+                cell.value = charge;
+                cell.isRevealed = true;
+                cell.meta = { charge: true };
+            }
+        }
+    }
+    syncTowerPlayers(game) {
+        const startingCredits = Number(this.meta.startingCredits ?? 400);
+        for (const player of game.snapshot().players) {
+            if (!this.towerCredits.has(player.id))
+                this.towerCredits.set(player.id, startingCredits);
+        }
+    }
+    applyTowerDefenseMove(playerId, move, game) {
+        this.syncTowerPlayers(game);
+        const payload = typeof move.val === "object" && move.val !== null
+            ? move.val
+            : { action: move.val };
+        const action = String(payload.action ?? "BUILD").toUpperCase();
+        if (action === "START_WAVE") {
+            if (this.towerWave >= Number(this.meta.maxWaves ?? 20)) {
+                return { correct: false, neutral: true, message: "Las oleadas ya terminaron" };
+            }
+            this.towerWave += 1;
+            const towers = this.board.flat().filter((target) => typeof target.meta.towerType === "string");
+            const damage = towers.reduce((total, tower) => {
+                const level = Number(tower.meta.level ?? 1);
+                const base = tower.meta.towerType === "SNIPER" ? 8
+                    : tower.meta.towerType === "BLAST" ? 6
+                        : tower.meta.towerType === "FROST" ? 3 : 4;
+                return total + base * level;
+            }, 0);
+            const enemies = 5 + this.towerWave * 2;
+            const layers = 1 + Math.floor(this.towerWave / 5);
+            const effectiveDamage = damage + (towers.some((tower) => tower.meta.towerType === "FROST") ? 5 : 0);
+            const defeated = Math.min(enemies, Math.floor(effectiveDamage / Math.max(1, layers * 2)));
+            const leaks = Math.max(0, enemies - defeated);
+            this.towerBaseHealth = Math.max(0, this.towerBaseHealth - leaks);
+            const reward = defeated * (7 + layers);
+            const participants = [...this.towerCredits.keys()];
+            const shared = participants.length ? Math.floor(reward / participants.length) : 0;
+            participants.forEach((id) => this.towerCredits.set(id, (this.towerCredits.get(id) ?? 0) + shared));
+            this.towerLastReport = {
+                wave: this.towerWave, enemies, layers, defeated, leaks,
+                modifier: this.towerWave >= 14 ? "RUNIC" : this.towerWave >= 12 ? "ARMORED" : this.towerWave >= 7 ? "STEALTH" : "NONE",
+            };
+            if (this.towerBaseHealth <= 0 || this.towerWave >= Number(this.meta.maxWaves ?? 20))
+                this.completed = true;
+            return {
+                correct: true,
+                points: defeated * 5,
+                message: leaks > 0
+                    ? `Oleada ${this.towerWave}: ${defeated} derrotados, ${leaks} atravesaron`
+                    : `Oleada ${this.towerWave} perfecta`,
+            };
+        }
+        if (cellIsTower(this.board[move.row][move.col]) && action === "UPGRADE") {
+            const target = this.board[move.row][move.col];
+            if (target.ownerId !== playerId)
+                return { correct: false, neutral: true, message: "Solo puedes mejorar tu torre" };
+            const level = Number(target.meta.level ?? 1);
+            if (level >= 3)
+                return { correct: false, neutral: true, message: "Torre al nivel máximo" };
+            const cost = 100 * level;
+            const credits = this.towerCredits.get(playerId) ?? 0;
+            if (credits < cost)
+                return { correct: false, neutral: true, message: "Créditos insuficientes" };
+            this.towerCredits.set(playerId, credits - cost);
+            target.meta.level = level + 1;
+            return { correct: true, points: 10, message: `Torre mejorada a nivel ${level + 1}` };
+        }
+        const towerType = String(payload.towerType ?? "RAPID").toUpperCase();
+        const costs = { RAPID: 100, BLAST: 150, SNIPER: 180, FROST: 130 };
+        const cost = costs[towerType];
+        const target = this.board[move.row][move.col];
+        if (!cost || target.meta.buildable !== true || target.meta.towerType != null) {
+            return { correct: false, neutral: true, message: "Selecciona un terreno libre" };
+        }
+        const credits = this.towerCredits.get(playerId) ?? 0;
+        if (credits < cost)
+            return { correct: false, neutral: true, message: "Créditos insuficientes" };
+        this.towerCredits.set(playerId, credits - cost);
+        target.meta.towerType = towerType;
+        target.meta.level = 1;
+        target.value = towerType;
+        target.ownerId = playerId;
+        target.isRevealed = true;
+        return { correct: true, points: 10, message: `${towerType} construida` };
+    }
+    applyReactorChainMove(playerId, move) {
+        const target = this.board[move.row]?.[move.col];
+        const color = Number(target?.value ?? 0);
+        if (!target || color <= 0)
+            return { correct: false, neutral: true, message: "Núcleo vacío" };
+        const queue = [{ row: move.row, col: move.col }];
+        const group = [];
+        const visited = new Set();
+        while (queue.length) {
+            const current = queue.shift();
+            const key = `${current.row}:${current.col}`;
+            if (visited.has(key) || Number(this.board[current.row]?.[current.col]?.value ?? 0) !== color)
+                continue;
+            visited.add(key);
+            group.push(current);
+            queue.push({ row: current.row - 1, col: current.col }, { row: current.row + 1, col: current.col }, { row: current.row, col: current.col - 1 }, { row: current.row, col: current.col + 1 });
+        }
+        if (group.length < 3)
+            return { correct: false, neutral: true, message: "Necesitas al menos 3 núcleos conectados" };
+        group.forEach(({ row, col }) => {
+            const cell = this.board[row][col];
+            cell.value = null;
+            cell.ownerId = playerId;
+            cell.isRevealed = false;
+        });
+        const colors = Number(this.meta.colors ?? 5);
+        for (let col = 0; col < this.board[0].length; col += 1) {
+            const values = this.board.map((row) => row[col].value).filter((value) => value != null);
+            while (values.length < this.board.length)
+                values.unshift(1 + Math.floor(Math.random() * colors));
+            values.forEach((value, row) => {
+                const cell = this.board[row][col];
+                cell.value = value;
+                cell.isRevealed = true;
+                cell.ownerId = null;
+                cell.meta = { reactorOrb: true };
+            });
+        }
+        const hasPlayableChain = this.board.some((row, rowIndex) => row.some((_cell, colIndex) => this.reactorGroupSize(rowIndex, colIndex) >= 3));
+        if (!hasPlayableChain) {
+            const guaranteedColor = 1 + Math.floor(Math.random() * colors);
+            for (const [row, col] of [[0, 0], [0, 1], [1, 0]]) {
+                this.board[row][col].value = guaranteedColor;
+            }
+        }
+        const combo = Math.max(1, Math.floor(group.length / 4));
+        this.meta.combo = combo;
+        this.meta.removed = Number(this.meta.removed ?? 0) + group.length;
+        this.meta.lastChain = { playerId, size: group.length, color, at: Date.now() };
+        return { correct: true, points: group.length * group.length * combo, message: `Cadena ×${combo} de ${group.length}` };
+    }
+    reactorGroupSize(row, col) {
+        const color = Number(this.board[row]?.[col]?.value ?? 0);
+        if (color <= 0)
+            return 0;
+        const queue = [{ row, col }];
+        const visited = new Set();
+        while (queue.length) {
+            const current = queue.shift();
+            const key = `${current.row}:${current.col}`;
+            if (visited.has(key) || Number(this.board[current.row]?.[current.col]?.value ?? 0) !== color)
+                continue;
+            visited.add(key);
+            queue.push({ row: current.row - 1, col: current.col }, { row: current.row + 1, col: current.col }, { row: current.row, col: current.col - 1 }, { row: current.row, col: current.col + 1 });
+        }
+        return visited.size;
     }
     activeTeam(playerId) {
         return Math.max(0, this.turnOrder.indexOf(playerId)) % 2 === 0 ? "BLUE" : "RED";
@@ -1293,12 +1522,14 @@ export class GenericPuzzleEngine {
             const obstacles = shapes.filter((candidate) => candidate.id !== shape.id && !candidate.memberKeys.every((key) => removed.has(key)));
             // Una ligera superposición visual de las formas curvas de la silueta no
             // debe convertir el nivel en un interbloqueo imposible desde el inicio.
-            const initiallyOverlapping = new Set(obstacles.filter((obstacle) => rectanglesIntersect(shape, obstacle)).map((obstacle) => obstacle.id));
+            const initiallyOverlapping = new Set(obstacles.filter((obstacle) => boxesIntersect3d(shape, obstacle)).map((obstacle) => obstacle.id));
             const direction = directionOverride ?? shape.direction;
-            const vector = direction === "UP" ? { x: 0, y: -1 }
-                : direction === "RIGHT" ? { x: 1, y: 0 }
-                    : direction === "DOWN" ? { x: 0, y: 1 }
-                        : { x: -1, y: 0 };
+            const vector = direction === "UP" ? { x: 0, y: -1, z: 0 }
+                : direction === "RIGHT" ? { x: 1, y: 0, z: 0 }
+                    : direction === "DOWN" ? { x: 0, y: 1, z: 0 }
+                        : direction === "LEFT" ? { x: -1, y: 0, z: 0 }
+                            : direction === "FRONT" ? { x: 0, y: 0, z: -1 }
+                                : { x: 0, y: 0, z: 1 };
             const perpendicular = { x: -vector.y, y: vector.x };
             for (let step = 1; step <= 80; step += 1) {
                 const progress = step / 40;
@@ -1307,14 +1538,17 @@ export class GenericPuzzleEngine {
                 const projected = {
                     x: shape.x + vector.x * progress + perpendicular.x * curve,
                     y: shape.y + vector.y * progress + perpendicular.y * curve,
+                    z: shape.z + vector.z * progress,
                     width: shape.width,
                     height: shape.height,
+                    depth: shape.depth,
                 };
                 const outside = projected.x + projected.width < 0 || projected.x > 1
-                    || projected.y + projected.height < 0 || projected.y > 1;
+                    || projected.y + projected.height < 0 || projected.y > 1
+                    || projected.z + projected.depth < 0 || projected.z > 1;
                 if (outside)
                     return true;
-                if (obstacles.some((obstacle) => !initiallyOverlapping.has(obstacle.id) && rectanglesIntersect(projected, obstacle)))
+                if (obstacles.some((obstacle) => !initiallyOverlapping.has(obstacle.id) && boxesIntersect3d(projected, obstacle)))
                     return false;
             }
             return false;
@@ -1454,8 +1688,15 @@ export class GenericPuzzleEngine {
         if (this.gameType === "NURIKABE") {
             return this.board.every((row, y) => row.every((cell, x) => cell.meta.islandClue === true || cell.value === (this.answers[y][x] === true ? "RIVER" : "ISLAND")));
         }
-        if (this.gameType === "NEXUS_ZERO")
-            return this.board.flat().every((cell) => cell.value === null);
+        if (this.gameType === "NEXUS_ZERO") {
+            return this.board.flat().every((cell) => cell.value === null)
+                && Number(this.meta.nexusRound ?? 1) >= Number(this.meta.nexusTargetRounds ?? 3);
+        }
+        if (this.gameType === "TOWER_DEFENSE")
+            return this.completed;
+        if (this.gameType === "REACTOR_CHAIN") {
+            return Number(this.meta.removed ?? 0) >= Number(this.meta.targetRemoved ?? 100);
+        }
         if (["HITORI", "BRIDGES"].includes(this.gameType)) {
             return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] !== true || cell.ownerId !== null));
         }
@@ -2090,6 +2331,14 @@ function rectanglesIntersect(first, second) {
         && first.x + first.width > second.x
         && first.y < second.y + second.height
         && first.y + first.height > second.y;
+}
+function boxesIntersect3d(first, second) {
+    return rectanglesIntersect(first, second)
+        && first.z < second.z + second.depth
+        && first.z + first.depth > second.z;
+}
+function cellIsTower(cell) {
+    return typeof cell.meta.towerType === "string";
 }
 function neighbourFor(row, col, side, rows, columns) {
     const target = side === "top" ? { row: row - 1, col }

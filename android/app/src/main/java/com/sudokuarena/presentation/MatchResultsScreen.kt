@@ -221,4 +221,6 @@ private fun gameName(gameType: GameType): String = when (gameType) {
     GameType.DEMOLITION_ARCADE -> "Demolición Arcade"
     GameType.MEMORY_NEON -> "Memoria Neón"
     GameType.MERGE_2048 -> "2048 Arena"
+    GameType.TOWER_DEFENSE -> "Defensa de Torres"
+    GameType.REACTOR_CHAIN -> "Reactor Chain"
 }

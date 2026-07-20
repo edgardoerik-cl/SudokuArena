@@ -31,6 +31,8 @@ class LocalTetrisEngine(
     private var hold: String? = null
     private var canHold = true
     private var cleanBombUsed = false
+    private var abilityEnergy = 0
+    private var bombsUsed = 0
     private var rotation = 0
     private var x = 3
     private var y = -1
@@ -57,15 +59,18 @@ class LocalTetrisEngine(
                     canPlace(x + dx, y + dy, target)
                 }?.let { (dx, dy) -> x += dx; y += dy; rotation = target }
             }
-            "HOLD" -> if (canHold) {
+            "HOLD" -> if (canHold && abilityEnergy >= 1) {
                 val previous = hold
                 hold = current
                 current = previous ?: next.also { next = drawPiece() }
                 rotation = 0; x = 3; y = -1; canHold = false
+                abilityEnergy--
             }
-            "CLEAN_BOMB" -> if (!cleanBombUsed) {
+            "CLEAN_BOMB" -> if (abilityEnergy >= 4) {
                 repeat(3) { board.removeAt(board.lastIndex); board.add(0, MutableList(10) { 0 }) }
                 cleanBombUsed = true
+                bombsUsed++
+                abilityEnergy -= 4
                 score += 150
             }
         }
@@ -88,6 +93,7 @@ class LocalTetrisEngine(
             players = listOf(TetrisPlayerState(
                 "solo", playerName, "#00E5FF", visible, next, score, lines, gameOver,
                 impact, current, hold, canHold, cleanBombUsed,
+                abilityEnergy, bombsUsed, 0,
             )),
         )
     }
@@ -113,6 +119,7 @@ class LocalTetrisEngine(
         val removed = 20 - remaining.size
         if (removed > 0) {
             lines += removed
+            abilityEnergy = (abilityEnergy + removed).coerceAtMost(8)
             score += removed * removed * 100
             board = (MutableList(removed) { MutableList(10) { 0 } } + remaining.map { it.toMutableList() }).toMutableList()
         }

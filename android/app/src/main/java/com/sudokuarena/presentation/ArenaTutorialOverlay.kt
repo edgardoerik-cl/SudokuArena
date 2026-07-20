@@ -229,4 +229,14 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("Combina", "Dos valores iguales se fusionan: 2+2=4, 4+4=8 y así sucesivamente.", "2 + 2 = 4"),
         TutorialStep("Alcanza la meta", "La meta depende de la dificultad. Cada fusión suma puntos inmediatamente.", "128  →  256  →  512"),
     )
+    GameType.TOWER_DEFENSE -> listOf(
+        TutorialStep("Construye", "Selecciona una zona verde y coloca una torre. Cada tipo tiene alcance, cadencia y costo distintos.", "♜  +  camino"),
+        TutorialStep("Lanza la oleada", "Cuando tu equipo esté preparado, inicia la siguiente oleada. Las torres atacan automáticamente.", "▶  enemigos"),
+        TutorialStep("Defiende el núcleo", "Mejora torres y combina ralentización con daño. Ganan si el núcleo resiste las 20 oleadas.", "◆  20"),
+    )
+    GameType.REACTOR_CHAIN -> listOf(
+        TutorialStep("Busca grupos", "Toca un grupo de 3 o más reactores del mismo color conectados por sus lados.", "● ● ●"),
+        TutorialStep("Crea cadenas", "Los reactores desaparecen, caen nuevas piezas y los grupos grandes multiplican tu puntuación.", "×2  ×3"),
+        TutorialStep("Llena el objetivo", "Encadena grupos antes que tus rivales hasta alcanzar el objetivo de energía de la arena.", "⚛  100%"),
+    )
 }

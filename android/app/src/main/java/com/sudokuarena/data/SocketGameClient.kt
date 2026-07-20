@@ -531,6 +531,9 @@ private fun parseTetrisState(json: JSONObject): TetrisArenaState {
                 hold = player.nullableString("hold"),
                 canHold = player.optBoolean("canHold", true),
                 cleanBombUsed = player.optBoolean("cleanBombUsed"),
+                abilityEnergy = player.optInt("abilityEnergy"),
+                bombsUsed = player.optInt("bombsUsed"),
+                garbageSent = player.optInt("garbageSent"),
             )
         },
     )

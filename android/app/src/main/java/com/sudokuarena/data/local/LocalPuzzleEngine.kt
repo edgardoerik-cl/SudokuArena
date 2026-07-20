@@ -47,6 +47,11 @@ class LocalPuzzleEngine(
     private var arrowMissileUses = 0
     private var nurikabeSonarUses = 0
     private var memoryFirstPick: Pair<Int, Int>? = null
+    private var nexusRound = 1
+    private var towerCredits = 400
+    private var towerWave = 0
+    private var towerBaseHealth = 20
+    private var reactorRemoved = 0
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
@@ -77,6 +82,20 @@ class LocalPuzzleEngine(
             if (gameType == GameType.NURIKABE) mapOf(
                 "sonarUses" to mapOf(OWNER to nurikabeSonarUses),
             ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.NEXUS_ZERO) mapOf(
+                "nexusRound" to nexusRound,
+                "nexusTargetRounds" to (blueprint.meta["nexusTargetRounds"] ?: 3),
+            ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.TOWER_DEFENSE) mapOf(
+                "wave" to towerWave,
+                "baseHealth" to towerBaseHealth,
+                "credits" to mapOf(OWNER to towerCredits),
+                "maxWaves" to 20,
+            ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.REACTOR_CHAIN) mapOf(
+                "removed" to reactorRemoved,
+                "targetRemoved" to (blueprint.meta["targetRemoved"] ?: 100),
+            ) else emptyMap<String, Any?>() +
             if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
             "dice" to capitalDice, "lastEvent" to capitalEvent, "surpriseCard" to capitalCard,
@@ -92,6 +111,8 @@ class LocalPuzzleEngine(
         val cell = board.getOrNull(row)?.getOrNull(col) ?: return reject("Movimiento fuera del tablero")
         if (gameType == GameType.CAPITAL_ARENA) return capitalMove(value)
         if (gameType == GameType.MERGE_2048) return merge2048Move(value)
+        if (gameType == GameType.TOWER_DEFENSE) return towerDefenseMove(row, col, value)
+        if (gameType == GameType.REACTOR_CHAIN) return reactorChainMove(row, col)
         if (gameType == GameType.MEMORY_NEON) {
             board.forEachIndexed { y, cells -> cells.forEachIndexed { x, candidate ->
                 if (candidate.meta["mismatch"] == true) {
@@ -340,12 +361,15 @@ class LocalPuzzleEngine(
             board.flatten().count { it.meta["team"] == "RED" } == 0
         GameType.CHESS_TACTICS -> board.flatten().count { it.value == "KING" } < 2
         GameType.HANGMAN -> board.first().all { it.value != null } || hangmanErrors >= 6
-        GameType.NEXUS_ZERO -> board.flatten().all { it.value == null }
+        GameType.NEXUS_ZERO -> board.flatten().all { it.value == null } &&
+            nexusRound >= ((blueprint.meta["nexusTargetRounds"] as? Number)?.toInt() ?: 3)
         GameType.MEMORY_NEON -> board.flatten().all { it.ownerId != null }
         GameType.MERGE_2048 -> {
             val target = (blueprint.meta["target"] as? Number)?.toInt() ?: 256
             board.flatten().any { ((it.value as? Number)?.toInt() ?: 0) >= target } || mergeHasNoMoves()
         }
+        GameType.TOWER_DEFENSE -> towerBaseHealth <= 0 || towerWave >= 20
+        GameType.REACTOR_CHAIN -> reactorRemoved >= ((blueprint.meta["targetRemoved"] as? Number)?.toInt() ?: 100)
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -362,6 +386,8 @@ class LocalPuzzleEngine(
         GameType.CHESS_TACTICS -> chessHotseat()
         GameType.MEMORY_NEON -> memoryNeon()
         GameType.MERGE_2048 -> merge2048()
+        GameType.TOWER_DEFENSE -> towerDefense()
+        GameType.REACTOR_CHAIN -> reactorChain()
         GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.DEMOLITION_ARCADE ->
             result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
@@ -736,7 +762,18 @@ class LocalPuzzleEngine(
         return result(
             cells,
             matrix(boardSize, boardSize) { _, _ -> null },
-            mapOf("actionMode" to true, "engine" to "NEXUS_SWIPE", "pairCount" to pairCount, "instructions" to "Desliza +N contra -N para crear Nexo Cero."),
+            mapOf(
+                "actionMode" to true,
+                "engine" to "NEXUS_SWIPE",
+                "pairCount" to pairCount,
+                "nexusTargetRounds" to when (difficulty) {
+                    PuzzleDifficulty.EASY -> 3
+                    PuzzleDifficulty.MEDIUM -> 4
+                    PuzzleDifficulty.HARD -> 5
+                    PuzzleDifficulty.EXPERT -> 6
+                },
+                "instructions" to "Desliza +N contra -N para crear Nexo Cero.",
+            ),
         )
     }
 
@@ -765,7 +802,29 @@ class LocalPuzzleEngine(
         }
         if (next == old) return reject("Las fichas están bloqueadas en esa dirección")
         board = next.map { row -> row.map { value -> GenericCell(value = value, isRevealed = value != null, meta = if (value != null) mapOf("charge" to true) else emptyMap()) } }
+        val targetRounds = (blueprint.meta["nexusTargetRounds"] as? Number)?.toInt() ?: 3
+        if (board.flatten().all { it.value == null } && nexusRound < targetRounds) {
+            nexusRound++
+            spawnLocalNexusWave(maxOf(2, (size * .34f).toInt()))
+        }
         return accept(merges * 25)
+    }
+
+    private fun spawnLocalNexusWave(pairCount: Int) {
+        val size = board.size
+        val positions = buildList {
+            repeat(size) { row -> repeat(size) { col -> add(row to col) } }
+        }.shuffled(random)
+        val next = MutableList(size) { MutableList(size) { GenericCell() } }
+        repeat(minOf(pairCount, positions.size / 2)) { pair ->
+            val value = random.nextInt(1, 10)
+            val sign = if (random.nextBoolean()) 1 else -1
+            val first = positions[pair * 2]
+            val second = positions[pair * 2 + 1]
+            next[first.first][first.second] = GenericCell(value * sign, true, meta = mapOf("charge" to true))
+            next[second.first][second.second] = GenericCell(-value * sign, true, meta = mapOf("charge" to true))
+        }
+        board = next
     }
 
     private fun crossLetters(): Blueprint {
@@ -780,6 +839,99 @@ class LocalPuzzleEngine(
         }
         val answers = matrix<Any?>(15, 15) { _, _ -> null }
         return result(board, answers, mapOf("rack" to listOf("M", "E", "N", "T", "E", "S", "O"), "instructions" to "El tablero comienza con ARENA. Cruza una palabra válida usando tu atril."))
+    }
+
+    private fun towerDefense(): Blueprint {
+        val rows = 9
+        val columns = 14
+        val path = buildList {
+            for (col in 0 until columns) add(1 to col)
+            for (row in 2..4) add(row to columns - 1)
+            for (col in columns - 2 downTo 1) add(4 to col)
+            for (row in 5..7) add(row to 1)
+            for (col in 2 until columns) add(7 to col)
+        }
+        val indexed = path.withIndex().associate { it.value to it.index }
+        return result(
+            matrix(rows, columns) { row, col ->
+                val index = indexed[row to col]
+                if (index == null) GenericCell(meta = mapOf("buildable" to true))
+                else GenericCell(isRevealed = true, isBlocked = true, meta = mapOf(
+                    "path" to true, "pathIndex" to index, "spawn" to (index == 0), "base" to (index == path.lastIndex),
+                ))
+            },
+            matrix(rows, columns) { _, _ -> null },
+            mapOf("actionMode" to true, "engine" to "COOP_TOWER_DEFENSE", "path" to path, "maxWaves" to 20),
+        )
+    }
+
+    private fun reactorChain(): Blueprint {
+        val boardSize = size(7, 8, 9, 10)
+        val colors = if (difficulty == PuzzleDifficulty.EASY) 4 else if (difficulty == PuzzleDifficulty.EXPERT) 6 else 5
+        val guaranteed = random.nextInt(1, colors + 1)
+        val reactorBoard = matrix(boardSize, boardSize) { row, col ->
+            val value = if ((row == 0 && col <= 1) || (row == 1 && col == 0)) guaranteed
+                else random.nextInt(1, colors + 1)
+            GenericCell(value, true, meta = mapOf("reactorOrb" to true))
+        }
+        return result(
+            reactorBoard,
+            matrix(boardSize, boardSize) { _, _ -> null },
+            mapOf("actionMode" to true, "engine" to "REACTOR_CHAIN", "colors" to colors, "targetRemoved" to boardSize * boardSize * 2),
+        )
+    }
+
+    private fun towerDefenseMove(row: Int, col: Int, raw: Any?): LocalPuzzleMoveResult {
+        val payload = raw as? Map<*, *>
+        val action = payload?.get("action")?.toString()?.uppercase() ?: "BUILD"
+        if (action == "START_WAVE") {
+            towerWave++
+            val damage = board.flatten().sumOf { cell ->
+                val base = when (cell.meta["towerType"]) { "SNIPER" -> 8; "BLAST" -> 6; "FROST" -> 3; "RAPID" -> 4; else -> 0 }
+                base * ((cell.meta["level"] as? Number)?.toInt() ?: 1)
+            }
+            val enemies = 5 + towerWave * 2
+            val defeated = minOf(enemies, damage / maxOf(2, (1 + towerWave / 5) * 2))
+            towerBaseHealth = maxOf(0, towerBaseHealth - (enemies - defeated))
+            towerCredits += defeated * 8
+            return accept(defeated * 5)
+        }
+        val target = board.getOrNull(row)?.getOrNull(col) ?: return reject("Terreno inválido")
+        if (target.meta["buildable"] != true || target.meta["towerType"] != null) return reject("Selecciona un terreno libre")
+        val type = payload?.get("towerType")?.toString()?.uppercase() ?: "RAPID"
+        val cost = mapOf("RAPID" to 100, "BLAST" to 150, "SNIPER" to 180, "FROST" to 130)[type] ?: return reject("Torre inválida")
+        if (towerCredits < cost) return reject("Créditos insuficientes")
+        towerCredits -= cost
+        replace(row, col, target.copy(value = type, isRevealed = true, ownerId = OWNER, meta = target.meta + mapOf("towerType" to type, "level" to 1)))
+        return accept(10)
+    }
+
+    private fun reactorChainMove(row: Int, col: Int): LocalPuzzleMoveResult {
+        val color = (board.getOrNull(row)?.getOrNull(col)?.value as? Number)?.toInt() ?: return reject("Núcleo vacío")
+        val queue = ArrayDeque<Pair<Int, Int>>()
+        val group = linkedSetOf<Pair<Int, Int>>()
+        queue.add(row to col)
+        while (queue.isNotEmpty()) {
+            val point = queue.removeFirst()
+            if (point in group || (board.getOrNull(point.first)?.getOrNull(point.second)?.value as? Number)?.toInt() != color) continue
+            group += point
+            queue.add(point.first - 1 to point.second)
+            queue.add(point.first + 1 to point.second)
+            queue.add(point.first to point.second - 1)
+            queue.add(point.first to point.second + 1)
+        }
+        if (group.size < 3) return reject("Necesitas 3 núcleos conectados")
+        val colors = (blueprint.meta["colors"] as? Number)?.toInt() ?: 5
+        val next = board.map { it.toMutableList() }.toMutableList()
+        group.forEach { (y, x) -> next[y][x] = GenericCell() }
+        for (x in next[0].indices) {
+            val values = next.mapNotNull { (it[x].value as? Number)?.toInt() }.toMutableList()
+            while (values.size < next.size) values.add(0, random.nextInt(1, colors + 1))
+            values.forEachIndexed { y, value -> next[y][x] = GenericCell(value, true, meta = mapOf("reactorOrb" to true)) }
+        }
+        board = next
+        reactorRemoved += group.size
+        return accept(group.size * group.size)
     }
 
     private fun secretCode(): Blueprint {

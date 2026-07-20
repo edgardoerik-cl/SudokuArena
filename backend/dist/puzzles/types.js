@@ -22,6 +22,8 @@ export const GAME_TYPES = [
     "CHECKERS",
     "DEMOLITION_ARCADE",
     "MEMORY_NEON",
-    "MERGE_2048"
+    "MERGE_2048",
+    "TOWER_DEFENSE",
+    "REACTOR_CHAIN"
 ];
 //# sourceMappingURL=types.js.map

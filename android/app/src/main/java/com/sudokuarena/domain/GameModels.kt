@@ -41,7 +41,7 @@ enum class GameType {
     DOTS_AND_BOXES, KAKURO, MATHDOKU, HITORI, CHESS_TACTICS,
     NURIKABE, BRIDGES, TETRIS_ARENA, HANGMAN, ARROWS_ESCAPE, PACMAN_ARENA,
     CROSS_LETTERS, SECRET_CODE, CAPITAL_ARENA, NEXUS_ZERO, CHECKERS, DEMOLITION_ARCADE,
-    MEMORY_NEON, MERGE_2048,
+    MEMORY_NEON, MERGE_2048, TOWER_DEFENSE, REACTOR_CHAIN,
 }
 enum class RoomPhase { LOBBY, RPS, PLAYING, PAUSED, SUDDEN_DEATH, FINISHED }
 
@@ -88,6 +88,9 @@ data class TetrisPlayerState(
     val hold: String? = null,
     val canHold: Boolean = true,
     val cleanBombUsed: Boolean = false,
+    val abilityEnergy: Int = 0,
+    val bombsUsed: Int = 0,
+    val garbageSent: Int = 0,
 )
 data class TetrisArenaState(
     val serverTime: Long,

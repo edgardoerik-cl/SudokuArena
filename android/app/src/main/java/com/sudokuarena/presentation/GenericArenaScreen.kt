@@ -56,6 +56,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -192,9 +193,15 @@ fun GenericArenaScreen(
                     PuzzleProgressSummary(generic)
                     PuzzleHints(generic)
                     if (state.gameType == GameType.ARROWS_ESCAPE) ArrowRaceProgress(state)
-                    GenericMoveControls(
-                        state, state.canMakeGenericMove, onMove, onMoveAt, onSecretChat,
-                    )
+                    // Algunos controles (teclado del Ahorcado, pistas y acciones
+                    // globales) envían una coordenada propia y no necesitan que
+                    // el usuario seleccione antes una casilla del tablero.
+                    val controlsEnabled = if (state.gameType in setOf(
+                            GameType.HANGMAN, GameType.HITORI, GameType.MERGE_2048,
+                            GameType.TOWER_DEFENSE,
+                        )
+                    ) state.canInteractGeneric else state.canMakeGenericMove
+                    GenericMoveControls(state, controlsEnabled, onMove, onMoveAt, onSecretChat)
                     if (!state.isSoloMode) {
                         ReactionMenu(onReaction)
                         GlobalGameChat(state, onGlobalChat)
@@ -537,12 +544,19 @@ private fun AnimatedArrowsGrid(
                 val isFlying = shape.memberKeys.any(flying::contains)
                 if (isRemoved && !isFlying) return@forEach
                 val direction = shape.direction
-                val vector = when (direction) {
-                    "UP" -> Offset(0f, -1f)
-                    "RIGHT" -> Offset(1f, 0f)
-                    "DOWN" -> Offset(0f, 1f)
-                    else -> Offset(-1f, 0f)
+                val worldVector = when (direction) {
+                    "UP" -> Triple(0f, -1f, 0f)
+                    "RIGHT" -> Triple(1f, 0f, 0f)
+                    "DOWN" -> Triple(0f, 1f, 0f)
+                    "LEFT" -> Triple(-1f, 0f, 0f)
+                    "FRONT" -> Triple(0f, 0f, -1f)
+                    else -> Triple(0f, 0f, 1f)
                 }
+                val screenX = worldVector.first * kotlin.math.cos(orbitYaw) + worldVector.third * kotlin.math.sin(orbitYaw)
+                val screenDepth = -worldVector.first * kotlin.math.sin(orbitYaw) + worldVector.third * kotlin.math.cos(orbitYaw)
+                val screenY = worldVector.second * kotlin.math.cos(orbitPitch) - screenDepth * kotlin.math.sin(orbitPitch)
+                val vectorLength = kotlin.math.sqrt(screenX * screenX + screenY * screenY).coerceAtLeast(.08f)
+                val vector = Offset(screenX / vectorLength, screenY / vectorLength)
                 val escape = if (isFlying) flight.value else 0f
                 val curveSign = if (shape.pathType == "CURVE_LEFT") -1f else if (shape.pathType == "CURVE_RIGHT") 1f else 0f
                 val curve = curveSign * sin(escape * Math.PI.toFloat()) * size.minDimension * .11f
@@ -565,6 +579,23 @@ private fun AnimatedArrowsGrid(
                 val maxOffsetY = shape.offsets.maxOfOrNull { it.second }?.coerceAtLeast(0) ?: 0
                 val segmentWidth = shapeWidth / (maxOffsetX + 1)
                 val segmentHeight = shapeHeight / (maxOffsetY + 1)
+                val extrusion = min(shapeWidth, shapeHeight) * (.10f + shape.depth * 1.6f)
+                val topFace = Path().apply {
+                    moveTo(origin.x, origin.y)
+                    lineTo(origin.x + extrusion, origin.y - extrusion)
+                    lineTo(origin.x + shapeWidth + extrusion, origin.y - extrusion)
+                    lineTo(origin.x + shapeWidth, origin.y)
+                    close()
+                }
+                val sideFace = Path().apply {
+                    moveTo(origin.x + shapeWidth, origin.y)
+                    lineTo(origin.x + shapeWidth + extrusion, origin.y - extrusion)
+                    lineTo(origin.x + shapeWidth + extrusion, origin.y + shapeHeight - extrusion)
+                    lineTo(origin.x + shapeWidth, origin.y + shapeHeight)
+                    close()
+                }
+                drawPath(topFace, color.copy(alpha = .48f * alpha))
+                drawPath(sideFace, Color.Black.copy(alpha = .24f * alpha))
                 shape.offsets.forEach { (x, y) ->
                     val segmentOrigin = origin + Offset(x * segmentWidth, y * segmentHeight)
                     val inset = min(segmentWidth, segmentHeight) * .06f
@@ -583,7 +614,10 @@ private fun AnimatedArrowsGrid(
                     )
                 }
                 drawCenteredText(
-                    when (direction) { "UP" -> "↑"; "RIGHT" -> "→"; "DOWN" -> "↓"; else -> "←" },
+                    when (direction) {
+                        "UP" -> "↑"; "RIGHT" -> "→"; "DOWN" -> "↓"; "LEFT" -> "←"
+                        "FRONT" -> "⊙"; else -> "⊗"
+                    },
                     origin + Offset(shapeWidth / 2f, shapeHeight / 2f),
                     max(shapeWidth, shapeHeight) * .72f,
                     textMeasurer,
@@ -734,6 +768,7 @@ private data class SpatialArrowShape(
     val direction: String,
     val pathType: String,
     val z: Float,
+    val depth: Float,
     val blockType: String,
     val memberKeys: List<String>,
 )
@@ -754,6 +789,7 @@ private fun parseSpatialArrowShapes(state: GenericBoardState): List<SpatialArrow
             direction = shape["direction"]?.toString().orEmpty(),
             pathType = shape["pathType"]?.toString() ?: "STRAIGHT",
             z = (shape["z"] as? Number)?.toFloat() ?: .5f,
+            depth = (shape["depth"] as? Number)?.toFloat() ?: .06f,
             blockType = shape["blockType"]?.toString() ?: "NORMAL",
             memberKeys = (shape["memberKeys"] as? List<*>)?.map { it.toString() }.orEmpty(),
         )
@@ -774,13 +810,16 @@ private fun canArrowEscapeClient(
         }
         val initiallyOverlapping = obstacles.filter { other ->
             shape.x < other.x + other.width && shape.x + shape.width > other.x &&
-                shape.y < other.y + other.height && shape.y + shape.height > other.y
+                shape.y < other.y + other.height && shape.y + shape.height > other.y &&
+                shape.z < other.z + other.depth && shape.z + shape.depth > other.z
         }.mapTo(mutableSetOf()) { it.id }
         val vector = when (shape.direction) {
-            "UP" -> 0f to -1f
-            "RIGHT" -> 1f to 0f
-            "DOWN" -> 0f to 1f
-            else -> -1f to 0f
+            "UP" -> Triple(0f, -1f, 0f)
+            "RIGHT" -> Triple(1f, 0f, 0f)
+            "DOWN" -> Triple(0f, 1f, 0f)
+            "LEFT" -> Triple(-1f, 0f, 0f)
+            "FRONT" -> Triple(0f, 0f, -1f)
+            else -> Triple(0f, 0f, 1f)
         }
         val perpendicular = -vector.second to vector.first
         repeat(80) { index ->
@@ -789,11 +828,15 @@ private fun canArrowEscapeClient(
             val curve = sign * sin(progress.coerceAtMost(1f) * Math.PI.toFloat()) * .11f
             val x = shape.x + vector.first * progress + perpendicular.first * curve
             val y = shape.y + vector.second * progress + perpendicular.second * curve
-            if (x + shape.width < 0 || x > 1 || y + shape.height < 0 || y > 1) return true
+            val z = shape.z + vector.third * progress
+            if (x + shape.width < 0 || x > 1 || y + shape.height < 0 || y > 1 ||
+                z + shape.depth < 0 || z > 1
+            ) return true
             if (obstacles.any { other ->
                     other.id !in initiallyOverlapping &&
                     x < other.x + other.width && x + shape.width > other.x
                         && y < other.y + other.height && y + shape.height > other.y
+                        && z < other.z + other.depth && z + shape.depth > other.z
                 }) return false
         }
         return false
@@ -1669,6 +1712,61 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
             )
             drawFittedCellText(number, center, width * .92f, textMeasurer, if (number <= 4) Color(0xFF102A56) else Color.White)
         }
+        GameType.TOWER_DEFENSE -> {
+            val isPath = meta["path"] == true
+            if (isPath) {
+                drawRoundRect(
+                    Color(0xFF334155),
+                    origin + Offset(1f, 1f),
+                    Size(width - 2f, height - 2f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(min(width, height) * .12f),
+                )
+                drawLine(
+                    Color(0xFF94A3B8),
+                    Offset(origin.x + width * .12f, center.y),
+                    Offset(origin.x + width * .88f, center.y),
+                    maxOf(1.5f, height * .045f),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(6f, 5f)),
+                )
+                when {
+                    meta["spawn"] == true -> drawCenteredText("▶", center, width * .78f, textMeasurer, Color(0xFF22C55E))
+                    meta["base"] == true -> drawCenteredText("◆", center, width * .78f, textMeasurer, Color(0xFFFACC15))
+                }
+            } else {
+                drawRect(Color(0xFFDDF4E5), origin + Offset(1f, 1f), Size(width - 2f, height - 2f))
+                val towerType = meta["towerType"]?.toString()
+                if (towerType != null) {
+                    val towerColor = when (towerType) {
+                        "BLAST" -> Color(0xFFF97316)
+                        "SNIPER" -> Color(0xFF7C3AED)
+                        "FROST" -> Color(0xFF06B6D4)
+                        else -> Color(0xFF2563EB)
+                    }
+                    val pulse = 1f + sin(animationPhase * Math.PI.toFloat() * 2f) * .06f
+                    drawCircle(towerColor.copy(alpha = .18f), min(width, height) * .42f * pulse, center)
+                    drawCircle(towerColor, min(width, height) * .28f, center)
+                    drawLine(
+                        Color.White,
+                        center,
+                        Offset(center.x, origin.y + height * .14f),
+                        maxOf(2f, width * .07f),
+                    )
+                    val level = (meta["level"] as? Number)?.toInt() ?: 1
+                    drawCenteredText(level, center, width * .55f, textMeasurer, Color.White)
+                }
+            }
+        }
+        GameType.REACTOR_CHAIN -> if (value != null) {
+            val orbColors = listOf(
+                Color(0xFFEF4444), Color(0xFF2563EB), Color(0xFF16A34A),
+                Color(0xFFFACC15), Color(0xFF9333EA), Color(0xFFF97316),
+            )
+            val color = orbColors[((value as? Number)?.toInt() ?: 1).minus(1).mod(orbColors.size)]
+            val pulse = .30f + sin((animationPhase + ((meta["_row"] as? Number)?.toFloat() ?: 0f) * .08f) * Math.PI.toFloat() * 2f) * .025f
+            drawCircle(color.copy(alpha = .24f), min(width, height) * (pulse + .10f), center)
+            drawCircle(color, min(width, height) * pulse, center)
+            drawCircle(Color.White.copy(alpha = .72f), min(width, height) * .09f, center - Offset(width * .08f, height * .08f))
+        }
         GameType.HITORI -> {
             drawCenteredText(value, center, width, textMeasurer, if (isBlocked) Color.White else Color(0xFF102A56))
         }
@@ -1774,7 +1872,7 @@ private fun GenericMoveControls(
     when (gameType) {
         GameType.MINESWEEPER, GameType.TIC_TAC_TOE, GameType.DOTS_AND_BOXES,
         GameType.BRIDGES, GameType.NEXUS_ZERO, GameType.ARROWS_ESCAPE,
-        GameType.CHECKERS, GameType.MEMORY_NEON -> Unit
+        GameType.CHECKERS, GameType.MEMORY_NEON, GameType.REACTOR_CHAIN -> Unit
         GameType.HITORI -> Button(
             onClick = { onMoveAt(0, 0, mapOf("action" to "HINT")) },
             enabled = enabled,
@@ -1802,6 +1900,42 @@ private fun GenericMoveControls(
                     Button({ onMoveAt(0, 0, "DOWN") }, enabled = enabled) { Text("↓") }
                     Button({ onMoveAt(0, 0, "RIGHT") }, enabled = enabled) { Text("→") }
                 }
+            }
+        }
+        GameType.TOWER_DEFENSE -> {
+            var tower by remember { mutableStateOf("RAPID") }
+            val credits = ((state.genericBoard?.meta?.get("credits") as? Map<*, *>)?.get(state.playerId) as? Number)?.toInt() ?: 0
+            val wave = (state.genericBoard?.meta?.get("wave") as? Number)?.toInt() ?: 0
+            val health = (state.genericBoard?.meta?.get("baseHealth") as? Number)?.toInt() ?: 20
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("BASE $health ♥ · OLEADA $wave/20 · $credits créditos", fontWeight = FontWeight.Black)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("RAPID" to "⚡100", "BLAST" to "💥150", "SNIPER" to "◎180", "FROST" to "❄130").forEach { (id, label) ->
+                        OutlinedButton(
+                            onClick = { tower = id },
+                            modifier = Modifier.weight(1f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                if (tower == id) 2.dp else 1.dp,
+                                if (tower == id) Color(0xFF7C3AED) else Color(0xFF94A3B8),
+                            ),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
+                        ) { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Black) }
+                    }
+                }
+                Button(
+                    onClick = {
+                        val target = state.selected ?: return@Button
+                        onMoveAt(target.row, target.column, mapOf("action" to "BUILD", "towerType" to tower))
+                    },
+                    enabled = enabled && state.selected != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("CONSTRUIR EN CASILLA SELECCIONADA", fontWeight = FontWeight.Black) }
+                Button(
+                    onClick = { onMoveAt(0, 0, mapOf("action" to "START_WAVE")) },
+                    enabled = enabled && health > 0 && wave < 20,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                ) { Text("▶ LANZAR OLEADA", fontWeight = FontWeight.Black) }
             }
         }
         GameType.HANGMAN -> {
@@ -1868,30 +2002,74 @@ private fun GenericMoveControls(
         }
         GameType.CROSS_LETTERS -> {
             var vertical by remember { mutableStateOf(false) }
-            val normalized = text.uppercase().filter { it in "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ" }
-            val available = state.letterRack.groupingBy { it }.eachCount().toMutableMap()
-            val usesRack = normalized.all { letter ->
-                val count = available[letter.toString()] ?: 0
-                if (count <= 0) false else { available[letter.toString()] = count - 1; true }
-            }
+            var chosen by remember(state.letterRack) { mutableStateOf(emptyList<Int>()) }
+            val normalized = chosen.mapNotNull(state.letterRack::getOrNull).joinToString("")
+            val selectedCell = state.selected
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    if (selectedCell == null) "1. Toca la casilla donde comenzará la palabra"
+                    else "Inicio ${selectedCell.row + 1},${selectedCell.column + 1} · toca las fichas en orden",
+                    fontWeight = FontWeight.Black,
+                    color = if (selectedCell == null) Color(0xFFD97706) else Color(0xFF047857),
+                )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    state.letterRack.forEach { letter ->
-                        Surface(shape = RoundedCornerShape(7.dp), color = Color(0xFFFFF4C2), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF7A4E00))) {
-                            Text(letter, Modifier.padding(horizontal = 9.dp, vertical = 7.dp), fontWeight = FontWeight.Black)
+                    state.letterRack.forEachIndexed { index, letter ->
+                        val used = index in chosen
+                        Surface(
+                            shape = RoundedCornerShape(9.dp),
+                            color = if (used) Color(0xFF94A3B8) else Color(0xFFFFF4C2),
+                            border = androidx.compose.foundation.BorderStroke(
+                                2.dp,
+                                if (used) Color(0xFF475569) else Color(0xFF7A4E00),
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clickable(enabled = enabled && !used) { chosen = chosen + index },
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text(letter, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                            }
                         }
                     }
                 }
-                OutlinedTextField(normalized, { text = it.take(15) }, label = { Text("Palabra del atril") }, modifier = Modifier.fillMaxWidth())
+                Surface(
+                    Modifier.fillMaxWidth().height(48.dp),
+                    color = Color(0xFFEFF6FF),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2563EB)),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            normalized.ifBlank { "FORMA TU PALABRA" },
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFF102A56),
+                        )
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedButton({ vertical = false }, modifier = Modifier.weight(1f)) { Text(if (!vertical) "✓ Horizontal" else "Horizontal") }
                     OutlinedButton({ vertical = true }, modifier = Modifier.weight(1f)) { Text(if (vertical) "✓ Vertical" else "Vertical") }
+                    OutlinedButton(
+                        { chosen = chosen.dropLast(1) },
+                        enabled = chosen.isNotEmpty(),
+                        modifier = Modifier.weight(.65f),
+                    ) { Text("⌫") }
                     Button(
-                        onClick = { onMove(mapOf("word" to normalized, "direction" to if (vertical) "V" else "H")); text = "" },
-                        enabled = enabled && normalized.length >= 2 && usesRack,
+                        onClick = {
+                            onMove(mapOf("word" to normalized, "direction" to if (vertical) "V" else "H"))
+                            chosen = emptyList()
+                        },
+                        enabled = enabled && selectedCell != null && normalized.length >= 2,
                         modifier = Modifier.weight(1f),
-                    ) { Text("Jugar") }
+                    ) { Text("JUGAR", fontWeight = FontWeight.Black) }
                 }
+                Text(
+                    "Blitz: todos juegan a la vez. Los cruces y casillas DL/TL/DW/TW multiplican puntos.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF475569),
+                )
             }
         }
         GameType.SECRET_CODE -> {
@@ -2022,6 +2200,8 @@ fun gameTitle(type: GameType): String = when (type) {
     GameType.DEMOLITION_ARCADE -> "Multi Arena · Demolición Arcade"
     GameType.MEMORY_NEON -> "Multi Arena · Memoria Neón"
     GameType.MERGE_2048 -> "Multi Arena · 2048 Arena"
+    GameType.TOWER_DEFENSE -> "Multi Arena · Defensa de Torres"
+    GameType.REACTOR_CHAIN -> "Multi Arena · Reactor Chain"
 }
 
 private fun formatGenericTime(milliseconds: Long): String {

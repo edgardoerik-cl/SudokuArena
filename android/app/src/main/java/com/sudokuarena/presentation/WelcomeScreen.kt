@@ -387,13 +387,12 @@ private fun GameCarouselSelector(
                     .clickable { onSelected(game) },
             ) {
                 Box(Modifier.fillMaxSize().padding(10.dp)) {
-                    AsyncImage(
-                        model = gameCoverResource(game),
-                        contentDescription = "Portada de ${gameMenuName(game)}",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().graphicsLayer { alpha = .34f },
+                    GameCoverBackdrop(game, Modifier.fillMaxSize())
+                    GameLoopPreview(
+                        game = game,
+                        active = game == selected,
+                        modifier = Modifier.align(Alignment.Center).size(84.dp),
                     )
-                    GameLoopPreview(game, Modifier.align(Alignment.Center).size(84.dp))
                     Text(
                         gameMenuName(game), fontWeight = FontWeight.Black, color = ArenaColors.Ink,
                         modifier = Modifier.align(Alignment.BottomCenter),
@@ -417,9 +416,32 @@ private fun gameCoverResource(game: GameType): Int = when (game) {
 }
 
 @Composable
-private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
+private fun GameCoverBackdrop(game: GameType, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val hue = (game.ordinal * 41f) % 360f
+        val first = Color.hsv(hue, .68f, .92f)
+        val second = Color.hsv((hue + 74f) % 360f, .72f, .74f)
+        drawRect(
+            androidx.compose.ui.graphics.Brush.linearGradient(
+                listOf(first.copy(alpha = .30f), Color.White.copy(alpha = .82f), second.copy(alpha = .24f)),
+                start = Offset.Zero,
+                end = Offset(size.width, size.height),
+            ),
+        )
+        repeat(7) { index ->
+            val x = size.width * ((index * 37 + game.ordinal * 13) % 100) / 100f
+            val y = size.height * ((index * 53 + game.ordinal * 17) % 100) / 100f
+            drawCircle(if (index % 2 == 0) first else second, 3f + index % 3, Offset(x, y))
+        }
+    }
+}
+
+@Composable
+private fun GameLoopPreview(game: GameType, active: Boolean = true, modifier: Modifier = Modifier) {
     val phase by rememberInfiniteTransition(label = "preview-$game").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(1_600, easing = LinearEasing)), label = "previewPhase",
+        0f, 1f,
+        infiniteRepeatable(tween(if (active) 1_600 else 12_000, easing = LinearEasing)),
+        label = "previewPhase",
     )
     Canvas(modifier) {
         val accent = if (game.ordinal % 2 == 0) ArenaColors.ElectricBlue else ArenaColors.Violet
@@ -483,6 +505,27 @@ private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
                     Size(size.width * .25f, size.height * .27f),
                 )
                 drawCircle(Color.White.copy(alpha = .55f), number.length * 2.5f, Offset(size.width * (.315f + (index % 2) * .32f), size.height * (.355f + (index / 2) * .34f)))
+            }
+            GameType.TOWER_DEFENSE -> {
+                val pathY = size.height * .58f
+                drawLine(Color(0xFF475569), Offset(size.width * .08f, pathY), Offset(size.width * .92f, pathY), 18f)
+                repeat(3) { index ->
+                    val x = size.width * (.24f + index * .25f)
+                    drawCircle(listOf(Color.Cyan, Color.Magenta, Color(0xFFFFB300))[index], 9f, Offset(x, pathY - 20f))
+                    drawLine(Color.White, Offset(x, pathY - 20f), Offset(x + 7f, pathY - 32f), 3f)
+                }
+                drawCircle(Color(0xFFFF5252), 7f, Offset(size.width * (.08f + phase * .84f), pathY))
+            }
+            GameType.REACTOR_CHAIN -> repeat(12) { index ->
+                val col = index % 4
+                val row = index / 4
+                val colors = listOf(Color.Red, Color.Blue, Color.Green, Color.Yellow, Color.Magenta, Color(0xFFFF7A00))
+                val radius = if (active && ((phase * 12).toInt() + index) % 7 == 0) 10f else 7f
+                drawCircle(
+                    colors[(index + game.ordinal) % colors.size],
+                    radius,
+                    Offset(size.width * (.2f + col * .2f), size.height * (.28f + row * .23f)),
+                )
             }
             else -> repeat(9) { index ->
                 val col = index % 3; val row = index / 3
@@ -578,6 +621,7 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.NEXUS_ZERO -> "±0"
     GameType.CHECKERS -> "⛀"; GameType.DEMOLITION_ARCADE -> "●▰"
     GameType.MEMORY_NEON -> "◇◆"; GameType.MERGE_2048 -> "2048"
+    GameType.TOWER_DEFENSE -> "♜"; GameType.REACTOR_CHAIN -> "⚛"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
@@ -592,6 +636,7 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.NEXUS_ZERO -> "Nexo Cero"
     GameType.CHECKERS -> "Damas Clásicas"; GameType.DEMOLITION_ARCADE -> "Demolición Arcade"
     GameType.MEMORY_NEON -> "Memoria Neón"; GameType.MERGE_2048 -> "2048 Arena"
+    GameType.TOWER_DEFENSE -> "Defensa de Torres"; GameType.REACTOR_CHAIN -> "Reactor Chain"
 }
 
 @Composable

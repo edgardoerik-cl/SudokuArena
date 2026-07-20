@@ -281,7 +281,8 @@ describe("motor genérico de puzzles", () => {
     const blueprint = createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "complex-shapes", difficulty: "EXPERT" });
     const shapes = blueprint.meta.shapes as Array<{ id: string; offsets: Array<{ x: number; y: number }>; direction: string }>;
     assert.ok(shapes.some((shape) => shape.offsets.length >= 3));
-    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
+    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "FRONT", "BACK"].includes(shape.direction)));
+    assert.ok(shapes.every((shape: any) => typeof shape.z === "number" && typeof shape.depth === "number"));
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
   });
 

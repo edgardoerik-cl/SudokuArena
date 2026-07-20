@@ -24,7 +24,9 @@ export const GAME_TYPES = [
   "CHECKERS",
   "DEMOLITION_ARCADE",
   "MEMORY_NEON",
-  "MERGE_2048"
+  "MERGE_2048",
+  "TOWER_DEFENSE",
+  "REACTOR_CHAIN"
 ] as const;
 
 export type GameType = (typeof GAME_TYPES)[number];

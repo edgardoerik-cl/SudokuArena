@@ -9,17 +9,19 @@ import org.junit.Test
 
 class LocalPuzzleEngineTest {
     @Test
-    fun `Tetris local usa las siete piezas y expone Hold y bomba`() {
+    fun `Tetris local usa las siete piezas y bloquea habilidades hasta ganar lineas`() {
         val starts = (1..12).map { seed -> LocalTetrisEngine("Tester", seed).snapshot().players.first().current }.toSet()
         assertTrue("El generador no puede producir solamente cuadrados O", starts.size > 1)
         val engine = LocalTetrisEngine("Tester", 17)
         val before = engine.snapshot().players.first()
+        assertEquals(0, before.abilityEnergy)
         engine.input("HOLD")
         val held = engine.snapshot().players.first()
-        assertEquals(before.current, held.hold)
-        assertFalse(held.canHold)
+        assertEquals(before.current, held.current)
+        assertEquals(null, held.hold)
+        assertTrue(held.canHold)
         engine.input("CLEAN_BOMB")
-        assertTrue(engine.snapshot().players.first().cleanBombUsed)
+        assertFalse(engine.snapshot().players.first().cleanBombUsed)
     }
 
     @Test
