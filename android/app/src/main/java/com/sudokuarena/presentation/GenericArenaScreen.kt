@@ -105,6 +105,25 @@ fun GenericArenaScreen(
     var confirmExit by remember { mutableStateOf(false) }
     BackHandler { confirmExit = true }
     val generic = state.genericBoard
+    val screenFx = rememberGameFxController()
+    var previousScore by remember(state.playerId, state.gameType) { mutableStateOf(state.ownPlayer?.score ?: 0) }
+    var penaltyWasActive by remember(state.playerId, state.gameType) { mutableStateOf(false) }
+    LaunchedEffect(state.ownPlayer?.score, generic?.revision) {
+        val score = state.ownPlayer?.score ?: previousScore
+        val gained = score - previousScore
+        if (gained > 0) {
+            screenFx.emit(
+                if (gained >= 40) GameFxKind.COMBO else GameFxKind.SUCCESS,
+                x = .5f, y = .38f, text = "+$gained", intensity = if (gained >= 40) 1.35f else .85f,
+            )
+        }
+        previousScore = score
+    }
+    LaunchedEffect(state.penaltyRemainingMs) {
+        val active = state.penaltyRemainingMs > 0
+        if (active && !penaltyWasActive) screenFx.emit(GameFxKind.ERROR, text = "BLOQUEADO", intensity = 1.35f)
+        penaltyWasActive = active
+    }
     val boardPulse = remember { androidx.compose.animation.core.Animatable(1f) }
     LaunchedEffect(generic?.revision) {
         if ((generic?.revision ?: 0L) > 0L) {
@@ -129,6 +148,7 @@ fun GenericArenaScreen(
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
+            GameAtmosphere(state.gameType, Modifier.fillMaxSize())
             AdaptiveArenaLayout(
                 Modifier.fillMaxSize()
                     .blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp),
@@ -211,6 +231,8 @@ fun GenericArenaScreen(
                 }
                 }
             )
+
+            GameFxOverlay(screenFx, Modifier.fillMaxSize().zIndex(9f))
 
             if ((state.ownPlayer?.shieldUntil ?: 0L) > state.serverNowMs) ShieldAuraOverlay(Modifier.zIndex(8f))
             if (state.fogSwipesRemaining > 0) {
@@ -891,6 +913,8 @@ private data class TowerVisualProjectile(
     val towerCol: Int,
     val targetId: String,
     val color: Color,
+    val damage: Float,
+    val towerType: String,
     val firedAt: Long,
     val arrivesAt: Long,
 )
@@ -938,13 +962,79 @@ private fun TowerDefenseGrid(
             towerCol = (projectile["towerCol"] as? Number)?.toInt() ?: return@mapNotNull null,
             targetId = projectile["targetId"]?.toString() ?: return@mapNotNull null,
             color = parseGenericColor(projectile["color"]?.toString() ?: "#60A5FA"),
+            damage = (projectile["damage"] as? Number)?.toFloat() ?: 0f,
+            towerType = projectile["towerType"]?.toString() ?: "RAPID",
             firedAt = (projectile["firedAt"] as? Number)?.toLong() ?: 0L,
             arrivesAt = (projectile["arrivesAt"] as? Number)?.toLong() ?: 0L,
         )
     }.orEmpty()
     val ownerColors = remember(players) { players.mapValues { parseGenericColor(it.value.colorHex) } }
+    val fx = rememberGameFxController()
+    val seenProjectiles = remember(state.gameId) { mutableSetOf<String>() }
+    val previousEnemyStates = remember(state.gameId) { mutableMapOf<String, String>() }
+    val previousTowers = remember(state.gameId) { mutableSetOf<String>() }
+    var previousWaveActive by remember(state.gameId) { mutableStateOf(false) }
+    var previousBaseHealth by remember(state.gameId) { mutableStateOf((state.meta["baseHealth"] as? Number)?.toInt() ?: 20) }
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(state.revision) {
+        fun normalized(progress: Float): Pair<Float, Float> {
+            if (path.isEmpty()) return .5f to .5f
+            val start = progress.toInt().coerceIn(0, path.lastIndex)
+            val end = (start + 1).coerceAtMost(path.lastIndex)
+            val fraction = (progress - start).coerceIn(0f, 1f)
+            val a = path[start]; val b = path[end]
+            val row = a.first + (b.first - a.first) * fraction
+            val col = a.second + (b.second - a.second) * fraction
+            return ((col + .5f) / state.columns) to ((row + .5f) / state.rows)
+        }
+        val activeWave = state.meta["waveActive"] == true
+        if (activeWave && !previousWaveActive) {
+            fx.emit(GameFxKind.WAVE, text = "OLEADA ${state.meta["wave"] ?: 1}", intensity = 1.4f)
+        }
+        previousWaveActive = activeWave
+        val baseHealth = (state.meta["baseHealth"] as? Number)?.toInt() ?: previousBaseHealth
+        if (baseHealth < previousBaseHealth) {
+            val base = path.lastOrNull()
+            fx.emit(
+                GameFxKind.ERROR,
+                x = ((base?.second ?: state.columns / 2f) + .5f) / state.columns,
+                y = ((base?.first ?: state.rows / 2f) + .5f) / state.rows,
+                text = "-${previousBaseHealth - baseHealth} NÚCLEO",
+                intensity = 1.45f,
+            )
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
+        previousBaseHealth = baseHealth
+        state.board.forEachIndexed { row, cells -> cells.forEachIndexed { col, cell ->
+            if (cell.meta["towerType"] != null && previousTowers.add("$row:$col")) {
+                fx.emit(GameFxKind.MAGIC, (col + .5f) / state.columns, (row + .5f) / state.rows, text = "TORRE LISTA")
+            }
+        } }
+        enemies.forEach { enemy ->
+            val old = previousEnemyStates.put(enemy.id, enemy.status)
+            if (old != null && old != enemy.status && enemy.status == "DEFEATED") {
+                val (x, y) = normalized(enemy.progress)
+                fx.emit(GameFxKind.EXPLOSION, x, y, text = "+${(enemy.maxHp / 6f).toInt().coerceAtLeast(5)}", intensity = if (enemy.kind == "GOLEM") 1.65f else 1f)
+            }
+        }
+        projectiles.filter { seenProjectiles.add(it.id) }.forEach { projectile ->
+            val target = enemies.firstOrNull { it.id == projectile.targetId } ?: return@forEach
+            val (x, y) = normalized(target.progress)
+            val kind = if (projectile.color == Color(0xFF22D3EE)) GameFxKind.FROST else GameFxKind.IMPACT
+            fx.emit(
+                kind, x, y,
+                text = if (projectile.damage > 0f) "-${projectile.damage.toInt()}" else null,
+                color = projectile.color,
+                intensity = if (projectile.towerType == "BLAST") .9f else .62f,
+                durationMs = 440,
+                shake = false,
+            )
+        }
+        if (seenProjectiles.size > 300) seenProjectiles.retainAll(projectiles.mapTo(mutableSetOf()) { it.id })
+    }
+    GameFxHost(fx, modifier.fillMaxSize()) {
     Canvas(
-        modifier
+        Modifier
             .fillMaxSize()
             .background(Color(0xFF071426), RoundedCornerShape(18.dp))
             .pointerInput(state.revision, enabled) {
@@ -976,6 +1066,15 @@ private fun TowerDefenseGrid(
                 radius = size.maxDimension * .72f,
             ),
         )
+        repeat(24) { index ->
+            val x = ((index * 47 % 101) / 100f * size.width + pulse * (6f + index % 5)).mod(size.width)
+            val y = (index * 71 % 97) / 96f * size.height
+            drawCircle(
+                if (index % 3 == 0) Color(0xFF22D3EE).copy(alpha = .24f) else Color.White.copy(alpha = .10f),
+                1.2f + index % 3,
+                Offset(x, y),
+            )
+        }
         // Textura tecnológica de fondo.
         for (row in 0 until state.rows) for (col in 0 until state.columns) {
             val origin = Offset(col * cw, row * ch)
@@ -996,12 +1095,30 @@ private fun TowerDefenseGrid(
             }
             drawCircle(Color(0xFF22C55E).copy(alpha = .24f + pulse * .18f), min(cw, ch) * .42f, point(path.first().first, path.first().second))
             drawCircle(Color(0xFFFACC15).copy(alpha = .28f + pulse * .2f), min(cw, ch) * .46f, point(path.last().first, path.last().second))
+            val gate = point(path.first().first, path.first().second)
+            drawLine(Color(0xFF4ADE80), gate + Offset(-cw * .28f, -ch * .34f), gate + Offset(-cw * .28f, ch * .34f), maxOf(3f, cw * .05f))
+            drawLine(Color(0xFF4ADE80), gate + Offset(cw * .28f, -ch * .34f), gate + Offset(cw * .28f, ch * .34f), maxOf(3f, cw * .05f))
+            drawLine(Color.White.copy(alpha = .65f), gate + Offset(-cw * .28f, -ch * .34f), gate + Offset(cw * .28f, -ch * .34f), maxOf(2f, cw * .035f))
+            val core = point(path.last().first, path.last().second)
+            val corePath = Path().apply {
+                moveTo(core.x, core.y - ch * .38f); lineTo(core.x + cw * .34f, core.y)
+                lineTo(core.x, core.y + ch * .38f); lineTo(core.x - cw * .34f, core.y); close()
+            }
+            drawPath(corePath, Color(0xFFFACC15).copy(alpha = .75f))
+            drawCircle(Color.White.copy(alpha = .85f), min(cw, ch) * (.09f + pulse * .035f), core)
         }
         state.board.forEachIndexed { row, cells -> cells.forEachIndexed { col, cell ->
             if (cell.meta["path"] == true) return@forEachIndexed
             val towerType = cell.meta["towerType"]?.toString()
             val towerCenter = point(row.toFloat(), col.toFloat())
             if (selected?.row == row && selected.column == col) {
+                val range = when (towerType) { "SNIPER" -> 6.4f; "BLAST" -> 3.2f; "FROST" -> 3.7f; else -> 3.4f }
+                if (towerType != null) drawCircle(
+                    towerColorFor(towerType).copy(alpha = .14f),
+                    min(cw, ch) * range,
+                    towerCenter,
+                    style = Stroke(maxOf(1.5f, cw * .025f)),
+                )
                 drawCircle(Color(0xFFFFD54F).copy(alpha = .22f), min(cw, ch) * .47f, towerCenter)
                 drawCircle(Color(0xFFFFD54F), min(cw, ch) * .39f, towerCenter, style = Stroke(maxOf(2f, cw * .035f)))
             }
@@ -1022,8 +1139,30 @@ private fun TowerDefenseGrid(
             drawCircle(Color(0xFF172033), radius, towerCenter)
             drawCircle(towerColor, radius * .72f, towerCenter)
             val angle = pulse * Math.PI.toFloat() * 2f + (row + col) * .7f
-            val barrel = towerCenter + Offset(kotlin.math.cos(angle), kotlin.math.sin(angle)) * radius * 1.25f
-            drawLine(Color.White.copy(alpha = .92f), towerCenter, barrel, maxOf(3f, radius * .28f))
+            val direction = Offset(kotlin.math.cos(angle), kotlin.math.sin(angle))
+            val perpendicular = Offset(-direction.y, direction.x)
+            when (towerType) {
+                "BLAST" -> {
+                    drawLine(Color.White.copy(alpha = .90f), towerCenter + perpendicular * radius * .24f, towerCenter + direction * radius * 1.18f + perpendicular * radius * .24f, maxOf(3f, radius * .24f))
+                    drawLine(Color.White.copy(alpha = .90f), towerCenter - perpendicular * radius * .24f, towerCenter + direction * radius * 1.18f - perpendicular * radius * .24f, maxOf(3f, radius * .24f))
+                }
+                "SNIPER" -> {
+                    drawLine(Color(0xFFE9D5FF), towerCenter, towerCenter + direction * radius * 1.65f, maxOf(2f, radius * .20f))
+                    drawCircle(Color.White, radius * .18f, towerCenter + direction * radius * .45f)
+                }
+                "FROST" -> {
+                    repeat(4) { crystal ->
+                        val crystalAngle = angle + crystal * Math.PI.toFloat() / 2f
+                        val tip = towerCenter + Offset(kotlin.math.cos(crystalAngle), kotlin.math.sin(crystalAngle)) * radius * 1.08f
+                        drawLine(Color.White.copy(alpha = .88f), towerCenter, tip, maxOf(2f, radius * .17f))
+                    }
+                }
+                else -> repeat(3) { barrelIndex ->
+                    val barrelAngle = angle + barrelIndex * Math.PI.toFloat() * 2f / 3f
+                    val barrel = towerCenter + Offset(kotlin.math.cos(barrelAngle), kotlin.math.sin(barrelAngle)) * radius * 1.2f
+                    drawLine(Color.White.copy(alpha = .92f), towerCenter, barrel, maxOf(2.5f, radius * .19f))
+                }
+            }
             val level = (cell.meta["level"] as? Number)?.toInt() ?: 1
             repeat(level) { index ->
                 drawCircle(Color(0xFFFFD54F), maxOf(1.7f, radius * .09f), towerCenter + Offset((index - (level - 1) / 2f) * radius * .35f, radius * .78f))
@@ -1043,12 +1182,33 @@ private fun TowerDefenseGrid(
             }
             drawCircle(Color.Black.copy(alpha = .42f), baseRadius * 1.1f, enemyCenter + Offset(2f, 3f))
             if (enemy.slowUntil > now) drawCircle(Color(0xFF67E8F9).copy(alpha = .35f), baseRadius * 1.55f, enemyCenter, style = Stroke(3f))
-            if (enemy.kind == "GOLEM") {
-                drawRoundRect(enemyColor, enemyCenter - Offset(baseRadius, baseRadius), Size(baseRadius * 2, baseRadius * 2), cornerRadius = androidx.compose.ui.geometry.CornerRadius(baseRadius * .3f))
-            } else {
-                drawCircle(enemyColor, baseRadius, enemyCenter)
-                drawCircle(Color.White, baseRadius * .16f, enemyCenter + Offset(-baseRadius * .32f, -baseRadius * .16f))
-                drawCircle(Color.White, baseRadius * .16f, enemyCenter + Offset(baseRadius * .32f, -baseRadius * .16f))
+            when (enemy.kind) {
+                "GOLEM" -> {
+                    drawRoundRect(enemyColor, enemyCenter - Offset(baseRadius, baseRadius), Size(baseRadius * 2, baseRadius * 2), cornerRadius = androidx.compose.ui.geometry.CornerRadius(baseRadius * .3f))
+                    drawRect(Color(0xFF312E81), enemyCenter - Offset(baseRadius * .72f, baseRadius * .22f), Size(baseRadius * 1.44f, baseRadius * .44f))
+                    drawCircle(Color(0xFFFDE68A), baseRadius * .13f, enemyCenter)
+                }
+                "PHANTOM" -> {
+                    val diamond = Path().apply {
+                        moveTo(enemyCenter.x, enemyCenter.y - baseRadius); lineTo(enemyCenter.x + baseRadius, enemyCenter.y)
+                        lineTo(enemyCenter.x, enemyCenter.y + baseRadius); lineTo(enemyCenter.x - baseRadius, enemyCenter.y); close()
+                    }
+                    drawPath(diamond, enemyColor.copy(alpha = .72f))
+                    repeat(3) { trail -> drawCircle(enemyColor.copy(alpha = .20f - trail * .05f), baseRadius * (.78f - trail * .16f), enemyCenter - Offset((trail + 1) * baseRadius * .65f, 0f)) }
+                }
+                "BRUTE" -> {
+                    drawCircle(enemyColor, baseRadius, enemyCenter)
+                    drawCircle(Color(0xFF7F1D1D), baseRadius * .78f, enemyCenter, style = Stroke(baseRadius * .20f))
+                    drawLine(Color.White, enemyCenter - Offset(baseRadius * .42f, 0f), enemyCenter + Offset(baseRadius * .42f, 0f), maxOf(2f, baseRadius * .14f))
+                }
+                else -> {
+                    val scout = Path().apply {
+                        moveTo(enemyCenter.x + baseRadius, enemyCenter.y); lineTo(enemyCenter.x - baseRadius * .72f, enemyCenter.y - baseRadius * .72f)
+                        lineTo(enemyCenter.x - baseRadius * .45f, enemyCenter.y); lineTo(enemyCenter.x - baseRadius * .72f, enemyCenter.y + baseRadius * .72f); close()
+                    }
+                    drawPath(scout, enemyColor)
+                    drawCircle(Color.White, baseRadius * .14f, enemyCenter + Offset(baseRadius * .20f, 0f))
+                }
             }
             val barWidth = baseRadius * 2.25f
             val barOrigin = enemyCenter + Offset(-barWidth / 2f, -baseRadius * 1.55f)
@@ -1068,6 +1228,7 @@ private fun TowerDefenseGrid(
             drawCircle(Color.White, maxOf(2.5f, min(cw, ch) * .06f), head)
             if (travel >= .96f) drawCircle(projectile.color.copy(alpha = .65f), min(cw, ch) * (.12f + pulse * .18f), target, style = Stroke(3f))
         }
+    }
     }
 }
 
@@ -2114,6 +2275,12 @@ private fun GenericMoveControls(
             val remaining = (state.genericBoard?.meta?.get("remainingEnemies") as? Number)?.toInt() ?: 0
             val selectedCell = state.selected?.let { state.genericBoard?.board?.getOrNull(it.row)?.getOrNull(it.column) }
             val selectedTower = selectedCell?.meta?.get("towerType")?.toString()
+            val towerDescription = when (tower) {
+                "BLAST" -> "Daño de área · alcance medio · ideal contra grupos"
+                "SNIPER" -> "Gran alcance · impacto pesado · cadencia lenta"
+                "FROST" -> "Ralentiza tropas · prepara combos para el equipo"
+                else -> "Cadencia alta · económica · excelente al inicio"
+            }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("◆ NÚCLEO $health", color = if (health <= 6) Color(0xFFDC2626) else Color(0xFF059669), fontWeight = FontWeight.Black)
@@ -2122,7 +2289,7 @@ private fun GenericMoveControls(
                 }
                 if (waveActive) {
                     LinearProgressIndicator(
-                        progress = { (remaining / (5f + wave * 2f)).coerceIn(0f, 1f) },
+                        progress = { (1f - remaining / (5f + wave * 2f)).coerceIn(0f, 1f) },
                         modifier = Modifier.fillMaxWidth().height(7.dp),
                         color = Color(0xFFE11D48),
                         trackColor = Color(0xFFE2E8F0),
@@ -2138,9 +2305,19 @@ private fun GenericMoveControls(
                                 if (tower == id) 2.dp else 1.dp,
                                 if (tower == id) Color(0xFF7C3AED) else Color(0xFF94A3B8),
                             ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (tower == id) towerColorFor(id).copy(alpha = .16f) else Color.Transparent,
+                            ),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp),
                         ) { Text(label, fontSize = 10.sp, fontWeight = FontWeight.Black) }
                     }
+                }
+                Surface(
+                    color = towerColorFor(tower).copy(alpha = .10f),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, towerColorFor(tower).copy(alpha = .42f)),
+                ) {
+                    Text(towerDescription, Modifier.fillMaxWidth().padding(7.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
                 Button(
                     onClick = {
@@ -2371,6 +2548,13 @@ private fun wordAlong(state: GenericBoardState, start: CellPosition, end: CellPo
 }
 
 private fun parseGenericColor(hex: String): Color = runCatching { Color(AndroidColor.parseColor(hex)) }.getOrDefault(Color.Gray)
+
+private fun towerColorFor(type: String): Color = when (type) {
+    "BLAST" -> Color(0xFFFB923C)
+    "SNIPER" -> Color(0xFFC084FC)
+    "FROST" -> Color(0xFF22D3EE)
+    else -> Color(0xFF60A5FA)
+}
 
 private fun mergeTileColor(value: Int): Color = when (value) {
     0 -> Color(0xFFE8EEF7)

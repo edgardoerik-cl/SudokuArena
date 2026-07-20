@@ -58,17 +58,33 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
     val arena = state.tetrisState
     val me = arena?.players?.firstOrNull { it.id == state.playerId } ?: arena?.players?.firstOrNull()
     val haptics = LocalHapticFeedback.current
+    val fx = rememberGameFxController()
     val impactFlash = remember(me?.id) { Animatable(0f) }
     var previousImpact by remember(me?.id) { mutableIntStateOf(me?.impact ?: 0) }
+    var previousLines by remember(me?.id) { mutableIntStateOf(me?.lines ?: 0) }
+    var previousGarbage by remember(me?.id) { mutableIntStateOf(me?.garbageSent ?: 0) }
     LaunchedEffect(me?.impact) {
         val impact = me?.impact ?: return@LaunchedEffect
         if (impact > previousImpact) {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            fx.emit(GameFxKind.IMPACT, x = .42f, y = .82f, text = "IMPACTO", intensity = 1.2f, shake = true)
             impactFlash.snapTo(1f)
             impactFlash.animateTo(0f, tween(360))
         }
         previousImpact = impact
     }
+    LaunchedEffect(me?.lines, me?.garbageSent) {
+        val lines = me?.lines ?: previousLines
+        if (lines > previousLines) {
+            val gained = lines - previousLines
+            fx.emit(GameFxKind.COMBO, x = .42f, y = .42f, text = if (gained >= 4) "TETRIS!" else "+$gained LÍNEA", intensity = 1f + gained * .12f)
+        }
+        previousLines = lines
+        val garbage = me?.garbageSent ?: previousGarbage
+        if (garbage > previousGarbage) fx.emit(GameFxKind.MAGIC, x = .82f, y = .45f, text = "ATAQUE +${garbage - previousGarbage}")
+        previousGarbage = garbage
+    }
+    GameFxHost(fx, Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(Color(0xFF071225)).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(7.dp),
@@ -174,6 +190,7 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
             modifier = Modifier.align(Alignment.CenterHorizontally),
         )
     }
+    }
 }
 
 @Composable
@@ -207,18 +224,27 @@ fun PacmanArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
     val me = arena?.players?.firstOrNull { it.id == state.playerId } ?: arena?.players?.firstOrNull()
     val hitShake = remember(me?.id) { Animatable(0f) }
     val scorePulse = remember(me?.id) { Animatable(0f) }
+    val fx = rememberGameFxController()
     var previousLives by remember(me?.id) { mutableIntStateOf(me?.lives ?: 3) }
     var previousScore by remember(me?.id) { mutableIntStateOf(me?.score ?: 0) }
     LaunchedEffect(me?.lives) {
         val lives = me?.lives ?: return@LaunchedEffect
-        if (lives < previousLives) { hitShake.snapTo(1f); hitShake.animateTo(0f, tween(620)) }
+        if (lives < previousLives) {
+            fx.emit(GameFxKind.ERROR, text = "VIDA -1", intensity = 1.4f)
+            hitShake.snapTo(1f); hitShake.animateTo(0f, tween(620))
+        }
         previousLives = lives
     }
     LaunchedEffect(me?.score) {
         val score = me?.score ?: return@LaunchedEffect
-        if (score > previousScore) { scorePulse.snapTo(1f); scorePulse.animateTo(0f, tween(430)) }
+        if (score > previousScore) {
+            val gained = score - previousScore
+            fx.emit(if (gained >= 100) GameFxKind.COMBO else GameFxKind.SUCCESS, x = .5f, y = .34f, text = "+$gained", intensity = if (gained >= 100) 1.3f else .55f)
+            scorePulse.snapTo(1f); scorePulse.animateTo(0f, tween(430))
+        }
         previousScore = score
     }
+    GameFxHost(fx, Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(Color.Black).padding(8.dp).graphicsLayer {
             translationX = sin((1f - hitShake.value) * Math.PI.toFloat() * 8f) * hitShake.value * 18f
@@ -285,6 +311,7 @@ fun PacmanArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
             modifier = Modifier.align(Alignment.CenterHorizontally),
         )
     }
+    }
 }
 
 @Composable
@@ -294,6 +321,22 @@ fun DemolitionArenaScreen(state: ArenaUiState, onPaddle: (Float) -> Unit, onPaus
     val frame by rememberInfiniteTransition(label = "demolitionFrame").animateFloat(
         0f, 1f, infiniteRepeatable(tween(16), RepeatMode.Restart), label = "demolitionClock",
     )
+    val fx = rememberGameFxController()
+    var previousBricks by remember(me?.id, me?.level) { mutableIntStateOf(me?.bricks?.size ?: 0) }
+    var previousLives by remember(me?.id) { mutableIntStateOf(me?.lives ?: 3) }
+    var previousBalls by remember(me?.id) { mutableIntStateOf(me?.balls?.size ?: 1) }
+    LaunchedEffect(me?.bricks?.size, me?.lives, me?.balls?.size) {
+        val bricks = me?.bricks?.size ?: previousBricks
+        if (bricks < previousBricks) fx.emit(GameFxKind.EXPLOSION, x = .5f, y = .28f, text = "+${(previousBricks - bricks) * 10}", intensity = .8f, shake = false)
+        previousBricks = bricks
+        val lives = me?.lives ?: previousLives
+        if (lives < previousLives) fx.emit(GameFxKind.ERROR, x = .5f, y = .86f, text = "BOLA PERDIDA", intensity = 1.3f)
+        previousLives = lives
+        val balls = me?.balls?.size ?: previousBalls
+        if (balls > previousBalls) fx.emit(GameFxKind.MAGIC, x = .5f, y = .55f, text = "MULTIBALL", intensity = 1.35f)
+        previousBalls = balls
+    }
+    GameFxHost(fx, Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(Color(0xFF050817)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ArcadeTopBar("Demolición Arcade", "♥ ${me?.lives ?: 3} · Nivel ${me?.level ?: 1} · ${me?.score ?: 0} pts", onPause, onExit)
         Canvas(
@@ -342,6 +385,7 @@ fun DemolitionArenaScreen(state: ArenaUiState, onPaddle: (Float) -> Unit, onPaus
             }
         }
         Text("Desliza horizontalmente para mover la plataforma", color = Color(0xFFB8C7E8), fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+    }
     }
 }
 

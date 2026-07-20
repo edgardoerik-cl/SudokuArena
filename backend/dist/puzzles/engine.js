@@ -1083,6 +1083,8 @@ export class GenericPuzzleEngine {
             this.towerProjectiles.push({
                 id: randomUUID(), towerRow, towerCol, targetId: target.id,
                 color: towerType === "FROST" ? "#22D3EE" : towerType === "BLAST" ? "#FB923C" : towerType === "SNIPER" ? "#C084FC" : "#60A5FA",
+                damage,
+                towerType,
                 firedAt: now, arrivesAt: now + (towerType === "SNIPER" ? 120 : 240),
             });
             this.towerNextShotAt.set(key, now + cooldown * 1_000);

@@ -26,6 +26,8 @@ private data class LocalTowerProjectile(
     val towerCol: Int,
     val targetId: String,
     val color: String,
+    val damage: Float,
+    val towerType: String,
     val firedAt: Long,
     val arrivesAt: Long,
 )
@@ -137,6 +139,7 @@ class LocalPuzzleEngine(
                 "projectiles" to towerProjectiles.map { projectile -> mapOf(
                     "id" to projectile.id, "towerRow" to projectile.towerRow, "towerCol" to projectile.towerCol,
                     "targetId" to projectile.targetId, "color" to projectile.color,
+                    "damage" to projectile.damage, "towerType" to projectile.towerType,
                     "firedAt" to projectile.firedAt, "arrivesAt" to projectile.arrivesAt,
                 ) },
             ) else emptyMap<String, Any?>() +
@@ -1019,6 +1022,7 @@ class LocalPuzzleEngine(
             towerProjectiles += LocalTowerProjectile(
                 "$now-$key", towerRow, towerCol, target.id,
                 when (type) { "FROST" -> "#22D3EE"; "BLAST" -> "#FB923C"; "SNIPER" -> "#C084FC"; else -> "#60A5FA" },
+                damage, type,
                 now, now + if (type == "SNIPER") 120 else 240,
             )
             towerNextShotAt[key] = now + when (type) { "RAPID" -> 360L; "SNIPER" -> 1_100L; else -> 700L }

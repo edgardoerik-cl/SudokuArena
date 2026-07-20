@@ -310,6 +310,21 @@ fun ArenaScreen(
     BackHandler { confirmExit = true }
     val shake = remember { Animatable(0f) }
     val boardPulse = remember { Animatable(1f) }
+    val screenFx = rememberGameFxController()
+    var previousScore by remember(state.playerId) { mutableStateOf(state.ownPlayer?.score ?: 0) }
+    var previousConquest by remember(state.playerId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.ownPlayer?.score, state.conquestMessage, state.comboMessage) {
+        val score = state.ownPlayer?.score ?: previousScore
+        if (score > previousScore) {
+            val gained = score - previousScore
+            screenFx.emit(if (gained >= 40) GameFxKind.COMBO else GameFxKind.SUCCESS, x = .5f, y = .38f, text = "+$gained", intensity = if (gained >= 40) 1.35f else .8f)
+        }
+        previousScore = score
+        state.conquestMessage?.takeIf { it != previousConquest }?.let {
+            screenFx.emit(GameFxKind.MAGIC, x = .5f, y = .5f, text = "CONQUISTA", intensity = 1.45f)
+            previousConquest = it
+        }
+    }
     LaunchedEffect(state.penaltyRemainingMs > 0) {
         if (state.penaltyRemainingMs > 0) {
             repeat(7) { index -> shake.animateTo(if (index % 2 == 0) 13f else -13f, tween(42)) }
@@ -339,6 +354,7 @@ fun ArenaScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            GameAtmosphere(GameType.SUDOKU, Modifier.fillMaxSize())
             AdaptiveArenaLayout(
                 modifier = Modifier
                     .fillMaxSize()
@@ -410,6 +426,8 @@ fun ArenaScreen(
                     }
                 }
             )
+
+            GameFxOverlay(screenFx, Modifier.fillMaxSize().zIndex(9f))
 
             if ((state.ownPlayer?.shieldUntil ?: 0) > state.serverNowMs) {
                 ShieldAuraOverlay(Modifier.zIndex(8f))
