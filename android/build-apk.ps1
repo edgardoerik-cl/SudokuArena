@@ -14,6 +14,6 @@ if ([string]::IsNullOrWhiteSpace($versionName)) { throw "No fue posible leer ver
 
 $outputDirectory = Join-Path $PSScriptRoot "releases"
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
-$versionedApk = Join-Path $outputDirectory "MultiArena-v$versionName-debug.apk"
+$versionedApk = Join-Path $outputDirectory "MultiArena-v$versionName.apk"
 Copy-Item -Force $apk $versionedApk
 Write-Host "APK generado: $versionedApk"

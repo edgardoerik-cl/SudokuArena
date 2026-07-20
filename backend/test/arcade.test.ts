@@ -18,6 +18,7 @@ describe("Tetris Arena", () => {
     assert.equal(state.players[0].board.length, 20);
     assert.equal(state.players[0].board[0].length, 10);
     assert.ok(state.players[0].next);
+    assert.equal(state.players[0].impact, 1);
   });
 });
 

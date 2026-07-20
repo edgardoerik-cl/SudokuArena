@@ -31,6 +31,7 @@ class LocalTetrisEngine(
     private var lines = 0
     private var tick = 0L
     private var gameOver = false
+    private var impact = 0
 
     override fun input(value: String) {
         if (gameOver) return
@@ -40,6 +41,7 @@ class LocalTetrisEngine(
             "SOFT_DROP" -> step()
             "HARD_DROP" -> {
                 while (canPlace(x, y + 1)) y++
+                impact++
                 lock()
             }
             "ROTATE" -> score += 1 // La ficha inicial es un bloque 2x2 simétrico.
@@ -60,7 +62,7 @@ class LocalTetrisEngine(
             serverTime = System.currentTimeMillis(),
             tick = tick,
             completed = gameOver,
-            players = listOf(TetrisPlayerState("solo", playerName, "#00E5FF", visible, "O", score, lines, gameOver)),
+            players = listOf(TetrisPlayerState("solo", playerName, "#00E5FF", visible, "O", score, lines, gameOver, impact)),
         )
     }
 
@@ -103,16 +105,24 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
     private var x = 1
     private var y = 1
     private var direction = "STOP"
+    private var queuedDirection: String? = null
     private var lives = 3
     private var score = 0
     private var tick = 0L
     private val ghosts = mutableListOf(13 to 13, 13 to 1, 1 to 13, 7 to 7)
 
     override fun input(value: String) {
-        if (value in setOf("UP", "RIGHT", "DOWN", "LEFT")) direction = value
+        if (value in setOf("UP", "RIGHT", "DOWN", "LEFT")) queuedDirection = value
     }
 
     override fun tick() {
+        queuedDirection?.let { queued ->
+            val (qy, qx) = vector(queued)
+            if (map.getOrNull(y + qy)?.getOrNull(x + qx) == 1) {
+                direction = queued
+                queuedDirection = null
+            }
+        }
         val (dy, dx) = vector(direction)
         if (map.getOrNull(y + dy)?.getOrNull(x + dx) == 1) { y += dy; x += dx }
         if (pills.remove("$x:$y")) score += 10

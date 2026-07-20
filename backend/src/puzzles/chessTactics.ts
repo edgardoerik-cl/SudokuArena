@@ -1,12 +1,12 @@
 export type ChessTeam = "BLUE" | "RED";
 export type ChessPieceType = "PAWN" | "KNIGHT" | "BISHOP" | "ROOK" | "QUEEN" | "KING";
 export type ChessSkill =
-  | "FORCED_MARCH"
-  | "AMBUSH"
+  | "PHALANX_CHARGE"
+  | "SEISMIC_LEAP"
   | "PIERCING_RAY"
-  | "SHOCKWAVE"
-  | "TACTICAL_TRANSPOSITION"
-  | "ROYAL_BUNKER";
+  | "STONE_WALL"
+  | "ROYAL_INTIMIDATION"
+  | "CALL_TO_ARMS";
 
 export interface Piece {
   id: string;
@@ -66,28 +66,28 @@ export function attackRange(piece: Piece, origin: BoardPoint): BoardPoint[] {
 }
 
 export function skillCost(skill: ChessSkill): number {
-  return skill === "ROYAL_BUNKER" || skill === "TACTICAL_TRANSPOSITION" ? 2 : 3;
+  return 1;
 }
 
 export function skillFor(piece: Piece): ChessSkill {
   switch (piece.type) {
-    case "PAWN": return "FORCED_MARCH";
-    case "KNIGHT": return "AMBUSH";
+    case "PAWN": return "PHALANX_CHARGE";
+    case "KNIGHT": return "SEISMIC_LEAP";
     case "BISHOP": return "PIERCING_RAY";
-    case "ROOK": return "SHOCKWAVE";
-    case "QUEEN": return "TACTICAL_TRANSPOSITION";
-    case "KING": return "ROYAL_BUNKER";
+    case "ROOK": return "STONE_WALL";
+    case "QUEEN": return "ROYAL_INTIMIDATION";
+    case "KING": return "CALL_TO_ARMS";
   }
 }
 
 export function cooldownFor(skill: ChessSkill): number {
   switch (skill) {
-    case "FORCED_MARCH": return 3;
-    case "AMBUSH": return 4;
+    case "PHALANX_CHARGE": return Number.MAX_SAFE_INTEGER;
+    case "SEISMIC_LEAP": return 4;
     case "PIERCING_RAY": return 5;
-    case "SHOCKWAVE": return 4;
-    case "TACTICAL_TRANSPOSITION": return Number.MAX_SAFE_INTEGER;
-    case "ROYAL_BUNKER": return 6;
+    case "STONE_WALL": return 4;
+    case "ROYAL_INTIMIDATION": return 6;
+    case "CALL_TO_ARMS": return Number.MAX_SAFE_INTEGER;
   }
 }
 

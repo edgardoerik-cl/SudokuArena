@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -34,6 +35,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -56,6 +58,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -449,10 +453,26 @@ private fun AnimatedArrowsGrid(
     var blockedShapeId by remember(state.gameId) { mutableStateOf<String?>(null) }
     val shake = remember(state.gameId) { androidx.compose.animation.core.Animatable(0f) }
     val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    var arrowAction by remember(state.gameId) { mutableStateOf("ESCAPE") }
+    var orbitYaw by remember(state.gameId) { mutableStateOf(0f) }
+    var orbitPitch by remember(state.gameId) { mutableStateOf(0f) }
+    var cameraZoom by remember(state.gameId) { mutableStateOf(1f) }
+    fun project(shape: SpatialArrowShape): Triple<Float, Float, Float> {
+        val dx = shape.x + shape.width / 2f - .5f
+        val dz = shape.z - .5f
+        val rotatedX = dx * kotlin.math.cos(orbitYaw) + dz * kotlin.math.sin(orbitYaw)
+        val rotatedZ = -dx * kotlin.math.sin(orbitYaw) + dz * kotlin.math.cos(orbitYaw)
+        val dy = shape.y + shape.height / 2f - .5f
+        val projectedY = dy * kotlin.math.cos(orbitPitch) - rotatedZ * kotlin.math.sin(orbitPitch)
+        val depthScale = (1.08f - rotatedZ * .42f).coerceIn(.62f, 1.42f) * cameraZoom
+        return Triple(.5f + rotatedX * cameraZoom, .5f + projectedY * cameraZoom, depthScale)
+    }
     LaunchedEffect(removed) {
         val newlyRemoved = removed - previousRemoved
         previousRemoved = removed
         if (newlyRemoved.isNotEmpty()) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             flying = newlyRemoved
             flight.snapTo(0f)
             flight.animateTo(1f, tween(560, easing = androidx.compose.animation.core.FastOutSlowInEasing))
@@ -460,25 +480,39 @@ private fun AnimatedArrowsGrid(
         }
     }
     val colors = remember(players) { players.values.map { parseGenericColor(it.colorHex) } }
+    Box(modifier.fillMaxWidth().aspectRatio(1.15f)) {
     Canvas(
-        modifier
-            .fillMaxWidth()
-            .aspectRatio(1.15f)
+        Modifier.fillMaxSize()
             .background(Color(0xFFF8FAFF), RoundedCornerShape(14.dp))
+            .pointerInput(enabled) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    if (!enabled) return@detectTransformGestures
+                    orbitYaw += pan.x / size.width * 3.2f
+                    orbitPitch = (orbitPitch + pan.y / size.height * 2.2f).coerceIn(-1.05f, 1.05f)
+                    cameraZoom = (cameraZoom * zoom).coerceIn(.65f, 2.2f)
+                }
+            }
             .pointerInput(spatialShapes, removed, enabled) {
                 detectTapGestures { offset ->
                     if (!enabled) return@detectTapGestures
-                    val worldX = offset.x / size.width
-                    val worldY = offset.y / size.height
-                    val shape = spatialShapes.lastOrNull { candidate ->
-                        worldX in candidate.x..(candidate.x + candidate.width)
-                            && worldY in candidate.y..(candidate.y + candidate.height)
+                    val worldX = offset.x / size.width; val worldY = offset.y / size.height
+                    val shape = spatialShapes.sortedBy { it.z }.lastOrNull { candidate ->
+                        val (x, y, scale) = project(candidate)
+                        worldX in (x - candidate.width * scale / 2f)..(x + candidate.width * scale / 2f)
+                            && worldY in (y - candidate.height * scale / 2f)..(y + candidate.height * scale / 2f)
                             && !candidate.memberKeys.all(removed::contains)
                     } ?: return@detectTapGestures
                     val member = shape.memberKeys.first().split(":").map(String::toInt)
                     if (canArrowEscapeClient(state, member[0], member[1], removed)) {
-                        onDirectMove(member[0], member[1], "ESCAPE")
+                        onDirectMove(member[0], member[1], mapOf("action" to arrowAction))
+                        arrowAction = "ESCAPE"
                     } else {
+                        if (arrowAction == "MISSILE" || arrowAction == "ROTATE") {
+                            onDirectMove(member[0], member[1], mapOf("action" to arrowAction))
+                            arrowAction = "ESCAPE"
+                            return@detectTapGestures
+                        }
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         blockedShapeId = shape.id
                         scope.launch {
                             shake.snapTo(0f)
@@ -508,12 +542,13 @@ private fun AnimatedArrowsGrid(
                 val blockedOffset = if (blockedShapeId == shape.id) {
                     sin(shake.value * Math.PI.toFloat() * 8f) * size.width * .012f
                 } else 0f
+                val (projectedX, projectedY, depthScale) = project(shape)
+                val shapeWidth = shape.width * size.width * depthScale
+                val shapeHeight = shape.height * size.height * depthScale
                 val origin = Offset(
-                    shape.x * size.width + vector.x * distance + perpendicular.x * curve + blockedOffset,
-                    shape.y * size.height + vector.y * distance + perpendicular.y * curve,
+                    projectedX * size.width - shapeWidth / 2f + vector.x * distance + perpendicular.x * curve + blockedOffset,
+                    projectedY * size.height - shapeHeight / 2f + vector.y * distance + perpendicular.y * curve,
                 )
-                val shapeWidth = shape.width * size.width
-                val shapeHeight = shape.height * size.height
                 val color = colors.getOrNull(kotlin.math.abs(shape.id.hashCode()) % maxOf(1, colors.size))
                     ?: listOf(Color(0xFF00A8FF), Color(0xFF7C3AED), Color(0xFFE91E63))[kotlin.math.abs(shape.id.hashCode()) % 3]
                 val alpha = 1f - escape
@@ -545,7 +580,30 @@ private fun AnimatedArrowsGrid(
                     textMeasurer,
                     color.copy(alpha = alpha),
                 )
+                if (shape.blockType == "BOMB") {
+                    drawCenteredText("✹", origin + Offset(shapeWidth * .22f, shapeHeight * .25f), shapeWidth * .35f, textMeasurer, Color(0xFFFF3D00))
+                } else if (shape.blockType == "BIDIRECTIONAL") {
+                    drawCenteredText("↔", origin + Offset(shapeWidth * .22f, shapeHeight * .25f), shapeWidth * .35f, textMeasurer, Color(0xFF7C3AED))
+                }
         }
+    }
+    val rotateUsed = ((state.meta["rotateUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
+    val missileUsed = ((state.meta["missileUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
+    Row(
+        Modifier.align(Alignment.BottomCenter).padding(8.dp).zIndex(4f),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Button(
+            { arrowAction = "ROTATE" },
+            enabled = enabled && rotateUsed < 2,
+            colors = ButtonDefaults.buttonColors(containerColor = if (arrowAction == "ROTATE") Color(0xFFEC4899) else Color(0xFF7C3AED)),
+        ) { Text("↻ Rotar ${2 - rotateUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
+        Button(
+            { arrowAction = "MISSILE" },
+            enabled = enabled && missileUsed < 1,
+            colors = ButtonDefaults.buttonColors(containerColor = if (arrowAction == "MISSILE") Color(0xFFFF3D00) else Color(0xFF7C3AED)),
+        ) { Text("➤ Misil ${1 - missileUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
+    }
     }
 }
 
@@ -640,6 +698,8 @@ private data class SpatialArrowShape(
     val offsets: List<Pair<Int, Int>>,
     val direction: String,
     val pathType: String,
+    val z: Float,
+    val blockType: String,
     val memberKeys: List<String>,
 )
 
@@ -658,6 +718,8 @@ private fun parseSpatialArrowShapes(state: GenericBoardState): List<SpatialArrow
             }.orEmpty(),
             direction = shape["direction"]?.toString().orEmpty(),
             pathType = shape["pathType"]?.toString() ?: "STRAIGHT",
+            z = (shape["z"] as? Number)?.toFloat() ?: .5f,
+            blockType = shape["blockType"]?.toString() ?: "NORMAL",
             memberKeys = (shape["memberKeys"] as? List<*>)?.map { it.toString() }.orEmpty(),
         )
     }.orEmpty()
@@ -754,7 +816,7 @@ fun GenericPuzzleGrid(
         DotsAndBoxesGrid(state, players, enabled, onDirectMove, modifier)
         return
     }
-    if (state.gameType == GameType.NEXUS_ZERO) {
+    if (state.gameType == GameType.NEXUS_ZERO && state.meta["engine"] != "NEXUS_SWIPE") {
         NexusSpatialGrid(state, players, enabled, onCellSelected, onDirectMove, modifier)
         return
     }
@@ -795,7 +857,7 @@ fun GenericPuzzleGrid(
             )
         }
     }
-    val gestureModifier = if (state.gameType == GameType.MERGE_2048) {
+    val gestureModifier = if (state.gameType in setOf(GameType.MERGE_2048, GameType.NEXUS_ZERO)) {
         Modifier.pointerInput(state.revision, enabled) {
             var totalDrag = Offset.Zero
             detectDragGestures(
@@ -955,14 +1017,19 @@ fun GenericPuzzleGrid(
             }
         }
     }
-    val tacticalRanges = remember(state.board, tacticalStart, state.gameType) {
-        tacticalStart?.let { source -> composeTacticalRanges(state, source) } ?: (emptySet<CellPosition>() to emptySet())
+    val tacticalRanges = remember(state.board, tacticalStart, tacticalSkillStart, state.gameType) {
+        tacticalStart?.let { source ->
+            if (tacticalSkillStart != null && state.gameType == GameType.CHESS_TACTICS) {
+                emptySet<CellPosition>() to composeChessSkillTargets(state, source)
+            } else composeTacticalRanges(state, source)
+        } ?: (emptySet<CellPosition>() to emptySet())
     }
 
+    Box(
+        modifier.fillMaxWidth().aspectRatio(state.columns.toFloat() / state.rows.toFloat()),
+    ) {
     Canvas(
-        modifier.then(gestureModifier)
-            .fillMaxWidth()
-            .aspectRatio(state.columns.toFloat() / state.rows.toFloat())
+        Modifier.fillMaxSize().then(gestureModifier)
             .background(Color.White, RoundedCornerShape(8.dp)),
     ) {
         val cellWidth = size.width / state.columns
@@ -1047,7 +1114,7 @@ fun GenericPuzzleGrid(
                     end,
                     style = Stroke(maxOf(3f, cellWidth * .055f)),
                 )
-                if (skill == "EARTHQUAKE" || skill == "SHOCKWAVE") {
+                if (skill == "SEISMIC_LEAP" || skill == "STONE_WALL") {
                     drawCircle(
                         Color(0xFFFF6D00).copy(alpha = 1f - progress),
                         min(cellWidth, cellHeight) * progress * 1.7f,
@@ -1057,6 +1124,32 @@ fun GenericPuzzleGrid(
                 }
             }
         }
+    }
+    val abilitySource = tacticalStart ?: selected
+    if (state.gameType == GameType.CHESS_TACTICS && abilitySource != null) {
+        val abilityCell = state.board.getOrNull(abilitySource.row)?.getOrNull(abilitySource.column)
+        val cooldown = (abilityCell?.meta?.get("currentCooldown") as? Number)?.toInt() ?: 0
+        val skillLabel = when (abilityCell?.meta?.get("type")?.toString()) {
+            "PAWN" -> "Falange"
+            "KNIGHT" -> "Salto Sísmico"
+            "BISHOP" -> "Rayo"
+            "ROOK" -> "Muro"
+            "QUEEN" -> "Intimidación"
+            "KING" -> "Revivir"
+            else -> "Habilidad"
+        }
+        Button(
+            onClick = {
+                tacticalStart = abilitySource
+                tacticalSkillStart = abilitySource
+            },
+            enabled = enabled && cooldown == 0,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).zIndex(4f),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+        ) {
+            Text(if (cooldown > 0) "$skillLabel · CD $cooldown" else "✦ $skillLabel", fontWeight = FontWeight.Black)
+        }
+    }
     }
 }
 
@@ -1204,6 +1297,62 @@ private fun NexusSpatialGrid(
     }
 }
 
+private fun composeChessSkillTargets(
+    state: GenericBoardState,
+    source: CellPosition,
+): Set<CellPosition> {
+    val cell = state.board.getOrNull(source.row)?.getOrNull(source.column) ?: return emptySet()
+    val team = cell.meta["team"]?.toString()
+    fun available(row: Int, col: Int): Boolean {
+        val target = state.board.getOrNull(row)?.getOrNull(col) ?: return false
+        return !target.isBlocked
+    }
+    return when (cell.meta["type"]?.toString()) {
+        "PAWN" -> {
+            val direction = if (team == "BLUE") 1 else -1
+            val middle = state.board.getOrNull(source.row + direction)?.getOrNull(source.column)
+            val destination = state.board.getOrNull(source.row + direction * 2)?.getOrNull(source.column)
+            if (middle?.value == null && destination != null && !destination.isBlocked &&
+                (destination.value == null || destination.meta["team"] != team)
+            ) setOf(CellPosition(source.row + direction * 2, source.column)) else emptySet()
+        }
+        "KNIGHT" -> listOf(-2 to -1, -2 to 1, -1 to -2, -1 to 2, 1 to -2, 1 to 2, 2 to -1, 2 to 1)
+            .map { (dy, dx) -> CellPosition(source.row + dy, source.column + dx) }
+            .filterTo(mutableSetOf()) { available(it.row, it.column) && state.board[it.row][it.column].value == null }
+        "BISHOP" -> buildSet {
+            for ((dy, dx) in listOf(-1 to -1, -1 to 1, 1 to -1, 1 to 1)) {
+                for (distance in 1..3) {
+                    val row = source.row + dy * distance
+                    val col = source.column + dx * distance
+                    val target = state.board.getOrNull(row)?.getOrNull(col) ?: break
+                    if (target.isBlocked) break
+                    if (target.value != null) {
+                        if (target.meta["team"] != team) add(CellPosition(row, col))
+                        break
+                    }
+                    add(CellPosition(row, col))
+                }
+            }
+        }
+        "ROOK" -> buildSet {
+            for (row in source.row - 1..source.row + 1) for (col in source.column - 1..source.column + 1) {
+                if ((row != source.row || col != source.column) && available(row, col) && state.board[row][col].value == null) {
+                    add(CellPosition(row, col))
+                }
+            }
+        }
+        "QUEEN" -> setOf(source)
+        "KING" -> buildSet {
+            for (row in source.row - 1..source.row + 1) for (col in source.column - 1..source.column + 1) {
+                if ((row != source.row || col != source.column) && available(row, col) && state.board[row][col].value == null) {
+                    add(CellPosition(row, col))
+                }
+            }
+        }
+        else -> emptySet()
+    }
+}
+
 private fun composeTacticalRanges(
     state: GenericBoardState,
     source: CellPosition,
@@ -1291,7 +1440,7 @@ private fun PuzzleHints(state: GenericBoardState) {
         GameType.NURIKABE -> Text("Toca las casillas de río; conserva blancas las islas numeradas.")
         GameType.BRIDGES -> Text("Toca los segmentos entre islas para construir la red.")
         GameType.CHECKERS -> Text("Las capturas son obligatorias. Si capturas, puedes encadenar otro salto.")
-        GameType.CHESS_TACTICS -> Text("Azul: movimiento · Rojo: ataque · Mantén pulsada una pieza y toca el objetivo para activar su habilidad.")
+        GameType.CHESS_TACTICS -> Text("Azul: movimiento · Rojo: ataque. Toca una pieza y luego su botón morado para apuntar la habilidad; solo consumes una acción.")
         GameType.HANGMAN -> Text("Pista: ${state.meta["clue"] ?: "Sin pista"} · Errores máximos: 6", fontWeight = FontWeight.Black)
         GameType.ARROWS_ESCAPE -> Text("Libera todas las flechas. Progreso: ${state.meta["progress"] ?: emptyMap<String, Int>()}")
         GameType.MEMORY_NEON -> Text(
@@ -1302,7 +1451,10 @@ private fun PuzzleHints(state: GenericBoardState) {
             "Ficha máxima: ${state.meta["highestTile"] ?: state.board.flatten().mapNotNull { (it.value as? Number)?.toInt() }.maxOrNull() ?: 0} · meta ${state.meta["target"] ?: 256}",
             fontWeight = FontWeight.Black,
         )
-        GameType.NEXUS_ZERO -> Text("Toca dos cargas vinculadas que sumen exactamente cero.", fontWeight = FontWeight.Black)
+        GameType.NEXUS_ZERO -> Text(
+            "Desliza todo el tablero. Las fichas +N y -N se destruyen al tocarse; valores incompatibles nunca se superponen.",
+            fontWeight = FontWeight.Black,
+        )
         GameType.CROSS_LETTERS -> {
             val active = state.meta["activePlayerId"]?.toString()
             Text("Turno: ${active?.take(8) ?: "preparando…"} · selecciona la casilla inicial", fontWeight = FontWeight.Bold)
@@ -1592,18 +1744,53 @@ private fun GenericMoveControls(
         GameType.HANGMAN -> {
             val letters = ('A'..'Z').map(Char::toString) + "Ñ"
             val guessed = (state.genericBoard?.meta?.get("guessedLetters") as? List<*>)?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+            val correct = (state.genericBoard?.meta?.get("correctGuesses") as? List<*>)?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+            val wrong = (state.genericBoard?.meta?.get("wrongGuesses") as? List<*>)?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+            val discarded = ((state.genericBoard?.meta?.get("discardedByPlayer") as? Map<*, *>)?.get(state.playerId) as? List<*>)
+                ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+            val revealUsed = (state.genericBoard?.meta?.get("revealUsed") as? List<*>)?.any { it?.toString() == state.playerId } == true
+            val discardUsed = (state.genericBoard?.meta?.get("discardUsed") as? List<*>)?.any { it?.toString() == state.playerId } == true
+            val lastBreathUsed = (state.genericBoard?.meta?.get("lastBreathUsed") as? List<*>)?.any { it?.toString() == state.playerId } == true
             val targetColumn = state.genericBoard?.board?.firstOrNull()
                 ?.indexOfFirst { it.value == null }
                 ?.coerceAtLeast(0) ?: 0
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        { onMoveAt(0, targetColumn, mapOf("action" to "REVEAL")) },
+                        enabled = enabled && !revealUsed,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                    ) { Text(if (revealUsed) "✓ Revelación" else "💡 Revelación", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                    Button(
+                        { onMoveAt(0, targetColumn, mapOf("action" to "DISCARD")) },
+                        enabled = enabled && !discardUsed,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                    ) { Text(if (discardUsed) "✓ Descarte" else "⌫ Descartar 3", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                }
+                Text(
+                    if (lastBreathUsed) "Último Aliento consumido" else "♥ Último Aliento disponible",
+                    fontSize = 11.sp,
+                    color = if (lastBreathUsed) Color.Gray else Color(0xFF00875A),
+                    fontWeight = FontWeight.Bold,
+                )
                 letters.chunked(9).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                         row.forEach { letter ->
                             Button(
                                 { onMoveAt(0, targetColumn, letter) },
-                                enabled = enabled && letter !in guessed,
-                                modifier = Modifier.weight(1f),
-                            ) { Text(letter, fontSize = 10.sp) }
+                                enabled = enabled && letter !in guessed && letter !in discarded,
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    disabledContainerColor = when {
+                                        letter in correct -> Color(0xFF22C55E)
+                                        letter in wrong -> Color(0xFFEF4444)
+                                        letter in discarded -> Color(0xFF475569)
+                                        else -> Color(0xFFCBD5E1)
+                                    },
+                                    disabledContentColor = Color.White,
+                                ),
+                            ) { Text(letter, fontSize = 11.sp) }
                         }
                         repeat(9 - row.size) { Spacer(Modifier.weight(1f)) }
                     }

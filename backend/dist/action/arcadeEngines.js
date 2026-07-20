@@ -22,7 +22,7 @@ export class TetrisArenaEngine {
                 this.players.set(player.id, {
                     id: player.id, name: player.name, colorHex: player.color,
                     board: grid(20, 10, 0), piece: { type: first, rotation: 0, row: -1, col: 3 },
-                    bag, next, score: 0, lines: 0, gameOver: false,
+                    bag, next, score: 0, lines: 0, gameOver: false, lockDeadline: 0, impact: 0,
                 });
             }
     }
@@ -34,27 +34,50 @@ export class TetrisArenaEngine {
             return this.tryMove(player, 0, -1);
         if (action === "RIGHT")
             return this.tryMove(player, 0, 1);
-        if (action === "SOFT_DROP")
-            return this.tryMove(player, 1, 0) || (this.lock(player), true);
+        if (action === "SOFT_DROP") {
+            if (this.tryMove(player, 1, 0))
+                return true;
+            if (!player.lockDeadline)
+                player.lockDeadline = Date.now() + 600;
+            return true;
+        }
         if (action === "ROTATE") {
             const previous = player.piece.rotation;
             player.piece.rotation = (previous + 1) % TETROMINOES[player.piece.type].length;
-            if (this.collides(player))
-                player.piece.rotation = previous;
-            return player.piece.rotation !== previous;
+            for (const [dy, dx] of [[0, 0], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+                player.piece.row += dy;
+                player.piece.col += dx;
+                if (!this.collides(player)) {
+                    player.lockDeadline = 0;
+                    return true;
+                }
+                player.piece.row -= dy;
+                player.piece.col -= dx;
+            }
+            player.piece.rotation = previous;
+            return false;
         }
         while (this.tryMove(player, 1, 0))
             player.score += 2;
-        this.lock(player);
+        player.impact += 1;
+        this.lock(player, true);
         return true;
     }
     tick(now = Date.now()) {
-        if (this.completed || now - this.lastGravityAt < 520)
+        const fastestLevel = Math.max(0, ...[...this.players.values()].map((player) => Math.floor(player.lines / 10)));
+        const gravityMs = Math.max(110, 520 - fastestLevel * 35);
+        if (this.completed || now - this.lastGravityAt < gravityMs)
             return;
         this.lastGravityAt = now;
         this.tickNumber += 1;
         for (const player of this.players.values()) {
-            if (!player.gameOver && !this.tryMove(player, 1, 0))
+            if (player.gameOver)
+                continue;
+            if (this.tryMove(player, 1, 0))
+                player.lockDeadline = 0;
+            else if (!player.lockDeadline)
+                player.lockDeadline = now + 600;
+            else if (now >= player.lockDeadline)
                 this.lock(player);
         }
         const alive = [...this.players.values()].filter((player) => !player.gameOver);
@@ -85,7 +108,7 @@ export class TetrisArenaEngine {
         player.piece.col -= dx;
         return false;
     }
-    lock(player) {
+    lock(player, kineticImpact = false) {
         const color = PIECE_NAMES.indexOf(player.piece.type) + 1;
         for (const [row, col] of this.cells(player.piece)) {
             if (row < 0) {
@@ -99,6 +122,8 @@ export class TetrisArenaEngine {
         while (remaining.length < 20)
             remaining.unshift(Array(10).fill(0));
         player.board = remaining;
+        if (kineticImpact && Math.random() < .10)
+            this.settleLooseBlocks(player.board);
         player.lines += cleared;
         player.score += [0, 100, 300, 500, 800][cleared] ?? 0;
         if (cleared >= 2)
@@ -109,9 +134,19 @@ export class TetrisArenaEngine {
         if (!player.bag.length)
             player.bag = shuffledBag();
         player.piece = { type: player.next, rotation: 0, row: -1, col: 3 };
+        player.lockDeadline = 0;
         player.next = player.bag.pop();
         if (this.collides(player))
             player.gameOver = true;
+    }
+    settleLooseBlocks(board) {
+        // Una sola pasada conservadora: cada bloque suelto cae verticalmente al
+        // hueco más bajo de su columna sin atravesar otros bloques.
+        for (let col = 0; col < 10; col += 1) {
+            const values = board.map((row) => row[col]).filter((value) => value !== 0);
+            for (let row = 0; row < 20; row += 1)
+                board[row][col] = row < 20 - values.length ? 0 : values[row - (20 - values.length)];
+        }
     }
     addGarbage(player, lines) {
         for (let count = 0; count < lines; count += 1) {
@@ -208,10 +243,9 @@ export class PacmanArenaEngine {
                 : now < this.frightenedUntil
                     ? "FRIGHTENED"
                     : Math.floor(now / 8_000) % 2 === 0 ? "CHASE" : "SCATTER";
-            if (ghost.mode === "FRIGHTENED" && this.tickNumber % 2 === 1)
-                return;
-            // En Chase/Scatter avanzan 4 de cada 5 ticks: 80% de Pac-Man.
-            if (ghost.mode !== "EATEN" && ghost.mode !== "FRIGHTENED" && this.tickNumber % 5 === 0)
+            // Todos los fantasmas activos avanzan al 80% de Pac-Man. En modo
+            // asustado conservan esa reducción y cambian su objetivo para huir.
+            if (ghost.mode !== "EATEN" && this.tickNumber % 5 === 0)
                 return;
             const target = ghost.mode === "EATEN"
                 ? { x: 7, y: 7 }
@@ -297,7 +331,7 @@ export class PacmanArenaEngine {
             const pivot = { x: player.x + vector.x * 2, y: player.y + vector.y * 2 };
             return { x: pivot.x * 2 - blinky.x, y: pivot.y * 2 - blinky.y };
         }
-        return manhattan(ghost, player) > 5 ? { x: player.x, y: player.y } : { x: ghost.homeX, y: ghost.homeY };
+        return manhattan(ghost, player) >= 8 ? { x: player.x, y: player.y } : { x: ghost.homeX, y: ghost.homeY };
     }
     bestGhostDirection(ghost, target, flee, salt) {
         const options = ["UP", "RIGHT", "DOWN", "LEFT"];

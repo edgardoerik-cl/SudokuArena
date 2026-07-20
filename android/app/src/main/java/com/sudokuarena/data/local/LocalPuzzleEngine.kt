@@ -29,6 +29,10 @@ class LocalPuzzleEngine(
     private val foundWords = mutableSetOf<String>()
     private val guessedLetters = mutableSetOf<String>()
     private var hangmanErrors = 0
+    private var hangmanRevealUsed = false
+    private var hangmanDiscardUsed = false
+    private var hangmanLastBreathUsed = false
+    private val hangmanDiscarded = mutableSetOf<String>()
     private var capitalPosition = 0
     private var capitalBalance = 1_500
     private var capitalStage = "ROLL"
@@ -39,6 +43,8 @@ class LocalPuzzleEngine(
     private val capitalOwners = mutableMapOf<Int, String>()
     private val capitalLevels = mutableMapOf<Int, Int>()
     private var localTurnTeam = "BLUE"
+    private var arrowRotateUses = 0
+    private var arrowMissileUses = 0
     private var memoryFirstPick: Pair<Int, Int>? = null
 
     fun snapshot() = GenericBoardState(
@@ -52,11 +58,20 @@ class LocalPuzzleEngine(
                     blueprint.answers.flatten().none { it?.toString() == guess }
                 },
                 "mistakesMade" to hangmanErrors,
+                "correctGuesses" to guessedLetters.filter { guess -> blueprint.answers.flatten().any { it?.toString() == guess } },
+                "revealUsed" to if (hangmanRevealUsed) listOf(OWNER) else emptyList<String>(),
+                "discardUsed" to if (hangmanDiscardUsed) listOf(OWNER) else emptyList<String>(),
+                "lastBreathUsed" to if (hangmanLastBreathUsed) listOf(OWNER) else emptyList<String>(),
+                "discardedByPlayer" to mapOf(OWNER to hangmanDiscarded.toList()),
                 "hiddenWord" to board.firstOrNull().orEmpty().map { it.value?.toString() ?: "_" },
             ) else emptyMap<String, Any?>() +
             if (gameType in setOf(GameType.CHECKERS, GameType.CHESS_TACTICS)) mapOf(
                 "localTurnTeam" to localTurnTeam,
                 "instructions" to "Modo Hotseat: entrega el teléfono al equipo ${if (localTurnTeam == "BLUE") "Azul" else "Rojo"}.",
+            ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.ARROWS_ESCAPE) mapOf(
+                "rotateUses" to mapOf(OWNER to arrowRotateUses),
+                "missileUses" to mapOf(OWNER to arrowMissileUses),
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
@@ -119,7 +134,26 @@ class LocalPuzzleEngine(
             return accept(if (identity == "RED") 20 else 0)
         }
         if (gameType == GameType.HANGMAN) {
-            val letter = value?.toString()?.uppercase()?.takeIf { it.length == 1 && it[0] in "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ" }
+            val payload = value as? Map<*, *>
+            when (payload?.get("action")?.toString()?.uppercase()) {
+                "REVEAL" -> {
+                    if (hangmanRevealUsed) return reject("Revelación Clara ya fue utilizada")
+                    val letter = blueprint.answers.flatten().mapNotNull { it?.toString() }.firstOrNull { it !in guessedLetters }
+                        ?: return reject("No quedan letras")
+                    hangmanRevealUsed = true
+                    return revealHangmanLetter(letter, 0)
+                }
+                "DISCARD" -> {
+                    if (hangmanDiscardUsed) return reject("Descarte Táctico ya fue utilizado")
+                    hangmanDiscardUsed = true
+                    hangmanDiscarded += "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ".map(Char::toString)
+                        .filter { candidate -> blueprint.answers.flatten().none { it?.toString() == candidate } && candidate !in guessedLetters }
+                        .shuffled(random).take(3)
+                    revision += 1
+                    return LocalPuzzleMoveResult(true, snapshot(), message = "Tres letras incorrectas descartadas")
+                }
+            }
+            val letter = (payload?.get("letter") ?: value)?.toString()?.uppercase()?.takeIf { it.length == 1 && it[0] in "ABCDEFGHIJKLMNÑOPQRSTUVWXYZ" }
                 ?: return reject("Selecciona una letra")
             if (!guessedLetters.add(letter)) return reject("Letra ya utilizada")
             var hits = 0
@@ -129,7 +163,13 @@ class LocalPuzzleEngine(
                     hits += 1
                 }
             }
-            if (hits == 0) hangmanErrors += 1
+            if (hits == 0) {
+                hangmanErrors += 1
+                if (hangmanErrors >= 6 && !hangmanLastBreathUsed) {
+                    hangmanLastBreathUsed = true
+                    hangmanErrors = 5
+                }
+            }
             revision += 1
             return LocalPuzzleMoveResult(
                 accepted = true,
@@ -139,6 +179,20 @@ class LocalPuzzleEngine(
             )
         }
         if (gameType == GameType.ARROWS_ESCAPE) {
+            val action = (value as? Map<*, *>)?.get("action")?.toString()?.uppercase() ?: "ESCAPE"
+            if (action == "ROTATE") {
+                if (arrowRotateUses >= 2) return reject("No quedan rotaciones")
+                val next = when (cell.value?.toString()) { "UP" -> "RIGHT"; "RIGHT" -> "DOWN"; "DOWN" -> "LEFT"; else -> "UP" }
+                replace(row, col, cell.copy(value = next, meta = cell.meta + ("arrow" to next)))
+                arrowRotateUses++
+                return accept(0)
+            }
+            if (action == "MISSILE") {
+                if (arrowMissileUses >= 1) return reject("Misil ya utilizado")
+                arrowMissileUses++
+                replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
+                return accept(15)
+            }
             val direction = cell.value?.toString() ?: return reject("Flecha inválida")
             val (dy, dx) = when (direction) {
                 "UP" -> -1 to 0; "RIGHT" -> 0 to 1; "DOWN" -> 1 to 0; else -> 0 to -1
@@ -206,15 +260,7 @@ class LocalPuzzleEngine(
         }
         if (gameType == GameType.DOTS_AND_BOXES) return dotsMove(row, col, value, cell)
         if (gameType == GameType.NEXUS_ZERO) {
-            val payload = value as? Map<*, *> ?: return incorrect()
-            val targetRow = payload["targetRow"]?.toString()?.toIntOrNull() ?: return incorrect()
-            val targetCol = payload["targetCol"]?.toString()?.toIntOrNull() ?: return incorrect()
-            val target = board.getOrNull(targetRow)?.getOrNull(targetCol) ?: return incorrect()
-            if (target.ownerId != null || blueprint.answers[row][col] != "$targetRow:$targetCol") return incorrect()
-            if ((cell.value as? Number)?.toInt()?.plus((target.value as? Number)?.toInt() ?: 99) != 0) return incorrect()
-            replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
-            replace(targetRow, targetCol, target.copy(ownerId = OWNER, isRevealed = true))
-            return accept(24)
+            return nexusSwipe(value)
         }
 
         val expected = blueprint.answers[row][col]
@@ -266,6 +312,7 @@ class LocalPuzzleEngine(
             board.flatten().count { it.meta["team"] == "RED" } == 0
         GameType.CHESS_TACTICS -> board.flatten().count { it.value == "KING" } < 2
         GameType.HANGMAN -> board.first().all { it.value != null } || hangmanErrors >= 6
+        GameType.NEXUS_ZERO -> board.flatten().all { it.value == null }
         GameType.MEMORY_NEON -> board.flatten().all { it.ownerId != null }
         GameType.MERGE_2048 -> {
             val target = (blueprint.meta["target"] as? Number)?.toInt() ?: 256
@@ -389,6 +436,17 @@ class LocalPuzzleEngine(
             ) return false
         } }
         return true
+    }
+
+    private fun revealHangmanLetter(letter: String, points: Int): LocalPuzzleMoveResult {
+        guessedLetters += letter
+        blueprint.answers.first().forEachIndexed { index, answer ->
+            if (answer?.toString() == letter) {
+                replace(0, index, board[0][index].copy(value = letter, isRevealed = true, ownerId = OWNER))
+            }
+        }
+        revision += 1
+        return LocalPuzzleMoveResult(true, snapshot(), points = points, message = "Revelación Clara activada")
     }
 
     private fun ticWinner(mark: String): Boolean {
@@ -634,44 +692,52 @@ class LocalPuzzleEngine(
         return result(board, answers, mapOf("instructions" to "Toca una isla y luego un vecino resaltado."))
     }
     private fun nexusZero(): Blueprint {
-        val rows = size(4, 6, 6, 8)
-        val cols = 6
-        val total = rows * cols
-        val shuffled = (0 until total).shuffled(random)
-        val partners = IntArray(total)
-        shuffled.chunked(2).forEach { pair -> partners[pair[0]] = pair[1]; partners[pair[1]] = pair[0] }
-        val positions = (0 until total).map { index ->
-            val baseX = 24 + (index % cols) * 158
-            val baseY = 24 + (index / cols) * (650 / rows)
-            mapOf(
-                "x" to (baseX + random.nextInt(-18, 19)).coerceIn(6, 920),
-                "y" to (baseY + random.nextInt(-12, 13)).coerceIn(6, 630),
-                "width" to 74,
-                "height" to 58,
-            )
-        }
-        val board = MutableList(rows) { row -> MutableList(cols) { col ->
-            GenericCell(isRevealed = true, meta = mapOf("charge" to true) + positions[row * cols + col])
-        } }
-        val answers = MutableList(rows) { MutableList<Any?>(cols) { null } }
-        val assigned = mutableSetOf<Int>()
-        repeat(total) { index ->
-            if (index in assigned) return@repeat
-            val partner = partners[index]
-            val charge = random.nextInt(1, 10) * if (random.nextBoolean()) 1 else -1
-            val row = index / cols; val col = index % cols
-            val otherRow = partner / cols; val otherCol = partner % cols
-            board[row][col] = board[row][col].copy(value = charge)
-            board[otherRow][otherCol] = board[otherRow][otherCol].copy(value = -charge)
-            answers[row][col] = "$otherRow:$otherCol"
-            answers[otherRow][otherCol] = "$row:$col"
-            assigned += index; assigned += partner
+        val boardSize = size(5, 6, 7, 8)
+        val pairsPerRow = maxOf(1, (boardSize * .36f).toInt())
+        val pairCount = pairsPerRow * boardSize
+        val cells = MutableList(boardSize) { MutableList(boardSize) { GenericCell() } }
+        repeat(boardSize) { row ->
+            val columns = (0 until boardSize).shuffled(random).take(pairsPerRow * 2).sorted()
+            repeat(pairsPerRow) { pair ->
+                val value = random.nextInt(1, 10)
+                val ordered = if (random.nextBoolean()) listOf(value, -value) else listOf(-value, value)
+                cells[row][columns[pair * 2]] = GenericCell(value = ordered[0], isRevealed = true, meta = mapOf("charge" to true))
+                cells[row][columns[pair * 2 + 1]] = GenericCell(value = ordered[1], isRevealed = true, meta = mapOf("charge" to true))
+            }
         }
         return result(
-            board.map { it.toList() },
-            answers.map { it.toList() },
-            mapOf("instructions" to "Nexo Cero: enlaza cargas dispersas que sumen 0.", "spatialLayout" to true, "arenaWidth" to 1000, "arenaHeight" to 700),
+            cells,
+            matrix(boardSize, boardSize) { _, _ -> null },
+            mapOf("actionMode" to true, "engine" to "NEXUS_SWIPE", "pairCount" to pairCount, "instructions" to "Desliza +N contra -N para crear Nexo Cero."),
         )
+    }
+
+    private fun nexusSwipe(raw: Any?): LocalPuzzleMoveResult {
+        val direction = raw?.toString()?.uppercase()
+        if (direction !in setOf("UP", "RIGHT", "DOWN", "LEFT")) return reject("Desliza en una dirección")
+        val size = board.size
+        val old = board.map { row -> row.map { (it.value as? Number)?.toInt() } }
+        val next = MutableList(size) { MutableList<Int?>(size) { null } }
+        var merges = 0
+        fun line(values: List<Int?>): List<Int?> {
+            val output = mutableListOf<Int>()
+            values.filterNotNull().forEach { value ->
+                if (output.lastOrNull()?.plus(value) == 0) { output.removeAt(output.lastIndex); merges++ }
+                else output += value
+            }
+            return output.map<Int, Int?> { it } + List(size - output.size) { null }
+        }
+        repeat(size) { axis ->
+            val horizontal = direction in setOf("LEFT", "RIGHT")
+            var source = List(size) { index -> if (horizontal) old[axis][index] else old[index][axis] }
+            if (direction in setOf("RIGHT", "DOWN")) source = source.reversed()
+            var result = line(source)
+            if (direction in setOf("RIGHT", "DOWN")) result = result.reversed()
+            result.forEachIndexed { index, value -> if (horizontal) next[axis][index] = value else next[index][axis] = value }
+        }
+        if (next == old) return reject("Las fichas están bloqueadas en esa dirección")
+        board = next.map { row -> row.map { value -> GenericCell(value = value, isRevealed = value != null, meta = if (value != null) mapOf("charge" to true) else emptyMap()) } }
+        return accept(merges * 25)
     }
 
     private fun crossLetters(): Blueprint {

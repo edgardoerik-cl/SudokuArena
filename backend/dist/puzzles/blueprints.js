@@ -142,82 +142,37 @@ function chessTactics(difficulty) {
             turnBased: true,
             blueMoves: "movimiento",
             redMoves: "ataque",
-            instructions: "Una acción por turno. Mantén pulsada una pieza para usar su habilidad cuando CD llegue a 0.",
+            instructions: "Elige movimiento clásico O habilidad. Peón: Falange; Caballo: Salto Sísmico; Alfil: Rayo; Torre: Muro; Reina: Intimidación; Rey: Revivir.",
             difficulty,
         },
     };
 }
-/**
- * Nexo Cero: cada pareja ortogonal contiene cargas opuestas. El jugador enlaza
- * dos nodos cuya suma sea cero; ambos quedan conquistados simultáneamente.
- */
 function nexusZero(random, difficulty) {
-    const rows = sizeFor(difficulty, 4, 6, 6, 8);
-    const columns = 6;
-    const board = matrix(rows, columns, () => cell(null, true));
-    const answers = matrix(rows, columns, () => null);
-    const indices = random.shuffle(Array.from({ length: rows * columns }, (_, index) => index));
-    const partner = new Array(rows * columns);
-    for (let index = 0; index < indices.length; index += 2) {
-        partner[indices[index]] = indices[index + 1];
-        partner[indices[index + 1]] = indices[index];
-    }
-    const boxes = [];
-    const width = 74;
-    const height = 58;
-    const arenaWidth = 1_000;
-    const arenaHeight = 700;
-    for (let index = 0; index < rows * columns; index += 1) {
-        let candidate = null;
-        for (let attempt = 0; attempt < 400; attempt += 1) {
-            const proposed = {
-                x: random.int(12, arenaWidth - width - 12),
-                y: random.int(12, arenaHeight - height - 12),
-                width,
-                height,
-            };
-            const overlaps = boxes.some((box) => proposed.x < box.x + box.width + 10 && proposed.x + proposed.width + 10 > box.x &&
-                proposed.y < box.y + box.height + 10 && proposed.y + proposed.height + 10 > box.y);
-            if (!overlaps) {
-                candidate = proposed;
-                break;
-            }
+    const size = sizeFor(difficulty, 5, 6, 7, 8);
+    const board = matrix(size, size, () => cell(null, false));
+    const answers = matrix(size, size, () => null);
+    const pairsPerRow = Math.max(1, Math.floor(size * .36));
+    const pairCount = pairsPerRow * size;
+    // Los huecos y orientaciones cambian, pero cada fila conserva pares opuestos
+    // en orden de compactación. El tablero siempre tiene una solución por swipes.
+    for (let row = 0; row < size; row += 1) {
+        const columns = random.shuffle(Array.from({ length: size }, (_, index) => index))
+            .slice(0, pairsPerRow * 2).sort((a, b) => a - b);
+        for (let pair = 0; pair < pairsPerRow; pair += 1) {
+            const value = random.int(1, 9);
+            const ordered = random.next() < .5 ? [value, -value] : [-value, value];
+            board[row][columns[pair * 2]] = cell(ordered[0], true, { charge: true });
+            board[row][columns[pair * 2 + 1]] = cell(ordered[1], true, { charge: true });
         }
-        // Fallback determinista para densidades extremas; conserva padding seguro.
-        boxes.push(candidate ?? {
-            x: 18 + (index % columns) * Math.floor((arenaWidth - 36) / columns),
-            y: 18 + Math.floor(index / columns) * Math.floor((arenaHeight - 36) / rows),
-            width: width - 8,
-            height: height - 8,
-        });
-    }
-    const assigned = new Set();
-    for (let index = 0; index < partner.length; index += 1) {
-        if (assigned.has(index))
-            continue;
-        const other = partner[index];
-        const charge = random.int(1, 9) * (random.next() < .5 ? -1 : 1);
-        const row = Math.floor(index / columns);
-        const col = index % columns;
-        const otherRow = Math.floor(other / columns);
-        const otherCol = other % columns;
-        board[row][col].value = charge;
-        board[otherRow][otherCol].value = -charge;
-        answers[row][col] = `${otherRow}:${otherCol}`;
-        answers[otherRow][otherCol] = `${row}:${col}`;
-        board[row][col].meta = { charge: true, ...boxes[index] };
-        board[otherRow][otherCol].meta = { charge: true, ...boxes[other] };
-        assigned.add(index);
-        assigned.add(other);
     }
     return {
         board,
         answers,
         meta: {
-            instructions: "Nexo Cero: enlaza dos cargas vecinas que sumen 0. Encadena rápido para dominar la matriz.",
-            spatialLayout: true,
-            arenaWidth,
-            arenaHeight,
+            actionMode: true,
+            engine: "NEXUS_SWIPE",
+            instructions: "Desliza todas las cargas. Solo +N y -N se fusionan; cada Nexo Cero elimina ambas fichas.",
+            pairCount,
             guaranteedSolvable: true,
             difficulty,
         },
@@ -554,12 +509,16 @@ function arrowsEscape(random, difficulty) {
         const pathType = difficulty === "EXPERT" && index % 5 === 0
             ? (index % 2 === 0 ? "CURVE_LEFT" : "CURVE_RIGHT")
             : "STRAIGHT";
-        shapes.push({ id, x, y, width, height, offsets, direction, pathType, memberKeys: [`0:${index}`] });
+        const blockType = index % 11 === 0 ? "BOMB" : index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL";
+        const z = .18 + random.next() * .64;
+        shapes.push({ id, x, y, z, width, height, depth: Math.max(width, height), offsets, direction, pathType, blockType, memberKeys: [`0:${index}`] });
         board[0][index] = cell(direction, true, {
             arrow: direction,
             shapeId: id,
             shapeAnchor: true,
             pathType,
+            blockType,
+            z,
         });
         answers[0][index] = direction;
     }
@@ -572,6 +531,9 @@ function arrowsEscape(random, difficulty) {
             worldHeight: 1,
             totalBlocks: count,
             totalShapes: shapes.length,
+            maxFailedTaps: sizeFor(difficulty, 8, 7, 6, 5),
+            rotatePowerUses: 2,
+            missilePowerUses: 1,
             shapes,
             instructions: "Toca una pieza flotante. Toda su geometría debe recorrer la trayectoria de salida sin tocar otra forma.",
             difficulty,

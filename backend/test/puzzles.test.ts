@@ -180,36 +180,28 @@ describe("motor genérico de puzzles", () => {
     assert.ok(hangman.board[0]!.every((cell) => cell.value === null));
   });
 
-  it("dispersa Nexo Cero sin solapamientos y conserva parejas opuestas", () => {
+  it("Nexo Cero genera cargas opuestas en una matriz sin superposición", () => {
     const blueprint = createPuzzleBlueprint("NEXUS_ZERO", { seed: "deep-shuffle", difficulty: "EXPERT" });
-    const boxes: Array<{ x: number; y: number; width: number; height: number }> = [];
-    blueprint.answers.forEach((row, y) => row.forEach((answer, x) => {
-      const [targetRow, targetCol] = String(answer).split(":").map(Number);
-      assert.equal(Number(blueprint.board[y]![x]!.value) + Number(blueprint.board[targetRow!]![targetCol!]!.value), 0);
-      const meta = blueprint.board[y]![x]!.meta;
-      boxes.push({ x: Number(meta.x), y: Number(meta.y), width: Number(meta.width), height: Number(meta.height) });
-    }));
-    assert.ok(boxes.some((box, index) => index > 0 && box.x !== boxes[index - 1]!.x));
+    const values = blueprint.board.flat().map((cell) => cell.value).filter((value): value is number => typeof value === "number");
+    const counts = new Map<number, number>();
+    values.forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1));
+    counts.forEach((count, value) => assert.equal(counts.get(-value), count));
     assert.equal(blueprint.meta.guaranteedSolvable, true);
-    assert.equal(blueprint.meta.spatialLayout, true);
+    assert.equal(blueprint.meta.engine, "NEXUS_SWIPE");
   });
 
-  it("Nexo Cero acepta valores opuestos aunque lleguen como enteros serializados", () => {
+  it("Nexo Cero procesa swipes globales sin solapar fichas incompatibles", () => {
     const players = new ArenaGame("nexus-int");
     players.addPlayer("p1", "Cero");
     players.startMatch({ gameType: "NEXUS_ZERO", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
     const engine = new GenericPuzzleEngine("NEXUS_ZERO", "nexus-int", { seed: "integer-zero" });
-    const snapshot = engine.snapshot(players);
-    const answer = String((createPuzzleBlueprint("NEXUS_ZERO", { seed: "integer-zero" }).answers[0]![0]));
-    const [targetRow, targetCol] = answer.split(":");
-    const result = engine.makeMove("p1", {
-      requestId: "zero-sum",
-      row: 0,
-      col: 0,
-      val: { targetRow, targetCol },
-    }, players);
-    assert.equal(result.accepted, true);
-    assert.equal(snapshot.board[0]![0]!.ownerId, null);
+    const before = engine.snapshot(players).board.flat().filter((cell) => cell.value != null).length;
+    const result = ["LEFT", "DOWN", "RIGHT", "UP"].map((direction, index) => engine.makeMove("p1", {
+      requestId: `zero-swipe-${index}`, row: 0, col: 0, val: direction,
+    }, players)).find((candidate) => candidate.accepted);
+    assert.ok(result);
+    const after = engine.snapshot(players).board.flat().filter((cell) => cell.value != null).length;
+    assert.ok(after <= before);
   });
 
   it("Damas conserva el turno al intentar un movimiento ilegal", () => {
@@ -270,6 +262,20 @@ describe("motor genérico de puzzles", () => {
     assert.equal(engine.snapshot(players).meta.currentPlayerTurn, "p2");
   });
 
+  it("Ahorcado aplica Revelación, Descarte y Último Aliento una sola vez", () => {
+    const players = new ArenaGame("hangman-powers");
+    players.addPlayer("p1", "Comodín");
+    players.startMatch({ gameType: "HANGMAN", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("HANGMAN", "hangman-powers", { seed: "lifeline" });
+    engine.setFirstPlayer("p1");
+    assert.equal(engine.makeMove("p1", { requestId: "reveal", row: 0, col: 0, val: { action: "REVEAL" } }, players).accepted, true);
+    assert.equal(engine.makeMove("p1", { requestId: "reveal-again", row: 0, col: 0, val: { action: "REVEAL" } }, players).accepted, false);
+    assert.equal(engine.makeMove("p1", { requestId: "discard", row: 0, col: 0, val: { action: "DISCARD" } }, players).accepted, true);
+    const state = engine.snapshot(players);
+    assert.ok((state.meta.revealUsed as string[]).includes("p1"));
+    assert.equal((state.meta.discardedByPlayer as Record<string, string[]>).p1.length, 3);
+  });
+
   it("Flechas modela formas padre con offsets y colisión conjunta", () => {
     const blueprint = createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "complex-shapes", difficulty: "EXPERT" });
     const shapes = blueprint.meta.shapes as Array<{ id: string; offsets: Array<{ x: number; y: number }>; direction: string }>;
@@ -285,7 +291,7 @@ describe("motor genérico de puzzles", () => {
       statusEffects: [], currentCooldown: 0, isShielded: false,
       hasEvasion: true, canActThisTurn: false, ambushTarget: null,
     };
-    assert.equal(skillFor(knight), "AMBUSH");
+    assert.equal(skillFor(knight), "SEISMIC_LEAP");
     assert.equal(movementRange(knight, { row: 4, col: 4 }).length, 8);
     assert.equal(attackRange(knight, { row: 4, col: 4 }).length, 8);
     assert.ok(calculateDamage(40, 20) < calculateDamage(40, 0));

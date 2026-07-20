@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -40,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,6 +57,18 @@ import kotlin.math.sin
 fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: () -> Unit, onExit: () -> Unit) {
     val arena = state.tetrisState
     val me = arena?.players?.firstOrNull { it.id == state.playerId } ?: arena?.players?.firstOrNull()
+    val haptics = LocalHapticFeedback.current
+    val impactFlash = remember(me?.id) { Animatable(0f) }
+    var previousImpact by remember(me?.id) { mutableIntStateOf(me?.impact ?: 0) }
+    LaunchedEffect(me?.impact) {
+        val impact = me?.impact ?: return@LaunchedEffect
+        if (impact > previousImpact) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            impactFlash.snapTo(1f)
+            impactFlash.animateTo(0f, tween(360))
+        }
+        previousImpact = impact
+    }
     Column(
         Modifier.fillMaxSize().background(Color(0xFF071225)).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(7.dp),
@@ -61,7 +76,40 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
         ArcadeTopBar("Tetris Arena", "Líneas ${me?.lines ?: 0} · ${me?.score ?: 0} pts", onPause, onExit)
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Surface(Modifier.weight(1f).fillMaxSize(), color = Color(0xFF020617), shape = RoundedCornerShape(16.dp)) {
-                Canvas(Modifier.fillMaxSize().padding(7.dp)) {
+                Canvas(
+                    Modifier.fillMaxSize().padding(7.dp)
+                        .pointerInput(me?.id, me?.gameOver) {
+                            if (me?.gameOver == true) return@pointerInput
+                            detectTapGestures(onTap = { onInput("ROTATE") })
+                        }
+                        .pointerInput(me?.id, me?.gameOver) {
+                            if (me?.gameOver == true) return@pointerInput
+                            var drag = Offset.Zero
+                            var horizontalSteps = 0
+                            detectDragGestures(
+                                onDragStart = { drag = Offset.Zero; horizontalSteps = 0 },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    drag += amount
+                                    val cellWidth = size.width / 10f
+                                    val requestedSteps = (drag.x / cellWidth).toInt()
+                                    while (horizontalSteps < requestedSteps) {
+                                        onInput("RIGHT"); horizontalSteps++; haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    while (horizontalSteps > requestedSteps) {
+                                        onInput("LEFT"); horizontalSteps--; haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    if (drag.y > size.height * .08f) {
+                                        onInput("SOFT_DROP")
+                                        drag = drag.copy(y = 0f)
+                                    }
+                                },
+                                onDragEnd = {
+                                    if (drag.y < -size.height * .10f) onInput("HARD_DROP")
+                                },
+                            )
+                        },
+                ) {
                     val board = me?.board ?: List(20) { List(10) { 0 } }
                     val cell = minOf(size.width / 10f, size.height / 20f)
                     val left = (size.width - cell * 10) / 2f
@@ -74,6 +122,10 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
                             drawRoundRect(Color.White.copy(alpha = .55f), origin + Offset(2f, 2f), Size(cell - 5f, cell - 5f), style = Stroke(1.4f))
                         }
                     } }
+                    if (impactFlash.value > 0f) {
+                        drawRect(Color.White.copy(alpha = impactFlash.value * .28f))
+                        drawRect(Color(0xFFFFC400).copy(alpha = impactFlash.value), style = Stroke(8f))
+                    }
                 }
             }
             Column(Modifier.weight(.44f).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -85,26 +137,12 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceBetween) {
-            VirtualJoystick(
-                enabled = me?.gameOver != true,
-                modifier = Modifier.size(112.dp),
-                onDirection = { direction ->
-                    when (direction) {
-                        "LEFT", "RIGHT" -> onInput(direction)
-                        "DOWN" -> onInput("SOFT_DROP")
-                    }
-                },
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.End) {
-                Button(onClick = { onInput("ROTATE") }, enabled = me?.gameOver != true, modifier = Modifier.size(width = 132.dp, height = 52.dp)) {
-                    Text("↻  GIRAR", fontWeight = FontWeight.Black)
-                }
-                Button(onClick = { onInput("HARD_DROP") }, enabled = me?.gameOver != true, modifier = Modifier.size(width = 132.dp, height = 58.dp)) {
-                    Text("⇊  CAÍDA", fontWeight = FontWeight.Black)
-                }
-            }
-        }
+        Text(
+            "Arrastra ↔ para mover · toca para girar · mantén ↓ para bajar · flick ↑ para impacto",
+            color = Color.White.copy(alpha = .76f),
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
     }
 }
 
@@ -135,7 +173,24 @@ fun PacmanArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
     ) {
         ArcadeTopBar("Pac-Man Arena", "♥ ${me?.lives ?: 3} · ${me?.score ?: 0} pts", onPause, onExit)
         BoxWithConstraints(
-            Modifier.weight(1f).fillMaxWidth().background(Color(0xFF02030F), RoundedCornerShape(16.dp)),
+            Modifier.weight(1f).fillMaxWidth().background(Color(0xFF02030F), RoundedCornerShape(16.dp))
+                .pointerInput(me?.id, me?.lives) {
+                    var drag = Offset.Zero
+                    detectDragGestures(
+                        onDragStart = { drag = Offset.Zero },
+                        onDrag = { change, amount -> change.consume(); drag += amount },
+                        onDragEnd = {
+                            if (drag.getDistance() >= 24f && (me?.lives ?: 0) > 0) {
+                                onInput(
+                                    if (abs(drag.x) > abs(drag.y)) {
+                                        if (drag.x > 0) "RIGHT" else "LEFT"
+                                    } else if (drag.y > 0) "DOWN" else "UP",
+                                )
+                            }
+                            drag = Offset.Zero
+                        },
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) {
             val map = arena?.tilemap.orEmpty()
@@ -148,11 +203,19 @@ fun PacmanArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
                 onRelease = PacmanSurfaceView::stopRenderer,
                 modifier = Modifier.size(tile * columns, tile * rows),
             )
+            if (arena?.ghosts?.any { it.mode == "FRIGHTENED" } == true) {
+                Canvas(Modifier.fillMaxSize()) {
+                    drawRect(Color(0x332196F3))
+                    drawRect(Color.White.copy(alpha = .18f), style = Stroke(7f))
+                }
+            }
         }
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-            VirtualJoystick(enabled = me?.lives?.let { it > 0 } == true, onDirection = onInput, modifier = Modifier.size(118.dp))
-            Text("Arrastra el joystick", color = Color.White.copy(alpha = .6f), fontSize = 11.sp, modifier = Modifier.align(Alignment.Center))
-        }
+        Text(
+            "Desliza en cualquier parte del laberinto · el giro queda preparado para la próxima esquina",
+            color = Color.White.copy(alpha = .72f),
+            fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+        )
     }
 }
 

@@ -153,9 +153,10 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⛓", "Mantén conectado", "Las casillas apagadas no deben tocarse por sus lados."),
     )
     GameType.CHESS_TACTICS -> listOf(
-        TutorialStep("AP", "Administra acciones", "Mover y atacar consume AP. Al tocar una unidad verás movimiento azul y ataque rojo."),
-        TutorialStep("♟", "Falange", "El Peón puede gastar AP para duplicar su defensa durante el turno."),
-        TutorialStep("♞♜", "Habilidades tácticas", "El Caballo golpea un área con Terremoto y la Torre atraviesa dos objetivos con Rayo Perforante."),
+        TutorialStep("♟", "Movimiento o habilidad", "En tu turno eliges una sola acción: mover una pieza con las reglas clásicas o activar su habilidad contextual."),
+        TutorialStep("◉", "Apunta con claridad", "Toca una pieza: las casillas azules son movimientos. Pulsa su habilidad y aparecerán en rojo o morado únicamente sus objetivos válidos."),
+        TutorialStep("⏳", "Respeta la recarga", "El número sobre el botón indica rondas de cooldown. Peón y Rey solo pueden usar su habilidad una vez por partida."),
+        TutorialStep("♜", "Defensas primero", "El Peón bloquea ataques frontales y la Torre protege a sus aliados adyacentes. Las pasivas defensivas tienen prioridad."),
     )
     GameType.NURIKABE -> listOf(
         TutorialStep("●≈", "Separa islas", "Los números indican el tamaño exacto de cada isla blanca."),
@@ -166,20 +167,24 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("#", "Respeta el número", "Cada isla recibe la cantidad indicada y toda la red queda conectada."),
     )
     GameType.TETRIS_ARENA -> listOf(
-        TutorialStep("▟", "Completa líneas", "Mueve y rota los tetrominós. Una fila llena desaparece y suma puntos."),
-        TutorialStep("▰", "Ataca con basura", "Dobles, triples y Tetris envían líneas grises a los tableros rivales."),
+        TutorialStep("↔", "Arrastra con una mano", "Desliza horizontalmente para llevar la pieza a otra columna. Toca rápidamente para rotarla con ajuste automático junto a paredes."),
+        TutorialStep("↓", "Controla la caída", "Arrastra hacia abajo para caída suave. Un flick rápido hacia arriba ejecuta la caída dura."),
+        TutorialStep("⚡", "Impacto cinético", "La caída dura vibra y puede acomodar bloques sueltos en huecos. Al tocar fondo tienes 0,6 segundos para el último ajuste."),
     )
     GameType.HANGMAN -> listOf(
-        TutorialStep("A _ _", "Adivina la palabra", "Usa la pista y prueba letras. Cada acierto revela todas sus posiciones."),
-        TutorialStep("6×", "Conserva tus intentos", "Con seis errores quedas eliminado; completa la palabra antes que tus rivales."),
+        TutorialStep("A _ _", "Toca una letra", "Usa el teclado integrado: verde significa acierto y rojo significa error. Cada acierto revela todas sus apariciones."),
+        TutorialStep("6×", "Cuida las seis vidas", "Cada error dibuja una parte del personaje. El sexto normalmente termina la ronda."),
+        TutorialStep("✨", "Tres ayudas", "Revelación descubre una letra, Descarte elimina tres letras falsas y Último Aliento evita una derrota fatal una sola vez."),
     )
     GameType.ARROWS_ESCAPE -> listOf(
-        TutorialStep("➜", "Libera los bloques", "Una flecha sale volando si no existe otro bloque frente a ella."),
-        TutorialStep("↩", "Evita rebotes", "Si la trayectoria está ocupada, la ficha rebota y permanece en el tablero."),
+        TutorialStep("◫", "Explora la figura 3D", "Arrastra para orbitar la cámara y pellizca para acercar o alejar. Un toque corto selecciona el bloque bajo el dedo."),
+        TutorialStep("➜", "Busca una salida", "El bloque vuela solo si toda su trayectoria está libre. Si choca, rebota, parpadea y consume un intento fallido."),
+        TutorialStep("↻ 🚀", "Cambia el puzzle", "Rotar gira una flecha bloqueada 90°. El misil atraviesa obstáculos. Las bombas liberadas eliminan dos bloques cercanos."),
     )
     GameType.PACMAN_ARENA -> listOf(
-        TutorialStep("●", "Come las píldoras", "Recorre el laberinto y suma puntos antes que los demás jugadores."),
-        TutorialStep("👻", "Lee a los fantasmas", "Alternan entre persecución y dispersión. Una píldora de poder los vuelve vulnerables."),
+        TutorialStep("↕", "Programa el próximo giro", "Desliza en cualquier zona del laberinto. La dirección queda en memoria y Pac-Man gira automáticamente al llegar a una intersección válida."),
+        TutorialStep("●", "Limpia el laberinto", "Come todos los puntos para ganar. Pac-Man avanza continuamente y solo se detiene frente a una pared."),
+        TutorialStep("👻", "Reconoce a los fantasmas", "Rojo persigue, Rosa embosca, Azul flanquea y Naranja huye de cerca. La píldora los vuelve azules y 20% más lentos."),
     )
     GameType.CROSS_LETTERS -> listOf(
         TutorialStep("AÑ", "Usa tu atril", "En tu turno forma una palabra española con las siete letras disponibles."),
@@ -197,8 +202,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("⚡", "Administra tu capital", "Cobra al pasar por Salida, evita la quiebra y termina con el patrimonio más alto."),
     )
     GameType.NEXUS_ZERO -> listOf(
-        TutorialStep("+4 −4", "Neutraliza cargas", "Encuentra dos nodos dispersos vinculados cuyos valores sumen exactamente cero."),
-        TutorialStep("⚡", "Encadena enlaces", "Resuelve pares rápidamente para multiplicar tu dominio y energía."),
+        TutorialStep("↔", "Desliza toda la matriz", "Haz swipe arriba, abajo, izquierda o derecha. Todas las fichas avanzan hacia ese borde sin atravesarse."),
+        TutorialStep("+4 −4", "Crea el Nexo", "Solo cargas exactamente opuestas pueden fusionarse. Al encontrarse suman cero y ambas desaparecen."),
+        TutorialStep("⊘", "Una fusión por movimiento", "Una ficha ya fusionada no vuelve a fusionarse durante el mismo swipe; las cargas incompatibles quedan en casillas separadas."),
     )
     GameType.CHECKERS -> listOf(
         TutorialStep("⛀", "Mueve en diagonal", "Las fichas normales avanzan una casilla diagonal hacia el lado rival."),

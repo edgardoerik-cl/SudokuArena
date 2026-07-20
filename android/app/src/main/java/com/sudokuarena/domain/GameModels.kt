@@ -83,6 +83,7 @@ data class TetrisPlayerState(
     val score: Int,
     val lines: Int,
     val gameOver: Boolean,
+    val impact: Int = 0,
 )
 data class TetrisArenaState(
     val serverTime: Long,

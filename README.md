@@ -3,8 +3,10 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `8.3.0` añade Memoria Neón y 2048 Arena en solitario y multijugador,
-con Bots, dificultad, tutoriales, animaciones y progreso visual compartido. También
+La versión `8.4.0` refina Chess Tactics, El Ahorcado, Flechas en Fuga 3D,
+Nexo Cero, Pac-Man y Tetris con controles táctiles, habilidades, IA y físicas
+adaptadas a sus reglas, además de Bots, dificultad, tutoriales, animaciones y
+progreso visual compartido. También
 incorpora una auditoría automática de los veinticuatro juegos. La versión `8.2.1`
 corrige la URL WebSocket de producción, la pantalla blanca de Flechas,
 el teclado virtual de Ahorcado y añade motores offline reales para los arcades y Hotseat
@@ -76,7 +78,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.3.0-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.4.0.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

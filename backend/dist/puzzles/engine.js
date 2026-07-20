@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createPuzzleBlueprint } from "./blueprints.js";
 import { SCRABBLE_SCORES } from "./blueprints.js";
 import { SPANISH_DICTIONARY } from "./spanishDictionary.js";
-import { attackRange, calculateDamage, cooldownFor, movementRange, skillCost, skillFor } from "./chessTactics.js";
+import { attackRange, cooldownFor, movementRange, skillCost, skillFor } from "./chessTactics.js";
 const GENERIC_HIT_POINTS = 10;
 const GENERIC_ENERGY = 25;
 const STRICT_PLAYER_TURN_GAMES = new Set([
@@ -45,8 +45,16 @@ export class GenericPuzzleEngine {
     capitalCard = null;
     hangmanGuesses = new Set();
     hangmanErrors = new Map();
+    hangmanRevealUsed = new Set();
+    hangmanDiscardUsed = new Set();
+    hangmanLastBreathUsed = new Set();
+    hangmanDiscarded = new Map();
     hiddenWord;
     arrowRemoved = new Map();
+    arrowFailedTaps = new Map();
+    arrowRotateUses = new Map();
+    arrowMissileUses = new Map();
+    capturedPawns = new Map([["BLUE", 0], ["RED", 0]]);
     memoryFirstPicks = new Map();
     mergeBotStep = 0;
     constructor(gameType, gameId, options = {}) {
@@ -120,6 +128,11 @@ export class GenericPuzzleEngine {
                     // solo letras ya descubiertas y guiones.
                     hiddenWord: this.board[0].map((cell) => cell.value?.toString() ?? "_"),
                     wrongGuesses: [...this.hangmanGuesses].filter((letter) => !this.hiddenWord.includes(letter)),
+                    correctGuesses: [...this.hangmanGuesses].filter((letter) => this.hiddenWord.includes(letter)),
+                    revealUsed: [...this.hangmanRevealUsed],
+                    discardUsed: [...this.hangmanDiscardUsed],
+                    lastBreathUsed: [...this.hangmanLastBreathUsed],
+                    discardedByPlayer: Object.fromEntries(this.hangmanDiscarded),
                     eliminated: [...this.hangmanErrors].filter(([, errors]) => errors >= 6).map(([id]) => id),
                     currentPlayerTurn: this.activePlayerId,
                     ...(this.completed && this.board[0].some((cell) => cell.value === null)
@@ -129,6 +142,9 @@ export class GenericPuzzleEngine {
                 ...(this.gameType === "ARROWS_ESCAPE" ? {
                     progress: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, removed.size])),
                     removedByPlayer: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, [...removed]])),
+                    failedTaps: Object.fromEntries(this.arrowFailedTaps),
+                    rotateUses: Object.fromEntries(this.arrowRotateUses),
+                    missileUses: Object.fromEntries(this.arrowMissileUses),
                 } : {}),
                 ...(this.gameType === "MEMORY_NEON" ? {
                     pairsFound: this.board.flat().filter((cell) => cell.ownerId !== null).length / 2,
@@ -211,6 +227,9 @@ export class GenericPuzzleEngine {
             return this.reject(move.requestId, "INVALID_MOVE", outcome.message ?? "Entrada no válida");
         }
         if (!outcome.correct) {
+            if (this.gameType === "CHESS_TACTICS" || this.gameType === "NEXUS_ZERO") {
+                return this.reject(move.requestId, "INVALID_MOVE", outcome.message ?? "Movimiento inválido; conserva tu turno");
+            }
             const penaltyMs = this.gameType === "MINESWEEPER" && outcome.hitMine ? 5_000 : 3_000;
             game.applyGenericPenalty(playerId, now + penaltyMs);
             // En Damas una jugada ilegal no consume el turno.
@@ -283,6 +302,10 @@ export class GenericPuzzleEngine {
                 col: 0,
                 val: directions[this.mergeBotStep++ % directions.length],
             };
+        }
+        if (this.gameType === "NEXUS_ZERO") {
+            const directions = ["LEFT", "DOWN", "RIGHT", "UP"];
+            return { requestId: `nexus-bot-${randomUUID()}`, row: 0, col: 0, val: directions[this.mergeBotStep++ % 4] };
         }
         if (this.gameType === "HANGMAN") {
             const target = this.board[0].findIndex((cell) => cell.value === null);
@@ -364,26 +387,6 @@ export class GenericPuzzleEngine {
                 col: placement.startCol,
                 val: { word: correct ? placement.word : `${placement.word}X`, endRow: placement.endRow, endCol: placement.endCol }
             };
-        }
-        if (this.gameType === "NEXUS_ZERO") {
-            for (let row = 0; row < this.board.length; row += 1) {
-                for (let col = 0; col < this.board[row].length; col += 1) {
-                    if (this.board[row][col].ownerId !== null)
-                        continue;
-                    const [targetRow, targetCol] = String(this.answers[row][col]).split(":").map(Number);
-                    if (this.board[targetRow]?.[targetCol]?.ownerId === null) {
-                        return {
-                            requestId: `nexus-bot-${randomUUID()}`,
-                            row,
-                            col,
-                            val: Math.random() <= accuracy
-                                ? { targetRow, targetCol }
-                                : { targetRow: row, targetCol: (col + 2) % this.board[row].length },
-                        };
-                    }
-                }
-            }
-            return null;
         }
         const candidates = [];
         for (let row = 0; row < this.board.length; row += 1) {
@@ -510,7 +513,35 @@ export class GenericPuzzleEngine {
             if ((this.hangmanErrors.get(playerId) ?? 0) >= 6) {
                 return { correct: false, neutral: true, points: 0, message: "Ya no te quedan vidas en esta ronda" };
             }
-            const letter = String(move.val ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : null;
+            const action = String(payload?.action ?? "LETTER").toUpperCase();
+            if (action === "REVEAL") {
+                if (this.hangmanRevealUsed.has(playerId))
+                    return { correct: false, neutral: true, message: "Revelación Clara ya fue utilizada" };
+                const letter = [...this.hiddenWord].find((candidate) => !this.hangmanGuesses.has(candidate));
+                if (!letter)
+                    return { correct: false, neutral: true, message: "No quedan letras por revelar" };
+                this.hangmanRevealUsed.add(playerId);
+                this.hangmanGuesses.add(letter);
+                [...this.hiddenWord].forEach((answer, col) => {
+                    if (answer === letter) {
+                        this.board[0][col].value = letter;
+                        this.board[0][col].ownerId = playerId;
+                        this.board[0][col].isRevealed = true;
+                    }
+                });
+                return { correct: true, points: 0, extraTurn: true };
+            }
+            if (action === "DISCARD") {
+                if (this.hangmanDiscardUsed.has(playerId))
+                    return { correct: false, neutral: true, message: "Descarte Táctico ya fue utilizado" };
+                const alphabet = [..."ABCDEFGHIJKLMNÑOPQRSTUVWXYZ"];
+                const discarded = alphabet.filter((candidate) => !this.hiddenWord.includes(candidate) && !this.hangmanGuesses.has(candidate)).sort(() => Math.random() - .5).slice(0, 3);
+                this.hangmanDiscardUsed.add(playerId);
+                this.hangmanDiscarded.set(playerId, discarded);
+                return { correct: true, points: 0, extraTurn: true };
+            }
+            const letter = String(payload?.letter ?? move.val ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
             if (!/^[A-ZÑ]$/.test(letter)) {
                 return { correct: false, neutral: true, message: "Ingresa exactamente una letra" };
             }
@@ -528,7 +559,13 @@ export class GenericPuzzleEngine {
                 }
             });
             if (hits === 0) {
-                this.hangmanErrors.set(playerId, (this.hangmanErrors.get(playerId) ?? 0) + 1);
+                const nextErrors = (this.hangmanErrors.get(playerId) ?? 0) + 1;
+                if (nextErrors >= 6 && !this.hangmanLastBreathUsed.has(playerId)) {
+                    this.hangmanLastBreathUsed.add(playerId);
+                    this.hangmanErrors.set(playerId, 5);
+                }
+                else
+                    this.hangmanErrors.set(playerId, nextErrors);
                 return { correct: true, points: 0 };
             }
             return { correct: true, points: hits * 12, extraTurn: true };
@@ -558,9 +595,47 @@ export class GenericPuzzleEngine {
             const members = this.arrowShapeMembers(shapeId);
             if (!members.length || members.every(({ row, col }) => removed.has(`${row}:${col}`)))
                 return { correct: false };
-            if (!this.canArrowShapeEscape(shapeId, removed))
-                return { correct: false, points: 0 };
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : null;
+            const action = String(payload?.action ?? move.val ?? "ESCAPE").toUpperCase();
+            if (action === "ROTATE") {
+                const used = this.arrowRotateUses.get(playerId) ?? 0;
+                if (used >= Number(this.meta.rotatePowerUses ?? 2))
+                    return { correct: false, neutral: true, message: "No quedan rotaciones" };
+                const shape = this.meta.shapes.find((candidate) => candidate.id === shapeId);
+                if (!shape)
+                    return { correct: false, neutral: true };
+                const next = { UP: "RIGHT", RIGHT: "DOWN", DOWN: "LEFT", LEFT: "UP" }[String(shape.direction)] ?? "UP";
+                shape.direction = next;
+                members.forEach(({ cell: member }) => { member.value = next; member.meta.arrow = next; });
+                this.arrowRotateUses.set(playerId, used + 1);
+                return { correct: true, points: 0 };
+            }
+            if (action === "MISSILE") {
+                const used = this.arrowMissileUses.get(playerId) ?? 0;
+                if (used >= Number(this.meta.missilePowerUses ?? 1))
+                    return { correct: false, neutral: true, message: "Misil ya utilizado" };
+                members.forEach(({ row, col }) => removed.add(`${row}:${col}`));
+                this.arrowMissileUses.set(playerId, used + 1);
+                this.arrowRemoved.set(playerId, removed);
+                return { correct: true, points: 15 * members.length };
+            }
+            const shape = this.meta.shapes.find((candidate) => candidate.id === shapeId);
+            const primary = String(shape?.direction ?? cell.meta.arrow);
+            const opposite = { UP: "DOWN", DOWN: "UP", LEFT: "RIGHT", RIGHT: "LEFT" }[primary];
+            const canEscape = this.canArrowShapeEscape(shapeId, removed, primary)
+                || (shape?.blockType === "BIDIRECTIONAL" && this.canArrowShapeEscape(shapeId, removed, opposite));
+            if (!canEscape) {
+                this.arrowFailedTaps.set(playerId, (this.arrowFailedTaps.get(playerId) ?? 0) + 1);
+                return { correct: true, points: 0 };
+            }
             members.forEach(({ row, col }) => removed.add(`${row}:${col}`));
+            if (shape?.blockType === "BOMB") {
+                const candidates = this.meta.shapes
+                    .filter((candidate) => candidate.id !== shapeId)
+                    .filter((candidate) => !candidate.memberKeys.every((key) => removed.has(key)))
+                    .slice(0, 2);
+                candidates.forEach((candidate) => candidate.memberKeys.forEach((key) => removed.add(key)));
+            }
             this.arrowRemoved.set(playerId, removed);
             return { correct: true, points: 10 * members.length };
         }
@@ -639,26 +714,8 @@ export class GenericPuzzleEngine {
                 extraTurn: completedBoxes > 0,
             };
         }
-        if (this.gameType === "NEXUS_ZERO") {
-            const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
-            const targetRow = Number.parseInt(String(payload.targetRow), 10);
-            const targetCol = Number.parseInt(String(payload.targetCol), 10);
-            const target = this.board[targetRow]?.[targetCol];
-            if (!target || target.ownerId !== null)
-                return { correct: false };
-            const expectedPartner = String(this.answers[move.row][move.col]) === `${targetRow}:${targetCol}`;
-            const firstValue = Number.parseInt(String(cell.value), 10);
-            const secondValue = Number.parseInt(String(target.value), 10);
-            if (!Number.isInteger(firstValue) || !Number.isInteger(secondValue))
-                return { correct: false };
-            if (!expectedPartner || firstValue + secondValue !== 0)
-                return { correct: false };
-            cell.ownerId = playerId;
-            target.ownerId = playerId;
-            cell.isRevealed = true;
-            target.isRevealed = true;
-            return { correct: true, points: 24 };
-        }
+        if (this.gameType === "NEXUS_ZERO")
+            return this.applyNexusSwipe(playerId, move);
         const expected = this.answers[move.row][move.col];
         const normalized = normalizeValue(move.val, expected);
         if (normalized !== expected)
@@ -744,6 +801,59 @@ export class GenericPuzzleEngine {
         }
         this.meta.highestTile = Math.max(...this.board.flat().map((cell) => Number(cell.value ?? 0)));
         return { correct: true, points: Math.max(2, points) };
+    }
+    applyNexusSwipe(playerId, move) {
+        const direction = String(move.val ?? "").toUpperCase();
+        if (!["UP", "RIGHT", "DOWN", "LEFT"].includes(direction)) {
+            return { correct: false, neutral: true, message: "Desliza en una dirección válida" };
+        }
+        const size = this.board.length;
+        const previous = this.board.map((row) => row.map((cell) => cell.value == null ? null : Number.parseInt(String(cell.value), 10)));
+        const next = matrixOf(size, size, null);
+        let nexuses = 0;
+        const processLine = (values) => {
+            const compact = values.filter((value) => Number.isInteger(value));
+            const output = [];
+            for (const value of compact) {
+                const last = output.at(-1);
+                if (last !== undefined && last + value === 0) {
+                    output.pop();
+                    nexuses += 1;
+                }
+                else
+                    output.push(value);
+            }
+            while (output.length < size)
+                output.push(Number.NaN);
+            return output.map((value) => Number.isNaN(value) ? null : value);
+        };
+        for (let line = 0; line < size; line += 1) {
+            const horizontal = direction === "LEFT" || direction === "RIGHT";
+            const source = Array.from({ length: size }, (_, index) => horizontal ? previous[line][index] : previous[index][line]);
+            if (direction === "RIGHT" || direction === "DOWN")
+                source.reverse();
+            const result = processLine(source);
+            if (direction === "RIGHT" || direction === "DOWN")
+                result.reverse();
+            result.forEach((value, index) => {
+                if (horizontal)
+                    next[line][index] = value;
+                else
+                    next[index][line] = value;
+            });
+        }
+        if (next.every((row, y) => row.every((value, x) => value === previous[y][x]))) {
+            return { correct: false, neutral: true, message: "Las fichas ya están bloqueadas en esa dirección" };
+        }
+        this.board.forEach((row, y) => row.forEach((target, x) => {
+            target.value = next[y][x] ?? null;
+            target.isRevealed = target.value !== null;
+            target.ownerId = null;
+            target.meta = target.value === null ? {} : { charge: true };
+        }));
+        this.meta.lastNexus = nexuses > 0 ? { playerId, count: nexuses, at: Date.now() } : null;
+        this.meta.nexusesCreated = Number(this.meta.nexusesCreated ?? 0) + nexuses;
+        return { correct: true, points: nexuses * 25 };
     }
     activeTeam(playerId) {
         return Math.max(0, this.turnOrder.indexOf(playerId)) % 2 === 0 ? "BLUE" : "RED";
@@ -897,25 +1007,37 @@ export class GenericPuzzleEngine {
                 return { correct: false };
             if (piece.ap < 1)
                 return { correct: false };
+            const intimidation = piece.statusEffects.find((effect) => effect.startsWith("INTIMIDATED:"));
+            if (intimidation) {
+                const [, queenRow, queenCol] = intimidation.split(":").map(Number);
+                const requiredY = Math.sign(move.row - queenRow);
+                const requiredX = Math.sign(move.col - queenCol);
+                if (Math.sign(targetRow - move.row) !== requiredY || Math.sign(targetCol - move.col) !== requiredX)
+                    return { correct: false };
+                piece.statusEffects = piece.statusEffects.filter((effect) => effect !== intimidation);
+            }
             if (enemy) {
-                enemy.hp -= calculateDamage(piece.type === "QUEEN" ? 48 : piece.type === "ROOK" ? 42 : piece.type === "KNIGHT" ? 36 : 30, enemy.defense);
-                if (enemy.hp <= 0) {
-                    if (enemy.type === "KING") {
-                        this.meta.winnerTeam = piece.team;
-                        this.completed = true;
-                    }
-                    clearPiece(target);
-                }
-                else
+                if (enemy.isShielded) {
+                    enemy.isShielded = false;
                     writePiece(target, enemy, target.ownerId);
+                    piece.ap = 0;
+                    writePiece(source, piece, playerId);
+                    return { correct: true, points: 2 };
+                }
+                if (enemy.type === "PAWN")
+                    this.capturedPawns.set(enemy.team, (this.capturedPawns.get(enemy.team) ?? 0) + 1);
+                if (enemy.type === "KING") {
+                    this.meta.winnerTeam = piece.team;
+                    this.completed = true;
+                }
+                writePiece(target, piece, playerId);
+                clearPiece(source);
             }
             else {
                 writePiece(target, piece, playerId);
                 clearPiece(source);
             }
             piece.ap -= 1;
-            if (enemy)
-                writePiece(source, piece, playerId);
             this.meta.lastChessAction = {
                 action: enemy ? "ATTACK" : "MOVE",
                 sourceRow: move.row,
@@ -926,7 +1048,7 @@ export class GenericPuzzleEngine {
                 at: Date.now(),
             };
             this.updateChessPassives();
-            return { correct: true, points: enemy ? (enemy.hp <= 0 ? 45 : 18) : 4 };
+            return { correct: true, points: enemy ? 45 : 4 };
         }
         if (action !== "SKILL")
             return { correct: false };
@@ -934,26 +1056,39 @@ export class GenericPuzzleEngine {
         const cost = skillCost(skill);
         if (piece.ap < cost || piece.currentCooldown > 0)
             return { correct: false };
-        if (skill === "FORCED_MARCH") {
+        if (skill === "PHALANX_CHARGE") {
             const direction = piece.team === "BLUE" ? 1 : -1;
-            if (targetRow !== move.row + direction || targetCol !== move.col || target.value !== null)
+            if (targetRow !== move.row + direction * 2 || targetCol !== move.col || this.board[move.row + direction][move.col].value !== null)
+                return { correct: false };
+            const pushed = pieceFromCell(target);
+            if (pushed) {
+                if (pushed.team === piece.team || pushed.type === "KING")
+                    return { correct: false };
+                const landing = this.board[targetRow + direction]?.[targetCol];
+                if (!landing || landing.value !== null || landing.isBlocked)
+                    return { correct: false };
+                writePiece(landing, pushed, target.ownerId);
+            }
+            else if (target.value !== null || target.isBlocked)
                 return { correct: false };
             writePiece(target, piece, playerId);
             clearPiece(source);
-            const support = this.board[move.row - direction]?.[move.col];
-            const ally = support ? pieceFromCell(support) : null;
-            if (support && ally && ally.team === piece.team && ["KNIGHT", "BISHOP"].includes(ally.type)) {
-                ally.canActThisTurn = true;
-                writePiece(support, ally, support.ownerId);
-            }
         }
-        else if (skill === "AMBUSH") {
-            const valid = attackRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
-            if (!valid)
+        else if (skill === "SEISMIC_LEAP") {
+            const valid = movementRange(piece, origin).some((point) => point.row === targetRow && point.col === targetCol);
+            if (!valid || target.value !== null || target.isBlocked)
                 return { correct: false };
-            piece.statusEffects = [...new Set([...piece.statusEffects, "Ambushing"])];
-            piece.ambushTarget = { row: targetRow, col: targetCol };
-            writePiece(source, piece, playerId);
+            writePiece(target, piece, playerId);
+            clearPiece(source);
+            for (let row = targetRow - 1; row <= targetRow + 1; row += 1)
+                for (let col = targetCol - 1; col <= targetCol + 1; col += 1) {
+                    const victimCell = this.board[row]?.[col];
+                    const victim = victimCell ? pieceFromCell(victimCell) : null;
+                    if (victimCell && victim && victim.team !== piece.team) {
+                        victim.statusEffects = [...new Set([...victim.statusEffects, "STUNNED"])];
+                        writePiece(victimCell, victim, victimCell.ownerId);
+                    }
+                }
         }
         else if (skill === "PIERCING_RAY") {
             const dy = Math.sign(targetRow - move.row);
@@ -966,42 +1101,53 @@ export class GenericPuzzleEngine {
                 const victim = pieceFromCell(victimCell);
                 if (!victim)
                     continue;
-                if (victim.team !== piece.team && !victim.statusEffects.some((effect) => effect.toUpperCase() === "INVULNERABLE")) {
-                    if (victim.type === "KNIGHT" && victim.hasEvasion) {
-                        victim.hasEvasion = false;
-                        writePiece(victimCell, victim, victimCell.ownerId);
-                    }
-                    else
-                        clearPiece(victimCell);
+                if (victim.team === piece.team || victim.type === "KING")
+                    break;
+                const pawnFrontShield = victim.type === "PAWN" && Math.sign(move.row - row) === (victim.team === "BLUE" ? -1 : 1);
+                if (victim.isShielded) {
+                    victim.isShielded = false;
+                    writePiece(victimCell, victim, victimCell.ownerId);
+                }
+                else if (!pawnFrontShield) {
+                    if (victim.type === "PAWN")
+                        this.capturedPawns.set(victim.team, (this.capturedPawns.get(victim.team) ?? 0) + 1);
+                    clearPiece(victimCell);
                 }
                 break;
             }
             writePiece(source, piece, playerId);
         }
-        else if (skill === "SHOCKWAVE") {
-            for (let row = move.row - 1; row <= move.row + 1; row += 1)
-                for (let col = move.col - 1; col <= move.col + 1; col += 1) {
+        else if (skill === "STONE_WALL") {
+            if (Math.max(Math.abs(targetRow - move.row), Math.abs(targetCol - move.col)) !== 1 || target.value !== null || target.isBlocked)
+                return { correct: false };
+            target.value = "WALL";
+            target.isRevealed = true;
+            target.isBlocked = true;
+            target.meta = { wall: true, wallTurns: 4, team: piece.team };
+            writePiece(source, piece, playerId);
+        }
+        else if (skill === "ROYAL_INTIMIDATION") {
+            if (targetRow !== move.row || targetCol !== move.col)
+                return { correct: false };
+            for (let row = move.row - 2; row <= move.row + 2; row += 1)
+                for (let col = move.col - 2; col <= move.col + 2; col += 1) {
                     const victimCell = this.board[row]?.[col];
                     const victim = victimCell ? pieceFromCell(victimCell) : null;
-                    if (!victimCell || !victim || victim.team === piece.team)
-                        continue;
-                    victim.statusEffects = [...new Set([...victim.statusEffects, "Stunned"])];
-                    writePiece(victimCell, victim, victimCell.ownerId);
+                    if (victimCell && victim && victim.team !== piece.team) {
+                        victim.statusEffects = [...new Set([...victim.statusEffects, `INTIMIDATED:${move.row}:${move.col}`])];
+                        writePiece(victimCell, victim, victimCell.ownerId);
+                    }
                 }
             writePiece(source, piece, playerId);
         }
-        else if (skill === "TACTICAL_TRANSPOSITION") {
-            const ally = pieceFromCell(target);
-            if (!ally || ally.team !== piece.team || ally.type === "KING")
-                return { correct: false };
-            const owner = target.ownerId;
-            writePiece(source, ally, owner);
-            writePiece(target, piece, playerId);
-        }
         else {
-            if (targetRow !== move.row || targetCol !== move.col)
+            if (Math.max(Math.abs(targetRow - move.row), Math.abs(targetCol - move.col)) !== 1 || target.value !== null || target.isBlocked)
                 return { correct: false };
-            piece.statusEffects = [...new Set([...piece.statusEffects, "Invulnerable"])];
+            if ((this.capturedPawns.get(piece.team) ?? 0) <= 0)
+                return { correct: false };
+            const revived = { ...piece, id: `${piece.team}-PAWN-revived-${Date.now()}`, type: "PAWN", currentCooldown: 0, statusEffects: [], isShielded: false };
+            writePiece(target, revived, playerId);
+            this.capturedPawns.set(piece.team, (this.capturedPawns.get(piece.team) ?? 1) - 1);
             writePiece(source, piece, playerId);
         }
         piece.ap -= cost;
@@ -1028,8 +1174,14 @@ export class GenericPuzzleEngine {
         const dy = Math.sign(target.row - origin.row);
         const dx = Math.sign(target.col - origin.col);
         for (let row = origin.row + dy, col = origin.col + dx; row !== target.row || col !== target.col; row += dy, col += dx) {
-            if (this.board[row]?.[col]?.value != null)
+            const traversed = this.board[row]?.[col];
+            if (traversed?.isBlocked)
                 return false;
+            if (traversed?.value != null) {
+                const ally = pieceFromCell(traversed);
+                if (!(type === "QUEEN" && ally?.team === pieceFromCell(this.board[origin.row][origin.col])?.team))
+                    return false;
+            }
         }
         return true;
     }
@@ -1043,16 +1195,17 @@ export class GenericPuzzleEngine {
         });
         this.board.forEach((row, rowIndex) => row.forEach((cell, colIndex) => {
             const piece = pieceFromCell(cell);
-            if (!piece || piece.type !== "PAWN")
+            if (!piece || piece.type !== "ROOK")
                 return;
-            const shielded = [colIndex - 1, colIndex + 1].some((col) => {
-                const ally = this.board[rowIndex]?.[col] ? pieceFromCell(this.board[rowIndex][col]) : null;
-                return ally?.team === piece.team && ally.type === "PAWN";
-            });
-            if (shielded) {
-                piece.isShielded = true;
-                writePiece(cell, piece, cell.ownerId);
-            }
+            for (let y = rowIndex - 1; y <= rowIndex + 1; y += 1)
+                for (let x = colIndex - 1; x <= colIndex + 1; x += 1) {
+                    const allyCell = this.board[y]?.[x];
+                    const ally = allyCell ? pieceFromCell(allyCell) : null;
+                    if (!allyCell || !ally || ally.team !== piece.team || ally.id === piece.id)
+                        continue;
+                    ally.isShielded = true;
+                    writePiece(allyCell, ally, allyCell.ownerId);
+                }
         }));
     }
     arrowShapeMembers(shapeId) {
@@ -1064,7 +1217,7 @@ export class GenericPuzzleEngine {
         }));
         return result;
     }
-    canArrowShapeEscape(shapeId, removed) {
+    canArrowShapeEscape(shapeId, removed, directionOverride) {
         if (this.meta.freeSpace === true) {
             const shapes = this.meta.shapes;
             const shape = shapes.find((candidate) => candidate.id === shapeId);
@@ -1074,9 +1227,10 @@ export class GenericPuzzleEngine {
             // Una ligera superposición visual de las formas curvas de la silueta no
             // debe convertir el nivel en un interbloqueo imposible desde el inicio.
             const initiallyOverlapping = new Set(obstacles.filter((obstacle) => rectanglesIntersect(shape, obstacle)).map((obstacle) => obstacle.id));
-            const vector = shape.direction === "UP" ? { x: 0, y: -1 }
-                : shape.direction === "RIGHT" ? { x: 1, y: 0 }
-                    : shape.direction === "DOWN" ? { x: 0, y: 1 }
+            const direction = directionOverride ?? shape.direction;
+            const vector = direction === "UP" ? { x: 0, y: -1 }
+                : direction === "RIGHT" ? { x: 1, y: 0 }
+                    : direction === "DOWN" ? { x: 0, y: 1 }
                         : { x: -1, y: 0 };
             const perpendicular = { x: -vector.y, y: vector.x };
             for (let step = 1; step <= 80; step += 1) {
@@ -1233,6 +1387,8 @@ export class GenericPuzzleEngine {
         if (this.gameType === "NURIKABE") {
             return this.board.every((row, y) => row.every((cell, x) => cell.meta.islandClue === true || cell.value === (this.answers[y][x] === true ? "RIVER" : "ISLAND")));
         }
+        if (this.gameType === "NEXUS_ZERO")
+            return this.board.flat().every((cell) => cell.value === null);
         if (["HITORI", "BRIDGES"].includes(this.gameType)) {
             return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] !== true || cell.ownerId !== null));
         }
@@ -1543,6 +1699,14 @@ export class GenericPuzzleEngine {
             const nextTeam = this.activeTeam(this.activePlayerId);
             // Fin de turno: enfría habilidades del equipo que actuó y consume Stun.
             this.board.flat().forEach((cell) => {
+                if (cell.meta.wall === true) {
+                    const turns = Number(cell.meta.wallTurns ?? 1) - 1;
+                    if (turns <= 0)
+                        clearPiece(cell);
+                    else
+                        cell.meta.wallTurns = turns;
+                    return;
+                }
                 const piece = pieceFromCell(cell);
                 if (!piece || piece.team !== previousTeam)
                     return;
@@ -1550,16 +1714,16 @@ export class GenericPuzzleEngine {
                 piece.statusEffects = piece.statusEffects.filter((effect) => effect.toUpperCase() !== "STUNNED");
                 writePiece(cell, piece, cell.ownerId);
             });
-            // Aura de liderazgo: la reina acelera un turno adicional a aliados cercanos.
+            // Aura de Inspiración del Rey: reduce un turno adicional a aliados adyacentes.
             this.board.forEach((row, rowIndex) => row.forEach((cell, colIndex) => {
-                const queen = pieceFromCell(cell);
-                if (!queen || queen.team !== previousTeam || queen.type !== "QUEEN")
+                const king = pieceFromCell(cell);
+                if (!king || king.team !== nextTeam || king.type !== "KING")
                     return;
                 for (let y = rowIndex - 1; y <= rowIndex + 1; y += 1)
                     for (let x = colIndex - 1; x <= colIndex + 1; x += 1) {
                         const allyCell = this.board[y]?.[x];
                         const ally = allyCell ? pieceFromCell(allyCell) : null;
-                        if (!allyCell || !ally || ally.team !== queen.team || ally.id === queen.id)
+                        if (!allyCell || !ally || ally.team !== king.team || ally.id === king.id)
                             continue;
                         ally.currentCooldown = Math.max(0, ally.currentCooldown - 1);
                         writePiece(allyCell, ally, allyCell.ownerId);
@@ -1848,6 +2012,9 @@ function clearPiece(cell) {
 }
 function oppositeSide(side) {
     return { top: "bottom", right: "left", bottom: "top", left: "right" }[side] ?? "";
+}
+function matrixOf(rows, columns, value) {
+    return Array.from({ length: rows }, () => Array.from({ length: columns }, () => value));
 }
 function rectanglesIntersect(first, second) {
     return first.x < second.x + second.width

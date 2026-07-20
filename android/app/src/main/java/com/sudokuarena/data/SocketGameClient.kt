@@ -526,6 +526,7 @@ private fun parseTetrisState(json: JSONObject): TetrisArenaState {
                 score = player.optInt("score"),
                 lines = player.optInt("lines"),
                 gameOver = player.optBoolean("gameOver"),
+                impact = player.optInt("impact"),
             )
         },
     )
