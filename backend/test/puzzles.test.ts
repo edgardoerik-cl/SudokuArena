@@ -126,7 +126,7 @@ describe("motor genérico de puzzles", () => {
     assert.equal(snapshot.players.length, 4);
   });
 
-  it("Letras Cruzadas entrega atril privado y valida una palabra española por turnos", () => {
+  it("Letras Cruzadas Blitz entrega atriles y acepta juego sin turnos", () => {
     const players = new ArenaGame("letters-players");
     players.addPlayer("bot", "Bot_Letras", true);
     players.startMatch({ gameType: "CROSS_LETTERS", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "HARD", puzzleDifficulty: "MEDIUM" }, "bot");
@@ -134,7 +134,8 @@ describe("motor genérico de puzzles", () => {
     const initial = engine.snapshot(players, 1_000);
     assert.equal(initial.rows, 15);
     assert.equal(engine.rackFor("bot").length, 7);
-    assert.equal(initial.meta.activePlayerId, "bot");
+    assert.equal(initial.meta.activePlayerId, null);
+    assert.equal(initial.meta.blitz, true);
     const move = engine.createBotMove(1, "bot");
     assert.ok(move);
     const result = engine.makeMove("bot", move!, players, 2_000);
@@ -289,11 +290,15 @@ describe("motor genérico de puzzles", () => {
       id: "n", team: "BLUE", owner: "BLUE", type: "KNIGHT",
       hp: 100, maxHp: 100, ap: 4, maxAp: 4, defense: 12,
       statusEffects: [], currentCooldown: 0, isShielded: false,
-      hasEvasion: true, canActThisTurn: false, ambushTarget: null,
+      hasEvasion: true, canActThisTurn: false, hasMoved: false, ambushTarget: null,
     };
     assert.equal(skillFor(knight), "SEISMIC_LEAP");
     assert.equal(movementRange(knight, { row: 4, col: 4 }).length, 8);
     assert.equal(attackRange(knight, { row: 4, col: 4 }).length, 8);
+    const pawn = { ...knight, type: "PAWN" as const, hasMoved: false };
+    assert.equal(movementRange(pawn, { row: 1, col: 3 }).length, 2);
+    pawn.hasMoved = true;
+    assert.equal(movementRange(pawn, { row: 3, col: 3 }).length, 1);
     assert.ok(calculateDamage(40, 20) < calculateDamage(40, 0));
     const blueprint = createPuzzleBlueprint("CHESS_TACTICS", { seed: "six-classes" });
     assert.deepEqual(

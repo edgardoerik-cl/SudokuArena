@@ -19,6 +19,10 @@ describe("Tetris Arena", () => {
     assert.equal(state.players[0].board[0].length, 10);
     assert.ok(state.players[0].next);
     assert.equal(state.players[0].impact, 1);
+    assert.equal(engine.input("p1", "HOLD"), true);
+    assert.ok(engine.snapshot().players[0].hold);
+    assert.equal(engine.input("p1", "CLEAN_BOMB"), true);
+    assert.equal(engine.snapshot().players[0].cleanBombUsed, true);
   });
 });
 
@@ -26,11 +30,15 @@ describe("Pac-Man Arena", () => {
   it("publica tilemap y fantasmas con máquina de estados", () => {
     const engine = new PacmanArenaEngine();
     engine.syncPlayers(players);
+    assert.equal(engine.snapshot().status, "WAITING");
+    engine.tick(900);
+    assert.equal(engine.snapshot().tick, 0);
     engine.input("p1", "LEFT");
     for (let tick = 0; tick < 12; tick += 1) engine.tick(1_000 + tick * 100);
     const state = engine.snapshot();
     assert.equal(state.tilemap.length, 15);
     assert.equal(state.ghosts.length, 4);
+    assert.equal(state.status, "PLAYING");
     assert.ok(state.ghosts.every((ghost: { mode: string }) => ["CHASE", "SCATTER", "FRIGHTENED", "EATEN"].includes(ghost.mode)));
     assert.ok(["LEFT", "UP", "DOWN", "RIGHT", "STOP"].includes(state.players[0].direction));
   });
@@ -48,5 +56,7 @@ describe("Demolición Arcade", () => {
     assert.ok(state.players[0].bricks.length > 0);
     assert.ok(state.players[0].ballX >= 0 && state.players[0].ballX <= 1);
     assert.ok(state.players[0].ballY >= 0 && state.players[0].ballY <= 1);
+    assert.ok(state.players[0].balls.length >= 1);
+    assert.ok(Array.isArray(state.players[0].drops));
   });
 });

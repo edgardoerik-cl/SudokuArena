@@ -9,6 +9,32 @@ import org.junit.Test
 
 class LocalPuzzleEngineTest {
     @Test
+    fun `Tetris local usa las siete piezas y expone Hold y bomba`() {
+        val starts = (1..12).map { seed -> LocalTetrisEngine("Tester", seed).snapshot().players.first().current }.toSet()
+        assertTrue("El generador no puede producir solamente cuadrados O", starts.size > 1)
+        val engine = LocalTetrisEngine("Tester", 17)
+        val before = engine.snapshot().players.first()
+        engine.input("HOLD")
+        val held = engine.snapshot().players.first()
+        assertEquals(before.current, held.hold)
+        assertFalse(held.canHold)
+        engine.input("CLEAN_BOMB")
+        assertTrue(engine.snapshot().players.first().cleanBombUsed)
+    }
+
+    @Test
+    fun `Pacman local espera el primer swipe`() {
+        val engine = LocalPacmanEngine("Tester")
+        assertEquals("WAITING", engine.snapshot().status)
+        engine.tick()
+        assertEquals(0L, engine.snapshot().tick)
+        engine.input("RIGHT")
+        engine.tick()
+        assertEquals("PLAYING", engine.snapshot().status)
+        assertTrue(engine.snapshot().tick > 0)
+    }
+
+    @Test
     fun `todos los juegos no Sudoku crean un tablero local jugable`() {
         val onlineOnly = setOf(
             GameType.SUDOKU,

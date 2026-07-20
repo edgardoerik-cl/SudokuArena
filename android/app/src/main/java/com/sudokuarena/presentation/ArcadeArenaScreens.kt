@@ -129,7 +129,18 @@ fun TetrisArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
                 }
             }
             Column(Modifier.weight(.44f).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Actual: ${me?.current ?: "—"}", color = Color.White, fontWeight = FontWeight.Black)
                 Text("Siguiente: ${me?.next ?: "—"}", color = Color.White, fontWeight = FontWeight.Black)
+                Button(
+                    onClick = { onInput("HOLD") },
+                    enabled = me?.canHold == true && me?.gameOver != true,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("HOLD ${me?.hold ?: "—"}", fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                Button(
+                    onClick = { onInput("CLEAN_BOMB") },
+                    enabled = me?.cleanBombUsed == false && me?.gameOver != true,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (me?.cleanBombUsed == true) "Bomba usada" else "💣 Limpiar 3 filas", fontSize = 10.sp) }
                 arena?.players?.filter { it.id != me?.id }?.forEach { rival ->
                     Surface(color = Color.White.copy(alpha = .09f), shape = RoundedCornerShape(10.dp)) {
                         Text("${rival.name}: ${rival.lines}", color = Color.White, modifier = Modifier.padding(7.dp), fontSize = 11.sp)
@@ -209,6 +220,19 @@ fun PacmanArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
                     drawRect(Color.White.copy(alpha = .18f), style = Stroke(7f))
                 }
             }
+            if (arena?.status == "WAITING") {
+                Surface(
+                    color = Color.Black.copy(alpha = .78f),
+                    shape = RoundedCornerShape(18.dp),
+                ) {
+                    Text(
+                        "DESLIZA PARA COMENZAR",
+                        Modifier.padding(horizontal = 22.dp, vertical = 14.dp),
+                        color = Color.Yellow,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
         }
         Text(
             "Desliza en cualquier parte del laberinto · el giro queda preparado para la próxima esquina",
@@ -240,8 +264,6 @@ fun DemolitionArenaScreen(state: ArenaUiState, onPaddle: (Float) -> Unit, onPaus
             frame // fuerza interpolación visual entre snapshots
             val player = me ?: return@Canvas
             val elapsed = ((System.currentTimeMillis() - (arena?.serverTime ?: 0L)).coerceIn(0L, 90L)) / 1000f
-            val bx = (player.ballX + player.velocityX * elapsed).coerceIn(.02f, .98f) * size.width
-            val by = (player.ballY + player.velocityY * elapsed).coerceIn(.02f, 1.02f) * size.height
             player.bricks.forEach { brick ->
                 val colors = listOf(Color(0xFF00E5FF), Color(0xFFFF3CAC), Color(0xFF7C4DFF), Color(0xFFFFB300), Color(0xFF00E676))
                 val color = colors[abs(brick.color) % colors.size]
@@ -250,8 +272,30 @@ fun DemolitionArenaScreen(state: ArenaUiState, onPaddle: (Float) -> Unit, onPaus
             }
             val paddleColor = runCatching { Color(android.graphics.Color.parseColor(player.colorHex)) }.getOrDefault(Color.Cyan)
             drawRoundRect(paddleColor, Offset((player.paddleX - .11f) * size.width, .92f * size.height), Size(.22f * size.width, .026f * size.height))
-            drawCircle(Color.White, size.minDimension * .018f, Offset(bx, by))
-            drawCircle(paddleColor.copy(alpha = .32f), size.minDimension * .032f, Offset(bx, by))
+            val balls = player.balls.ifEmpty {
+                listOf(com.sudokuarena.domain.DemolitionBallState(
+                    "legacy", player.ballX, player.ballY, player.velocityX, player.velocityY,
+                ))
+            }
+            balls.forEach { ball ->
+                val bx = (ball.x + ball.vx * elapsed).coerceIn(.02f, .98f) * size.width
+                val by = (ball.y + ball.vy * elapsed).coerceIn(.02f, 1.02f) * size.height
+                drawCircle(Color.White, size.minDimension * .018f, Offset(bx, by))
+                drawCircle(paddleColor.copy(alpha = .32f), size.minDimension * .032f, Offset(bx, by))
+            }
+            player.drops.forEach { drop ->
+                val color = when (drop.type) {
+                    "MULTIBALL" -> Color.Cyan
+                    "LASER" -> Color.Red
+                    else -> Color.Yellow
+                }
+                drawCircle(color, size.minDimension * .025f, Offset(drop.x * size.width, drop.y * size.height))
+                drawCircle(Color.White, size.minDimension * .029f, Offset(drop.x * size.width, drop.y * size.height), style = Stroke(2f))
+            }
+            if (player.laserUntil > (arena?.serverTime ?: 0L)) {
+                drawLine(Color.Red, Offset((player.paddleX - .06f) * size.width, .91f * size.height), Offset((player.paddleX - .06f) * size.width, 0f), 3f)
+                drawLine(Color.Red, Offset((player.paddleX + .06f) * size.width, .91f * size.height), Offset((player.paddleX + .06f) * size.width, 0f), 3f)
+            }
         }
         Text("Desliza horizontalmente para mover la plataforma", color = Color(0xFFB8C7E8), fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
     }

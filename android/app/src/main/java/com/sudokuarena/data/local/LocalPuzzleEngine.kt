@@ -45,6 +45,7 @@ class LocalPuzzleEngine(
     private var localTurnTeam = "BLUE"
     private var arrowRotateUses = 0
     private var arrowMissileUses = 0
+    private var nurikabeSonarUses = 0
     private var memoryFirstPick: Pair<Int, Int>? = null
 
     fun snapshot() = GenericBoardState(
@@ -72,6 +73,9 @@ class LocalPuzzleEngine(
             if (gameType == GameType.ARROWS_ESCAPE) mapOf(
                 "rotateUses" to mapOf(OWNER to arrowRotateUses),
                 "missileUses" to mapOf(OWNER to arrowMissileUses),
+            ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.NURIKABE) mapOf(
+                "sonarUses" to mapOf(OWNER to nurikabeSonarUses),
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
@@ -114,7 +118,20 @@ class LocalPuzzleEngine(
                 accept(0)
             }
         }
-        if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.TETRIS_ARENA, GameType.NURIKABE, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
+        if (gameType == GameType.HITORI && (value as? Map<*, *>)?.get("action")?.toString()?.uppercase() == "HINT") {
+            var candidate: Pair<Int, Int>? = null
+            board.forEachIndexed { y, cells -> cells.forEachIndexed { x, target ->
+                if (candidate == null && blueprint.answers[y][x] == true && target.ownerId == null) candidate = y to x
+            } }
+            if (candidate == null) board.forEachIndexed { y, cells -> cells.forEachIndexed { x, target ->
+                if (candidate == null && blueprint.answers[y][x] != true && target.meta["hintColor"] == null) candidate = y to x
+            } }
+            val (hintRow, hintCol) = candidate ?: return reject("No quedan deducciones")
+            val target = board[hintRow][hintCol]
+            replace(hintRow, hintCol, target.copy(meta = target.meta + ("hintColor" to if (blueprint.answers[hintRow][hintCol] == true) "RED" else "GREEN")))
+            return accept(0)
+        }
+        if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.TETRIS_ARENA, GameType.NURIKABE, GameType.HITORI, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
 
         if (gameType == GameType.CROSS_LETTERS) {
             val payload = value as? Map<*, *> ?: return incorrect()
@@ -210,6 +227,17 @@ class LocalPuzzleEngine(
         if (gameType == GameType.CHECKERS) return checkersMove(row, col, value, cell)
         if (gameType == GameType.CHESS_TACTICS) return chessHotseatMove(row, col, value, cell)
         if (gameType == GameType.NURIKABE) {
+            if ((value as? Map<*, *>)?.get("action")?.toString()?.uppercase() == "SONAR") {
+                if (nurikabeSonarUses >= 3) return reject("No quedan pulsos")
+                for (y in maxOf(0, row - 1)..minOf(board.lastIndex, row + 1)) {
+                    for (x in maxOf(0, col - 1)..minOf(board[y].lastIndex, col + 1)) {
+                        val target = board[y][x]
+                        replace(y, x, target.copy(meta = target.meta + ("sonarState" to if (blueprint.answers[y][x] == true) "RIVER" else "ISLAND")))
+                    }
+                }
+                nurikabeSonarUses++
+                return accept(0)
+            }
             val action = value?.toString()?.uppercase().orEmpty()
             if (action !in setOf("RIVER", "ISLAND", "CLEAR") || cell.meta["islandClue"] == true) return reject("Casilla no disponible")
             val next = if (action == "CLEAR") cell.copy(value = null, ownerId = null, isRevealed = false)

@@ -1,7 +1,7 @@
 import type { PlayerState } from "../types.js";
 
 type TetrominoName = "I" | "J" | "L" | "O" | "S" | "T" | "Z";
-export type TetrisAction = "LEFT" | "RIGHT" | "ROTATE" | "SOFT_DROP" | "HARD_DROP";
+export type TetrisAction = "LEFT" | "RIGHT" | "ROTATE" | "SOFT_DROP" | "HARD_DROP" | "HOLD" | "CLEAN_BOMB";
 export type PacmanDirection = "UP" | "RIGHT" | "DOWN" | "LEFT" | "STOP";
 export interface DemolitionBrick {
   id: string;
@@ -28,7 +28,7 @@ interface FallingPiece { type: TetrominoName; rotation: number; row: number; col
 interface TetrisPlayer {
   id: string; name: string; colorHex: string; board: number[][]; piece: FallingPiece;
   bag: TetrominoName[]; next: TetrominoName; score: number; lines: number; gameOver: boolean;
-  lockDeadline: number; impact: number;
+  lockDeadline: number; impact: number; hold: TetrominoName | null; canHold: boolean; cleanBombUsed: boolean;
 }
 
 export class TetrisArenaEngine {
@@ -46,6 +46,7 @@ export class TetrisArenaEngine {
         id: player.id, name: player.name, colorHex: player.color,
         board: grid(20, 10, 0), piece: { type: first, rotation: 0, row: -1, col: 3 },
         bag, next, score: 0, lines: 0, gameOver: false, lockDeadline: 0, impact: 0,
+        hold: null, canHold: true, cleanBombUsed: false,
       });
     }
   }
@@ -53,6 +54,30 @@ export class TetrisArenaEngine {
   input(playerId: string, action: TetrisAction): boolean {
     const player = this.players.get(playerId);
     if (!player || player.gameOver || this.completed) return false;
+    if (action === "HOLD") {
+      if (!player.canHold) return false;
+      const current = player.piece.type;
+      if (player.hold === null) {
+        player.piece = { type: player.next, rotation: 0, row: -1, col: 3 };
+        if (!player.bag.length) player.bag = shuffledBag();
+        player.next = player.bag.pop()!;
+      } else {
+        player.piece = { type: player.hold, rotation: 0, row: -1, col: 3 };
+      }
+      player.hold = current;
+      player.canHold = false;
+      player.lockDeadline = 0;
+      if (this.collides(player)) player.gameOver = true;
+      return true;
+    }
+    if (action === "CLEAN_BOMB") {
+      if (player.cleanBombUsed) return false;
+      player.board.splice(17, 3);
+      player.board.unshift(...grid(3, 10, 0));
+      player.cleanBombUsed = true;
+      player.score += 150;
+      return true;
+    }
     if (action === "LEFT") return this.tryMove(player, 0, -1);
     if (action === "RIGHT") return this.tryMove(player, 0, 1);
     if (action === "SOFT_DROP") {
@@ -133,6 +158,7 @@ export class TetrisArenaEngine {
     }
     if (!player.bag.length) player.bag = shuffledBag();
     player.piece = { type: player.next, rotation: 0, row: -1, col: 3 };
+    player.canHold = true;
     player.lockDeadline = 0;
     player.next = player.bag.pop()!;
     if (this.collides(player)) player.gameOver = true;
@@ -209,6 +235,7 @@ export class PacmanArenaEngine {
   private frightenedUntil = 0;
   private tickNumber = 0;
   private completed = false;
+  private started = false;
 
   constructor() {
     PACMAN_MAP.forEach((row, y) => row.forEach((tile, x) => {
@@ -230,10 +257,11 @@ export class PacmanArenaEngine {
     // Buffer de giro: conserva la dirección solicitada hasta alcanzar una
     // intersección donde sea válida, sin frenar el movimiento actual.
     player.queuedDirection = direction;
+    if (direction !== "STOP") this.started = true;
     return true;
   }
   tick(now = Date.now()): void {
-    if (this.completed) return;
+    if (this.completed || !this.started) return;
     this.tickNumber += 1;
     for (const player of this.players.values()) {
       if (player.queuedDirection && this.canMove(player, player.queuedDirection)) {
@@ -249,29 +277,29 @@ export class PacmanArenaEngine {
       }
     }
     this.ghosts.forEach((ghost, index) => {
-      ghost.mode = (ghost.eatenUntil ?? 0) > now
-        ? "EATEN"
-        : now < this.frightenedUntil
+      if ((ghost.eatenUntil ?? 0) > now) {
+        ghost.mode = "EATEN";
+        ghost.x = 7; ghost.y = 7; ghost.direction = "STOP";
+        return;
+      }
+      ghost.mode = now < this.frightenedUntil
           ? "FRIGHTENED"
           : Math.floor(now / 8_000) % 2 === 0 ? "CHASE" : "SCATTER";
-      // Todos los fantasmas activos avanzan al 80% de Pac-Man. En modo
-      // asustado conservan esa reducción y cambian su objetivo para huir.
-      if (ghost.mode !== "EATEN" && this.tickNumber % 5 === 0) return;
-      const target = ghost.mode === "EATEN"
-        ? { x: 7, y: 7 }
-        : ghost.mode === "SCATTER"
+      // Tres movimientos de fantasma por cada cuatro de Pac-Man: 75%.
+      if (this.tickNumber % 4 === 0) return;
+      const target = ghost.mode === "SCATTER"
           ? { x: ghost.homeX, y: ghost.homeY }
           : this.ghostTarget(ghost, index);
       ghost.direction = this.bestGhostDirection(ghost, target, ghost.mode === "FRIGHTENED", index);
       this.moveActor(ghost, ghost.direction);
-      if (ghost.mode === "EATEN" && ghost.x === 7 && ghost.y === 7) ghost.eatenUntil = 0;
     });
     for (const player of this.players.values()) for (const ghost of this.ghosts) {
       if (player.x !== ghost.x || player.y !== ghost.y) continue;
       if (ghost.mode === "FRIGHTENED") {
         player.score = (player.score ?? 0) + 200;
         ghost.mode = "EATEN";
-        ghost.eatenUntil = now + 3_000;
+        ghost.x = 7; ghost.y = 7; ghost.direction = "STOP";
+        ghost.eatenUntil = now + 10_000;
       } else {
         if (ghost.mode === "EATEN") continue;
         player.lives = Math.max(0, (player.lives ?? 0) - 1);
@@ -283,6 +311,7 @@ export class PacmanArenaEngine {
   snapshot(): any {
     return {
       serverTime: Date.now(), tick: this.tickNumber, completed: this.completed, tilemap: PACMAN_MAP,
+      status: this.started ? "PLAYING" : "WAITING",
       pills: [...this.pills], powerPills: [...this.powerPills],
       players: [...this.players.values()], ghosts: this.ghosts,
     };
@@ -354,6 +383,10 @@ interface DemolitionPlayer {
   bricks: DemolitionBrick[];
   completed: boolean;
   isBot: boolean;
+  balls: Array<{ id: string; x: number; y: number; vx: number; vy: number }>;
+  drops: Array<{ id: string; x: number; y: number; type: "MULTIBALL" | "LASER" | "SPEED" }>;
+  laserUntil: number;
+  speedUntil: number;
 }
 
 export class DemolitionArenaEngine {
@@ -378,6 +411,10 @@ export class DemolitionArenaEngine {
         bricks: this.generateLevel(1),
         completed: false,
         isBot: player.isBot,
+        balls: [{ id: "main", x: .5, y: .78, vx: .34, vy: -.48 }],
+        drops: [],
+        laserUntil: 0,
+        speedUntil: 0,
       });
     });
   }
@@ -416,49 +453,88 @@ export class DemolitionArenaEngine {
   }
 
   private integrate(player: DemolitionPlayer, deltaSeconds: number): void {
+    const now = Date.now();
+    player.drops.forEach((drop) => { drop.y += deltaSeconds * .22; });
+    const caught = player.drops.filter((drop) => drop.y >= .88 && drop.y <= .97 && Math.abs(drop.x - player.paddleX) <= .13);
+    caught.forEach((drop) => this.applyDemolitionDrop(player, drop.type, now));
+    player.drops = player.drops.filter((drop) => drop.y <= 1 && !caught.includes(drop));
+    if (player.laserUntil > now && this.tickNumber % 12 === 0) {
+      const target = player.bricks.filter((brick) => Math.abs(brick.x + brick.width / 2 - player.paddleX) <= .07)
+        .sort((a, b) => b.y - a.y)[0];
+      if (target) {
+        target.hp -= 1;
+        if (target.hp <= 0) player.bricks = player.bricks.filter((brick) => brick.id !== target.id);
+        player.score += 8 * player.level;
+      }
+    }
+    player.balls.forEach((ball) => this.integrateDemolitionBall(player, ball, deltaSeconds, now));
+    player.balls = player.balls.filter((ball) => ball.y <= 1.05);
+    if (player.balls.length === 0) {
+      player.lives -= 1;
+      this.resetBall(player);
+      return;
+    }
+    const primary = player.balls[0]!;
+    player.ballX = primary.x; player.ballY = primary.y;
+    player.velocityX = primary.vx; player.velocityY = primary.vy;
+    if (player.bricks.length === 0) {
+      player.level += 1;
+      player.score += 250;
+      player.bricks = this.generateLevel(player.level);
+      player.drops = [];
+      this.resetBall(player);
+    }
+  }
+
+  private integrateDemolitionBall(
+    player: DemolitionPlayer,
+    ball: { id: string; x: number; y: number; vx: number; vy: number },
+    deltaSeconds: number,
+    now: number,
+  ): void {
     const radius = .014;
-    let nextX = player.ballX + player.velocityX * deltaSeconds;
-    let nextY = player.ballY + player.velocityY * deltaSeconds;
+    let nextX = ball.x + ball.vx * deltaSeconds;
+    let nextY = ball.y + ball.vy * deltaSeconds;
     if (nextX - radius <= 0 || nextX + radius >= 1) {
-      player.velocityX *= -1;
+      ball.vx *= -1;
       nextX = Math.max(radius, Math.min(1 - radius, nextX));
     }
     if (nextY - radius <= 0) {
-      player.velocityY = Math.abs(player.velocityY);
+      ball.vy = Math.abs(ball.vy);
       nextY = radius;
     }
     const paddle = { x: player.paddleX - .105, y: .91, width: .21, height: .025 };
-    if (player.velocityY > 0 && circleIntersectsRect(nextX, nextY, radius, paddle)) {
+    if (ball.vy > 0 && circleIntersectsRect(nextX, nextY, radius, paddle)) {
       const relative = (nextX - player.paddleX) / (paddle.width / 2);
-      const speed = Math.min(.78, Math.hypot(player.velocityX, player.velocityY) * 1.015);
-      player.velocityX = relative * speed * .78;
-      player.velocityY = -Math.sqrt(Math.max(.08, speed * speed - player.velocityX * player.velocityX));
+      const speed = Math.min(.92, Math.hypot(ball.vx, ball.vy) * 1.015);
+      ball.vx = relative * speed * .78;
+      ball.vy = -Math.sqrt(Math.max(.08, speed * speed - ball.vx * ball.vx));
       nextY = paddle.y - radius;
     }
     const hit = player.bricks.find((brick) =>
       brick.hp > 0 && circleIntersectsRect(nextX, nextY, radius, brick)
     );
     if (hit) {
-      const previousXInside = player.ballX >= hit.x && player.ballX <= hit.x + hit.width;
-      if (previousXInside) player.velocityY *= -1;
-      else player.velocityX *= -1;
+      const previousXInside = ball.x >= hit.x && ball.x <= hit.x + hit.width;
+      if (previousXInside) ball.vy *= -1;
+      else ball.vx *= -1;
       hit.hp -= 1;
-      player.score += 10 * player.level;
-      if (hit.hp <= 0) player.bricks = player.bricks.filter((brick) => brick.id !== hit.id);
+      player.score += 10 * player.level * (player.speedUntil > now ? 2 : 1);
+      if (hit.hp <= 0) {
+        player.bricks = player.bricks.filter((brick) => brick.id !== hit.id);
+        if (Math.random() < .24) {
+          const types = ["MULTIBALL", "LASER", "SPEED"] as const;
+          player.drops.push({
+            id: `drop-${this.tickNumber}-${hit.id}`,
+            x: hit.x + hit.width / 2,
+            y: hit.y + hit.height,
+            type: types[Math.floor(Math.random() * types.length)]!,
+          });
+        }
+      }
     }
-    player.ballX = nextX;
-    player.ballY = nextY;
-    if (player.ballY - radius > 1) {
-      player.lives -= 1;
-      this.resetBall(player);
-      return;
-    }
-    if (player.bricks.length === 0) {
-      player.level += 1;
-      player.score += 250;
-      player.bricks = this.generateLevel(player.level);
-      this.resetBall(player);
-    }
+    ball.x = nextX;
+    ball.y = nextY;
   }
 
   private resetBall(player: DemolitionPlayer): void {
@@ -467,6 +543,26 @@ export class DemolitionArenaEngine {
     const speed = Math.min(.72, .48 + player.level * .025);
     player.velocityX = (Math.random() < .5 ? -1 : 1) * speed * .55;
     player.velocityY = -speed;
+    player.balls = [{
+      id: `ball-${this.tickNumber}`,
+      x: player.ballX, y: player.ballY, vx: player.velocityX, vy: player.velocityY,
+    }];
+  }
+
+  private applyDemolitionDrop(player: DemolitionPlayer, type: "MULTIBALL" | "LASER" | "SPEED", now: number): void {
+    if (type === "MULTIBALL") {
+      const source = player.balls[0];
+      if (source) {
+        player.balls.push(
+          { ...source, id: `multi-a-${this.tickNumber}`, vx: -Math.abs(source.vx || .32) },
+          { ...source, id: `multi-b-${this.tickNumber}`, vx: Math.abs(source.vx || .32) },
+        );
+      }
+    } else if (type === "LASER") player.laserUntil = now + 5_000;
+    else {
+      player.speedUntil = now + 7_000;
+      player.balls.forEach((ball) => { ball.vx *= 1.22; ball.vy *= 1.22; });
+    }
   }
 
   private generateLevel(level: number): DemolitionBrick[] {

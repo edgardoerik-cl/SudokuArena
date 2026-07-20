@@ -527,6 +527,10 @@ private fun parseTetrisState(json: JSONObject): TetrisArenaState {
                 lines = player.optInt("lines"),
                 gameOver = player.optBoolean("gameOver"),
                 impact = player.optInt("impact"),
+                current = player.optJSONObject("piece")?.optString("type", "O") ?: "O",
+                hold = player.nullableString("hold"),
+                canHold = player.optBoolean("canHold", true),
+                cleanBombUsed = player.optBoolean("cleanBombUsed"),
             )
         },
     )
@@ -567,6 +571,7 @@ private fun parsePacmanState(json: JSONObject): PacmanArenaState {
         powerPills = stringSet("powerPills"),
         players = actors("players"),
         ghosts = actors("ghosts"),
+        status = json.optString("status", "WAITING"),
     )
 }
 
@@ -600,6 +605,27 @@ private fun parseDemolitionState(json: JSONObject): DemolitionArenaState = Demol
                     color = brick.optInt("color"),
                 )
             }.orEmpty(),
+            balls = player.optJSONArray("balls")?.mapObjects { rawBall ->
+                val ball = rawBall as JSONObject
+                com.sudokuarena.domain.DemolitionBallState(
+                    id = ball.optString("id"),
+                    x = ball.optDouble("x").toFloat(),
+                    y = ball.optDouble("y").toFloat(),
+                    vx = ball.optDouble("vx").toFloat(),
+                    vy = ball.optDouble("vy").toFloat(),
+                )
+            }.orEmpty(),
+            drops = player.optJSONArray("drops")?.mapObjects { rawDrop ->
+                val drop = rawDrop as JSONObject
+                com.sudokuarena.domain.DemolitionDropState(
+                    id = drop.optString("id"),
+                    x = drop.optDouble("x").toFloat(),
+                    y = drop.optDouble("y").toFloat(),
+                    type = drop.optString("type"),
+                )
+            }.orEmpty(),
+            laserUntil = player.optLong("laserUntil"),
+            speedUntil = player.optLong("speedUntil"),
         )
     }.orEmpty(),
 )

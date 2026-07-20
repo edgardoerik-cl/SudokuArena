@@ -109,9 +109,9 @@ fun CapitalArenaBoard(
         }
     }
 
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Box(
-        modifier
-            .fillMaxWidth()
+        Modifier.fillMaxWidth()
             .aspectRatio(1f)
             .background(Color(0xFFF6F8FF), RoundedCornerShape(18.dp)),
     ) {
@@ -141,12 +141,12 @@ fun CapitalArenaBoard(
                 drawRoundRect(Color(0xFF263A60), cell + Offset(2f, 2f), Size(unit - 4f, unit - 4f), style = Stroke(1.4f))
                 val shortName = when (space.type) {
                     "START" -> "SALIDA"; "GO_TO_JAIL" -> "CÁRCEL"; "CHANCE" -> "?"; "TAX" -> "IMP"
-                    "STATION" -> "TREN"; "JAIL" -> "JAIL"; "PARKING" -> "P"; else -> space.name.take(7)
+                    "STATION" -> "ESTACIÓN"; "JAIL" -> "CÁRCEL"; "PARKING" -> "PARQUE"; else -> space.name.take(12)
                 }
                 drawCapitalSpaceIcon(space.type, cell + Offset(unit * .5f, unit * .78f), unit * .14f)
                 val layout = textMeasurer.measure(
                     shortName,
-                    TextStyle(color = Color(0xFF102A56), fontSize = if (shortName.length > 4) 6.sp else 9.sp, fontWeight = FontWeight.Black),
+                    TextStyle(color = Color(0xFF102A56), fontSize = if (shortName.length > 7) 5.sp else if (shortName.length > 4) 6.sp else 9.sp, fontWeight = FontWeight.Black),
                 )
                 drawText(layout, topLeft = cell + Offset((unit - layout.size.width) / 2f, unit * .22f))
                 if (space.price > 0) {
@@ -197,13 +197,6 @@ fun CapitalArenaBoard(
             card = surpriseCard,
             modifier = Modifier.align(Alignment.Center).fillMaxWidth(.48f),
         )
-        Row(
-            Modifier.align(Alignment.BottomCenter).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            OutlinedButton(onClick = { focused = true }) { Text("◎ Enfocar", fontSize = 10.sp) }
-            OutlinedButton(onClick = { focused = false }) { Text("▣ Completo", fontSize = 10.sp) }
-        }
         if (powerMenuVisible && localPlayerId != null) {
             Surface(
                 modifier = Modifier
@@ -226,6 +219,18 @@ fun CapitalArenaBoard(
                 }
             }
         }
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedButton(onClick = { focused = true }, modifier = Modifier.weight(1f)) {
+            Text("◎ Enfocar jugador", fontSize = 11.sp)
+        }
+        OutlinedButton(onClick = { focused = false }, modifier = Modifier.weight(1f)) {
+            Text("▣ Tablero completo", fontSize = 11.sp)
+        }
+    }
     }
 }
 

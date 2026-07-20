@@ -23,6 +23,7 @@ export interface Piece {
   isShielded: boolean;
   hasEvasion: boolean;
   canActThisTurn: boolean;
+  hasMoved: boolean;
   ambushTarget: BoardPoint | null;
 }
 
@@ -35,7 +36,13 @@ export function calculateDamage(baseDamage: number, defense: number, multiplier 
 export function movementRange(piece: Piece, origin: BoardPoint): BoardPoint[] {
   if (piece.ap <= 0) return [];
   const direction = piece.team === "BLUE" ? 1 : -1;
-  if (piece.type === "PAWN") return inside([{ row: origin.row + direction, col: origin.col }]);
+  if (piece.type === "PAWN") {
+    const distance = piece.hasMoved ? 1 : 2;
+    return inside(Array.from({ length: distance }, (_, index) => ({
+      row: origin.row + direction * (index + 1),
+      col: origin.col,
+    })));
+  }
   if (piece.type === "KNIGHT") return inside(offsets(origin, [
     [-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1],
   ]));

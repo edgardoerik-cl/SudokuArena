@@ -3,6 +3,11 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
+La versión `8.5.0` corrige Ahorcado, peones de Chess y el layout de Capital;
+añade Hold/Bomba y bolsa completa a Tetris, Pac-Man con inicio bajo demanda,
+fantasmas al 75% y jaula de diez segundos, Drops de Demolición, combos y
+cronómetros en Flechas, Letras Cruzadas Blitz y ayudas deterministas para
+Hitori/Nurikabe. También incorpora el GDD de Bastión Cooperativo.
 La versión `8.4.0` refina Chess Tactics, El Ahorcado, Flechas en Fuga 3D,
 Nexo Cero, Pac-Man y Tetris con controles táctiles, habilidades, IA y físicas
 adaptadas a sus reglas, además de Bots, dificultad, tutoriales, animaciones y
@@ -78,7 +83,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.4.0.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.5.0.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

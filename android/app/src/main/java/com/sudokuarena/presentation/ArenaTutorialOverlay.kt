@@ -151,6 +151,7 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
     GameType.HITORI -> listOf(
         TutorialStep("◼", "Apaga duplicados", "Toca cifras repetidas para que cada fila y columna quede sin duplicados."),
         TutorialStep("⛓", "Mantén conectado", "Las casillas apagadas no deben tocarse por sus lados."),
+        TutorialStep("💡", "Pista sin azar", "La pista marca verde una casilla segura o roja una que debe apagarse; nunca entrega una conjetura."),
     )
     GameType.CHESS_TACTICS -> listOf(
         TutorialStep("♟", "Movimiento o habilidad", "En tu turno eliges una sola acción: mover una pieza con las reglas clásicas o activar su habilidad contextual."),
@@ -161,6 +162,7 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
     GameType.NURIKABE -> listOf(
         TutorialStep("●≈", "Separa islas", "Los números indican el tamaño exacto de cada isla blanca."),
         TutorialStep("■", "Construye el río", "Pinta un río negro conectado sin crear bloques de 2×2."),
+        TutorialStep("◉", "Usa el Sonar", "Tienes tres pulsos por partida. Cada uno muestra durante unos segundos el estado correcto de un área 3×3."),
     )
     GameType.BRIDGES -> listOf(
         TutorialStep("●═●", "Conecta islas", "Traza puentes horizontales o verticales entre islas alineadas."),
@@ -170,6 +172,7 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("↔", "Arrastra con una mano", "Desliza horizontalmente para llevar la pieza a otra columna. Toca rápidamente para rotarla con ajuste automático junto a paredes."),
         TutorialStep("↓", "Controla la caída", "Arrastra hacia abajo para caída suave. Un flick rápido hacia arriba ejecuta la caída dura."),
         TutorialStep("⚡", "Impacto cinético", "La caída dura vibra y puede acomodar bloques sueltos en huecos. Al tocar fondo tienes 0,6 segundos para el último ajuste."),
+        TutorialStep("HOLD 💣", "Dos recursos tácticos", "Hold guarda o intercambia la pieza actual una vez por caída. La bomba elimina las tres filas inferiores una vez por partida."),
     )
     GameType.HANGMAN -> listOf(
         TutorialStep("A _ _", "Toca una letra", "Usa el teclado integrado: verde significa acierto y rojo significa error. Cada acierto revela todas sus apariciones."),
@@ -187,7 +190,7 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("👻", "Reconoce a los fantasmas", "Rojo persigue, Rosa embosca, Azul flanquea y Naranja huye de cerca. La píldora los vuelve azules y 20% más lentos."),
     )
     GameType.CROSS_LETTERS -> listOf(
-        TutorialStep("AÑ", "Usa tu atril", "En tu turno forma una palabra española con las siete letras disponibles."),
+        TutorialStep("AÑ", "Blitz simultáneo", "Todos construyen al mismo tiempo sobre el tablero compartido. La primera palabra válida confirmada por el servidor conquista sus casillas."),
         TutorialStep("DL·TW", "Aprovecha premios", "Las casillas DL/TL multiplican una letra; DW/TW multiplican toda la palabra."),
         TutorialStep("★", "Conecta palabras", "La primera palabra cruza la estrella central y las siguientes deben enlazarse al tablero."),
     )

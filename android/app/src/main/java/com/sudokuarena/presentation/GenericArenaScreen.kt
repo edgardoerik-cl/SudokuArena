@@ -455,6 +455,15 @@ private fun AnimatedArrowsGrid(
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var arrowAction by remember(state.gameId) { mutableStateOf("ESCAPE") }
+    val blockedUntil = ((state.meta["blockedUntil"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toLong() ?: 0L
+    var timerBlocked by remember(state.gameId, localPlayerId) { mutableStateOf(false) }
+    LaunchedEffect(blockedUntil) {
+        timerBlocked = blockedUntil > System.currentTimeMillis()
+        if (timerBlocked) {
+            kotlinx.coroutines.delay((blockedUntil - System.currentTimeMillis()).coerceAtLeast(0L))
+            timerBlocked = false
+        }
+    }
     var orbitYaw by remember(state.gameId) { mutableStateOf(0f) }
     var orbitPitch by remember(state.gameId) { mutableStateOf(0f) }
     var cameraZoom by remember(state.gameId) { mutableStateOf(1f) }
@@ -484,17 +493,17 @@ private fun AnimatedArrowsGrid(
     Canvas(
         Modifier.fillMaxSize()
             .background(Color(0xFFF8FAFF), RoundedCornerShape(14.dp))
-            .pointerInput(enabled) {
+            .pointerInput(enabled, timerBlocked) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    if (!enabled) return@detectTransformGestures
+                    if (!enabled || timerBlocked) return@detectTransformGestures
                     orbitYaw += pan.x / size.width * 3.2f
                     orbitPitch = (orbitPitch + pan.y / size.height * 2.2f).coerceIn(-1.05f, 1.05f)
                     cameraZoom = (cameraZoom * zoom).coerceIn(.65f, 2.2f)
                 }
             }
-            .pointerInput(spatialShapes, removed, enabled) {
+            .pointerInput(spatialShapes, removed, enabled, timerBlocked) {
                 detectTapGestures { offset ->
-                    if (!enabled) return@detectTapGestures
+                    if (!enabled || timerBlocked) return@detectTapGestures
                     val worldX = offset.x / size.width; val worldY = offset.y / size.height
                     val shape = spatialShapes.sortedBy { it.z }.lastOrNull { candidate ->
                         val (x, y, scale) = project(candidate)
@@ -584,23 +593,49 @@ private fun AnimatedArrowsGrid(
                     drawCenteredText("✹", origin + Offset(shapeWidth * .22f, shapeHeight * .25f), shapeWidth * .35f, textMeasurer, Color(0xFFFF3D00))
                 } else if (shape.blockType == "BIDIRECTIONAL") {
                     drawCenteredText("↔", origin + Offset(shapeWidth * .22f, shapeHeight * .25f), shapeWidth * .35f, textMeasurer, Color(0xFF7C3AED))
+                } else if (shape.blockType == "TIMER") {
+                    drawCenteredText("⏱", origin + Offset(shapeWidth * .22f, shapeHeight * .25f), shapeWidth * .35f, textMeasurer, Color(0xFFD50000))
                 }
         }
     }
     val rotateUsed = ((state.meta["rotateUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
     val missileUsed = ((state.meta["missileUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
+    val combo = ((state.meta["combos"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 1
+    if (combo > 1) {
+        Text(
+            "COMBO ×$combo",
+            modifier = Modifier.align(Alignment.TopCenter).padding(8.dp).zIndex(5f),
+            color = Color(0xFFD500F9),
+            fontWeight = FontWeight.Black,
+            fontSize = 20.sp,
+        )
+    }
+    if (timerBlocked) {
+        Surface(
+            modifier = Modifier.align(Alignment.Center).zIndex(8f),
+            color = Color(0xEED50000),
+            shape = RoundedCornerShape(16.dp),
+        ) {
+            Text(
+                "⏱ BLOQUEO TEMPORAL",
+                Modifier.padding(18.dp),
+                color = Color.White,
+                fontWeight = FontWeight.Black,
+            )
+        }
+    }
     Row(
         Modifier.align(Alignment.BottomCenter).padding(8.dp).zIndex(4f),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Button(
             { arrowAction = "ROTATE" },
-            enabled = enabled && rotateUsed < 2,
+            enabled = enabled && !timerBlocked && rotateUsed < 2,
             colors = ButtonDefaults.buttonColors(containerColor = if (arrowAction == "ROTATE") Color(0xFFEC4899) else Color(0xFF7C3AED)),
         ) { Text("↻ Rotar ${2 - rotateUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
         Button(
             { arrowAction = "MISSILE" },
-            enabled = enabled && missileUsed < 1,
+            enabled = enabled && !timerBlocked && missileUsed < 1,
             colors = ButtonDefaults.buttonColors(containerColor = if (arrowAction == "MISSILE") Color(0xFFFF3D00) else Color(0xFF7C3AED)),
         ) { Text("➤ Misil ${1 - missileUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
     }
@@ -1041,6 +1076,10 @@ fun GenericPuzzleGrid(
                 val ownerColor = cell.ownerId?.let(identityColors::get)
                 val bridgeValid = state.gameType == GameType.BRIDGES && "${row}:${col}" in validBridgeTargets
                 val fill = when {
+                    cell.meta["hintColor"] == "RED" -> Color(0xFFFF1744).copy(alpha = .42f)
+                    cell.meta["hintColor"] == "GREEN" -> Color(0xFF00C853).copy(alpha = .38f)
+                    cell.meta["sonarState"] == "RIVER" -> Color(0xFF2196F3).copy(alpha = .36f)
+                    cell.meta["sonarState"] == "ISLAND" -> Color(0xFF66BB6A).copy(alpha = .34f)
                     CellPosition(row, col) in illegalWater -> Color(0xFFFF1744).copy(alpha = warningAlpha)
                     state.gameType == GameType.NURIKABE && cell.value == "RIVER" -> Color(0xFF2196F3).copy(alpha = .78f)
                     state.gameType == GameType.NURIKABE && cell.value == "ISLAND" -> Color(0xFF66BB6A).copy(alpha = .72f)
@@ -1397,7 +1436,13 @@ private fun composeTacticalRanges(
     if (type == "PAWN") {
         val direction = if (team == "BLUE") 1 else -1
         val forward = state.board.getOrNull(source.row + direction)?.getOrNull(source.column)
-        if (forward?.value == null) moves += CellPosition(source.row + direction, source.column)
+        if (forward?.value == null) {
+            moves += CellPosition(source.row + direction, source.column)
+            val double = state.board.getOrNull(source.row + direction * 2)?.getOrNull(source.column)
+            if (cell.meta["hasMoved"] != true && double?.value == null && double?.isBlocked == false) {
+                moves += CellPosition(source.row + direction * 2, source.column)
+            }
+        }
         for (dx in listOf(-1, 1)) {
             val target = state.board.getOrNull(source.row + direction)?.getOrNull(source.column + dx)
             if (target?.value != null && target.meta["team"] != team) attacks += CellPosition(source.row + direction, source.column + dx)
@@ -1457,7 +1502,11 @@ private fun PuzzleHints(state: GenericBoardState) {
         )
         GameType.CROSS_LETTERS -> {
             val active = state.meta["activePlayerId"]?.toString()
-            Text("Turno: ${active?.take(8) ?: "preparando…"} · selecciona la casilla inicial", fontWeight = FontWeight.Bold)
+            Text(
+                if (state.meta["blitz"] == true) "BLITZ EN TIEMPO REAL · ambos jugadores pueden colocar palabras"
+                else "Turno: ${active?.take(8) ?: "preparando…"} · selecciona la casilla inicial",
+                fontWeight = FontWeight.Bold,
+            )
         }
         GameType.SECRET_CODE -> {
             val clue = state.meta["clue"] as? Map<*, *>
@@ -1723,9 +1772,23 @@ private fun GenericMoveControls(
     val gameType = state.gameType
     var text by remember(gameType) { mutableStateOf("") }
     when (gameType) {
-        GameType.MINESWEEPER, GameType.TIC_TAC_TOE, GameType.HITORI, GameType.DOTS_AND_BOXES,
-        GameType.NURIKABE, GameType.BRIDGES, GameType.NEXUS_ZERO, GameType.ARROWS_ESCAPE,
+        GameType.MINESWEEPER, GameType.TIC_TAC_TOE, GameType.DOTS_AND_BOXES,
+        GameType.BRIDGES, GameType.NEXUS_ZERO, GameType.ARROWS_ESCAPE,
         GameType.CHECKERS, GameType.MEMORY_NEON -> Unit
+        GameType.HITORI -> Button(
+            onClick = { onMoveAt(0, 0, mapOf("action" to "HINT")) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("💡 Pista determinista", fontWeight = FontWeight.Black) }
+        GameType.NURIKABE -> {
+            val used = ((state.genericBoard?.meta?.get("sonarUses") as? Map<*, *>)?.get(state.playerId) as? Number)?.toInt() ?: 0
+            val target = state.selected ?: CellPosition(state.genericBoard?.rows?.div(2) ?: 0, state.genericBoard?.columns?.div(2) ?: 0)
+            Button(
+                onClick = { onMoveAt(target.row, target.column, mapOf("action" to "SONAR")) },
+                enabled = enabled && used < 3,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("◉ Sonar 3×3 · ${3 - used} pulsos", fontWeight = FontWeight.Black) }
+        }
         GameType.MERGE_2048 -> {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(

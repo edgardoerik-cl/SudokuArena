@@ -84,6 +84,10 @@ data class TetrisPlayerState(
     val lines: Int,
     val gameOver: Boolean,
     val impact: Int = 0,
+    val current: String = "O",
+    val hold: String? = null,
+    val canHold: Boolean = true,
+    val cleanBombUsed: Boolean = false,
 )
 data class TetrisArenaState(
     val serverTime: Long,
@@ -111,6 +115,7 @@ data class PacmanArenaState(
     val powerPills: Set<String>,
     val players: List<PacmanActorState>,
     val ghosts: List<PacmanActorState>,
+    val status: String = "WAITING",
 )
 
 data class DemolitionBrickState(
@@ -122,6 +127,8 @@ data class DemolitionBrickState(
     val hp: Int,
     val color: Int,
 )
+data class DemolitionBallState(val id: String, val x: Float, val y: Float, val vx: Float, val vy: Float)
+data class DemolitionDropState(val id: String, val x: Float, val y: Float, val type: String)
 
 data class DemolitionPlayerState(
     val id: String,
@@ -136,6 +143,10 @@ data class DemolitionPlayerState(
     val score: Int,
     val level: Int,
     val bricks: List<DemolitionBrickState>,
+    val balls: List<DemolitionBallState> = emptyList(),
+    val drops: List<DemolitionDropState> = emptyList(),
+    val laserUntil: Long = 0,
+    val speedUntil: Long = 0,
 )
 
 data class DemolitionArenaState(

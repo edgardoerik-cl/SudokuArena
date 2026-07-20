@@ -123,6 +123,7 @@ function chessTactics(difficulty) {
             isShielded: false,
             hasEvasion: type === "KNIGHT",
             canActThisTurn: false,
+            hasMoved: false,
             ambushTarget: null,
         });
     };
@@ -509,7 +510,7 @@ function arrowsEscape(random, difficulty) {
         const pathType = difficulty === "EXPERT" && index % 5 === 0
             ? (index % 2 === 0 ? "CURVE_LEFT" : "CURVE_RIGHT")
             : "STRAIGHT";
-        const blockType = index % 11 === 0 ? "BOMB" : index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL";
+        const blockType = index % 13 === 0 ? "TIMER" : index % 11 === 0 ? "BOMB" : index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL";
         const z = .18 + random.next() * .64;
         shapes.push({ id, x, y, z, width, height, depth: Math.max(width, height), offsets, direction, pathType, blockType, memberKeys: [`0:${index}`] });
         board[0][index] = cell(direction, true, {
@@ -518,6 +519,7 @@ function arrowsEscape(random, difficulty) {
             shapeAnchor: true,
             pathType,
             blockType,
+            timerSeconds: blockType === "TIMER" ? Math.max(6, 13 - Math.floor(index / 13)) : null,
             z,
         });
         answers[0][index] = direction;

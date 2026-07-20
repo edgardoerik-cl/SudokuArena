@@ -54,8 +54,14 @@ export class GenericPuzzleEngine {
     arrowFailedTaps = new Map();
     arrowRotateUses = new Map();
     arrowMissileUses = new Map();
+    arrowCombo = new Map();
+    arrowLastSuccessAt = new Map();
+    arrowBlockedUntil = new Map();
+    arrowTimerStartedAt = Date.now();
+    arrowTimerTriggered = new Map();
     capturedPawns = new Map([["BLUE", 0], ["RED", 0]]);
     memoryFirstPicks = new Map();
+    nurikabeSonarUses = new Map();
     mergeBotStep = 0;
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
@@ -92,8 +98,8 @@ export class GenericPuzzleEngine {
             meta: {
                 ...structuredClone(this.meta),
                 ...(this.gameType === "CROSS_LETTERS" ? {
-                    activePlayerId: this.activePlayerId,
-                    turnEndsAt: this.turnEndsAt,
+                    activePlayerId: null,
+                    blitz: true,
                     tilesRemaining: this.letterBag.length,
                     rackCounts: Object.fromEntries([...this.racks].map(([id, rack]) => [id, rack.length]))
                 } : {}),
@@ -145,10 +151,16 @@ export class GenericPuzzleEngine {
                     failedTaps: Object.fromEntries(this.arrowFailedTaps),
                     rotateUses: Object.fromEntries(this.arrowRotateUses),
                     missileUses: Object.fromEntries(this.arrowMissileUses),
+                    combos: Object.fromEntries(this.arrowCombo),
+                    blockedUntil: Object.fromEntries(this.arrowBlockedUntil),
+                    timerStartedAt: this.arrowTimerStartedAt,
                 } : {}),
                 ...(this.gameType === "MEMORY_NEON" ? {
                     pairsFound: this.board.flat().filter((cell) => cell.ownerId !== null).length / 2,
                     activePicks: Object.fromEntries([...this.memoryFirstPicks].map(([id, pick]) => [id, `${pick.row}:${pick.col}`])),
+                } : {}),
+                ...(this.gameType === "NURIKABE" ? {
+                    sonarUses: Object.fromEntries(this.nurikabeSonarUses),
                 } : {})
             }
         };
@@ -198,11 +210,8 @@ export class GenericPuzzleEngine {
         if (requests.has(move.requestId))
             return this.reject(move.requestId, "DUPLICATE", "Jugada duplicada");
         requests.add(move.requestId);
-        if (this.gameType === "CROSS_LETTERS") {
+        if (this.gameType === "CROSS_LETTERS")
             this.syncLetterPlayers(game, now);
-            if (this.activePlayerId !== playerId)
-                return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno");
-        }
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType)) {
             this.syncTurnPlayers(game);
             if (this.activePlayerId !== playerId)
@@ -219,7 +228,7 @@ export class GenericPuzzleEngine {
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
         }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048"].includes(this.gameType))) {
+        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048"].includes(this.gameType))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
         const outcome = this.applySpecificMove(playerId, move, cell, game, now);
@@ -249,8 +258,6 @@ export class GenericPuzzleEngine {
         const points = outcome.points ?? GENERIC_HIT_POINTS;
         game.applyGenericSuccess(playerId, points, options.rewardEnergy === false || points <= 0 ? 0 : GENERIC_ENERGY, now);
         this.completed = this.isPuzzleComplete();
-        if (this.gameType === "CROSS_LETTERS")
-            this.advanceLetterTurn(now);
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && outcome.extraTurn !== true)
             this.advanceStrictTurn();
         this.revision += 1;
@@ -590,6 +597,9 @@ export class GenericPuzzleEngine {
         if (this.gameType === "CHESS_TACTICS")
             return this.applyChessTacticsMove(playerId, move, cell);
         if (this.gameType === "ARROWS_ESCAPE") {
+            if ((this.arrowBlockedUntil.get(playerId) ?? 0) > now) {
+                return { correct: false, neutral: true, message: "Tablero bloqueado por una pieza cronómetro" };
+            }
             const removed = this.arrowRemoved.get(playerId) ?? new Set();
             const shapeId = String(cell.meta.shapeId ?? `${move.row}:${move.col}`);
             const members = this.arrowShapeMembers(shapeId);
@@ -620,6 +630,17 @@ export class GenericPuzzleEngine {
                 return { correct: true, points: 15 * members.length };
             }
             const shape = this.meta.shapes.find((candidate) => candidate.id === shapeId);
+            const triggered = this.arrowTimerTriggered.get(playerId) ?? new Set();
+            this.arrowTimerTriggered.set(playerId, triggered);
+            const expiredTimers = this.meta.shapes.filter((candidate) => candidate.blockType === "TIMER"
+                && !candidate.memberKeys.every((key) => removed.has(key))
+                && !triggered.has(String(candidate.id))
+                && now - this.arrowTimerStartedAt >= Number(candidate.timerSeconds ?? 10) * 1_000);
+            if (expiredTimers.length) {
+                expiredTimers.forEach((candidate) => triggered.add(String(candidate.id)));
+                this.arrowBlockedUntil.set(playerId, now + 3_000);
+                return { correct: true, points: 0, message: "¡Cronómetro agotado! Bloqueo de 3 segundos" };
+            }
             const primary = String(shape?.direction ?? cell.meta.arrow);
             const opposite = { UP: "DOWN", DOWN: "UP", LEFT: "RIGHT", RIGHT: "LEFT" }[primary];
             const canEscape = this.canArrowShapeEscape(shapeId, removed, primary)
@@ -630,16 +651,52 @@ export class GenericPuzzleEngine {
             }
             members.forEach(({ row, col }) => removed.add(`${row}:${col}`));
             if (shape?.blockType === "BOMB") {
+                const sourceX = Number(shape.x ?? 0);
+                const sourceY = Number(shape.y ?? 0);
                 const candidates = this.meta.shapes
                     .filter((candidate) => candidate.id !== shapeId)
                     .filter((candidate) => !candidate.memberKeys.every((key) => removed.has(key)))
+                    .sort((a, b) => Math.hypot(Number(a.x ?? 0) - sourceX, Number(a.y ?? 0) - sourceY)
+                    - Math.hypot(Number(b.x ?? 0) - sourceX, Number(b.y ?? 0) - sourceY))
                     .slice(0, 2);
                 candidates.forEach((candidate) => candidate.memberKeys.forEach((key) => removed.add(key)));
             }
             this.arrowRemoved.set(playerId, removed);
-            return { correct: true, points: 10 * members.length };
+            const combo = now - (this.arrowLastSuccessAt.get(playerId) ?? 0) <= 1_800
+                ? Math.min(8, (this.arrowCombo.get(playerId) ?? 1) + 1)
+                : 1;
+            this.arrowCombo.set(playerId, combo);
+            this.arrowLastSuccessAt.set(playerId, now);
+            return { correct: true, points: 10 * members.length * combo };
+        }
+        if (this.gameType === "HITORI" && typeof move.val === "object" && move.val !== null
+            && String(move.val.action).toUpperCase() === "HINT") {
+            const forced = this.board.flatMap((row, rowIndex) => row.map((candidate, colIndex) => ({ candidate, row: rowIndex, col: colIndex })))
+                .find(({ candidate, row, col }) => this.answers[row][col] === true && candidate.ownerId === null);
+            const safe = forced ?? this.board.flatMap((row, rowIndex) => row.map((candidate, colIndex) => ({ candidate, row: rowIndex, col: colIndex })))
+                .find(({ candidate, row, col }) => this.answers[row][col] !== true && candidate.meta.hintColor == null);
+            if (!safe)
+                return { correct: false, neutral: true, message: "No quedan deducciones pendientes" };
+            safe.candidate.meta.hintColor = forced ? "RED" : "GREEN";
+            safe.candidate.meta.hintExpiresAt = now + 4_000;
+            this.meta.lastHint = { row: safe.row, col: safe.col, kind: forced ? "PAINT" : "KEEP", at: now };
+            return { correct: true, points: 0 };
         }
         if (this.gameType === "NURIKABE") {
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : null;
+            if (String(payload?.action ?? "").toUpperCase() === "SONAR") {
+                const used = this.nurikabeSonarUses.get(playerId) ?? 0;
+                if (used >= 3)
+                    return { correct: false, neutral: true, message: "No quedan pulsos de Sonar" };
+                for (let row = Math.max(0, move.row - 1); row <= Math.min(this.board.length - 1, move.row + 1); row += 1) {
+                    for (let col = Math.max(0, move.col - 1); col <= Math.min(this.board[row].length - 1, move.col + 1); col += 1) {
+                        this.board[row][col].meta.sonarState = this.answers[row][col] === true ? "RIVER" : "ISLAND";
+                        this.board[row][col].meta.sonarUntil = now + 5_000;
+                    }
+                }
+                this.nurikabeSonarUses.set(playerId, used + 1);
+                return { correct: true, points: 0 };
+            }
             const action = String(move.val ?? "").toUpperCase();
             if (!['RIVER', 'ISLAND', 'CLEAR'].includes(action) || cell.meta.islandClue === true)
                 return { correct: false };
@@ -999,6 +1056,15 @@ export class GenericPuzzleEngine {
             if ((!expectsAttack && !valid) || (expectsAttack && !attackValid) || !this.chessPathClear(origin, { row: targetRow, col: targetCol }, piece.type)) {
                 return { correct: false };
             }
+            if (piece.type === "PAWN" && !expectsAttack) {
+                const direction = piece.team === "BLUE" ? 1 : -1;
+                const distance = targetRow - move.row;
+                if (targetCol !== move.col || distance !== direction && distance !== direction * 2)
+                    return { correct: false };
+                if (Math.abs(distance) === 2 && (piece.hasMoved || this.board[move.row + direction][move.col].value !== null)) {
+                    return { correct: false };
+                }
+            }
             if (enemy && enemy.team === piece.team)
                 return { correct: false };
             if (enemy?.statusEffects.some((effect) => effect.toUpperCase() === "INVULNERABLE"))
@@ -1016,6 +1082,7 @@ export class GenericPuzzleEngine {
                     return { correct: false };
                 piece.statusEffects = piece.statusEffects.filter((effect) => effect !== intimidation);
             }
+            piece.hasMoved = true;
             if (enemy) {
                 if (enemy.isShielded) {
                     enemy.isShielded = false;
@@ -1145,7 +1212,7 @@ export class GenericPuzzleEngine {
                 return { correct: false };
             if ((this.capturedPawns.get(piece.team) ?? 0) <= 0)
                 return { correct: false };
-            const revived = { ...piece, id: `${piece.team}-PAWN-revived-${Date.now()}`, type: "PAWN", currentCooldown: 0, statusEffects: [], isShielded: false };
+            const revived = { ...piece, id: `${piece.team}-PAWN-revived-${Date.now()}`, type: "PAWN", currentCooldown: 0, statusEffects: [], isShielded: false, hasMoved: true };
             writePiece(target, revived, playerId);
             this.capturedPawns.set(piece.team, (this.capturedPawns.get(piece.team) ?? 1) - 1);
             writePiece(source, piece, playerId);
@@ -1906,7 +1973,7 @@ export class GenericPuzzleEngine {
     }
     createCrossLettersBotMove(accuracy, playerId) {
         const id = playerId ?? this.activePlayerId;
-        if (!id || this.activePlayerId !== id)
+        if (!id)
             return null;
         const word = this.suggestedWords.get(id) ?? "ARENA";
         const correctWord = Math.random() <= accuracy ? word : `${word}X`;
@@ -1974,6 +2041,7 @@ function pieceFromCell(cell) {
         isShielded: cell.meta.isShielded === true,
         hasEvasion: cell.meta.hasEvasion !== false,
         canActThisTurn: cell.meta.canActThisTurn === true,
+        hasMoved: cell.meta.hasMoved === true,
         ambushTarget: typeof cell.meta.ambushTarget === "string" && cell.meta.ambushTarget.includes(":")
             ? (() => {
                 const [row, col] = cell.meta.ambushTarget.split(":").map(Number);
@@ -2001,6 +2069,7 @@ function writePiece(cell, piece, ownerId) {
         isShielded: piece.isShielded,
         hasEvasion: piece.hasEvasion,
         canActThisTurn: piece.canActThisTurn,
+        hasMoved: piece.hasMoved,
         ambushTarget: piece.ambushTarget ? `${piece.ambushTarget.row}:${piece.ambushTarget.col}` : null,
     };
 }

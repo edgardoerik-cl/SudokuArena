@@ -129,7 +129,7 @@ data class ArenaUiState(
             val phaseAllowsPlay = isSoloMode || roomState?.phase in setOf(RoomPhase.PLAYING, RoomPhase.SUDDEN_DEATH)
             val turnAllowsPlay = gameType !in setOf(
                 GameType.MINESWEEPER, GameType.CROSSWORD, GameType.DOTS_AND_BOXES,
-                GameType.CROSS_LETTERS, GameType.SECRET_CODE, GameType.CAPITAL_ARENA,
+                GameType.SECRET_CODE, GameType.CAPITAL_ARENA,
             ) ||
                 isSoloMode || genericTurnPlayerId == null || genericTurnPlayerId == playerId
             return connected && genericBoard != null && phaseAllowsPlay && turnAllowsPlay &&
@@ -383,7 +383,13 @@ class ArenaViewModel(
         val current = mutableState.value
         if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.TETRIS_ARENA, GameType.WORD_SEARCH, GameType.MERGE_2048))) return
+        // Ahorcado usa una coordenada de transporte para todas las teclas. Esa
+        // celda puede quedar revelada tras el primer acierto, pero el teclado
+        // debe seguir emitiendo letras hasta que finalice la palabra.
+        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(
+                GameType.NURIKABE, GameType.TETRIS_ARENA, GameType.WORD_SEARCH,
+                GameType.MERGE_2048, GameType.HANGMAN,
+            ))) return
         submitGenericMove(CellPosition(row, column), value)
         if (current.gameType == GameType.NEXUS_ZERO) {
             mutableState.update { it.copy(selected = null) }

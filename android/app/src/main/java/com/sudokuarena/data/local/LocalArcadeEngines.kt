@@ -25,8 +25,15 @@ class LocalTetrisEngine(
 ) : LocalRealtimeGameEngine<String, TetrisArenaState> {
     private val random = Random(seed)
     private var board = MutableList(20) { MutableList(10) { 0 } }
-    private var x = 4
-    private var y = 0
+    private var bag = mutableListOf<String>()
+    private var current = drawPiece()
+    private var next = drawPiece()
+    private var hold: String? = null
+    private var canHold = true
+    private var cleanBombUsed = false
+    private var rotation = 0
+    private var x = 3
+    private var y = -1
     private var score = 0
     private var lines = 0
     private var tick = 0L
@@ -36,15 +43,31 @@ class LocalTetrisEngine(
     override fun input(value: String) {
         if (gameOver) return
         when (value) {
-            "LEFT" -> if (canPlace(x - 1, y)) x--
-            "RIGHT" -> if (canPlace(x + 1, y)) x++
+            "LEFT" -> if (canPlace(x - 1, y, rotation)) x--
+            "RIGHT" -> if (canPlace(x + 1, y, rotation)) x++
             "SOFT_DROP" -> step()
             "HARD_DROP" -> {
-                while (canPlace(x, y + 1)) y++
+                while (canPlace(x, y + 1, rotation)) y++
                 impact++
                 lock()
             }
-            "ROTATE" -> score += 1 // La ficha inicial es un bloque 2x2 simétrico.
+            "ROTATE" -> {
+                val target = (rotation + 1) % rotations().size
+                listOf(0 to 0, -1 to 0, 1 to 0, 0 to -1, 0 to 1).firstOrNull { (dx, dy) ->
+                    canPlace(x + dx, y + dy, target)
+                }?.let { (dx, dy) -> x += dx; y += dy; rotation = target }
+            }
+            "HOLD" -> if (canHold) {
+                val previous = hold
+                hold = current
+                current = previous ?: next.also { next = drawPiece() }
+                rotation = 0; x = 3; y = -1; canHold = false
+            }
+            "CLEAN_BOMB" -> if (!cleanBombUsed) {
+                repeat(3) { board.removeAt(board.lastIndex); board.add(0, MutableList(10) { 0 }) }
+                cleanBombUsed = true
+                score += 150
+            }
         }
     }
 
@@ -55,30 +78,36 @@ class LocalTetrisEngine(
 
     override fun snapshot(): TetrisArenaState {
         val visible = board.map { it.toMutableList() }.toMutableList()
-        if (!gameOver) for (dy in 0..1) for (dx in 0..1) {
-            visible.getOrNull(y + dy)?.let { row -> if (x + dx in row.indices) row[x + dx] = 1 }
+        if (!gameOver) cells(x, y, rotation).forEach { (row, col) ->
+            visible.getOrNull(row)?.let { target -> if (col in target.indices) target[col] = pieceColor(current) }
         }
         return TetrisArenaState(
             serverTime = System.currentTimeMillis(),
             tick = tick,
             completed = gameOver,
-            players = listOf(TetrisPlayerState("solo", playerName, "#00E5FF", visible, "O", score, lines, gameOver, impact)),
+            players = listOf(TetrisPlayerState(
+                "solo", playerName, "#00E5FF", visible, next, score, lines, gameOver,
+                impact, current, hold, canHold, cleanBombUsed,
+            )),
         )
     }
 
     private fun step() {
-        if (canPlace(x, y + 1)) y++ else lock()
+        if (canPlace(x, y + 1, rotation)) y++ else lock()
     }
 
-    private fun canPlace(targetX: Int, targetY: Int): Boolean =
-        (0..1).all { dy -> (0..1).all { dx ->
-            targetY + dy in board.indices && targetX + dx in 0 until 10 && board[targetY + dy][targetX + dx] == 0
-        } }
+    private fun rotations() = PIECES.getValue(current)
+    private fun cells(targetX: Int, targetY: Int, targetRotation: Int) =
+        PIECES.getValue(current)[targetRotation].map { (row, col) -> targetY + row to targetX + col }
+    private fun canPlace(targetX: Int, targetY: Int, targetRotation: Int): Boolean =
+        cells(targetX, targetY, targetRotation).all { (row, col) ->
+            col in 0 until 10 && row < 20 && (row < 0 || board[row][col] == 0)
+        }
 
     private fun lock() {
-        for (dy in 0..1) for (dx in 0..1) {
-            if (y + dy !in board.indices) { gameOver = true; return }
-            board[y + dy][x + dx] = 1
+        cells(x, y, rotation).forEach { (row, col) ->
+            if (row < 0) { gameOver = true; return }
+            board[row][col] = pieceColor(current)
         }
         val remaining = board.filterNot { row -> row.all { it != 0 } }
         val removed = 20 - remaining.size
@@ -87,21 +116,46 @@ class LocalTetrisEngine(
             score += removed * removed * 100
             board = (MutableList(removed) { MutableList(10) { 0 } } + remaining.map { it.toMutableList() }).toMutableList()
         }
-        x = random.nextInt(0, 9)
-        y = 0
-        if (!canPlace(x, y)) gameOver = true
+        current = next
+        next = drawPiece()
+        rotation = 0
+        x = 3
+        y = -1
+        canHold = true
+        if (!canPlace(x, y, rotation)) gameOver = true
+    }
+
+    private fun drawPiece(): String {
+        if (bag.isEmpty()) bag = PIECES.keys.shuffled(random).toMutableList()
+        return bag.removeAt(bag.lastIndex)
+    }
+
+    private fun pieceColor(piece: String) = PIECES.keys.indexOf(piece) + 1
+
+    companion object {
+        private val PIECES = linkedMapOf(
+            "I" to listOf(listOf(0 to 0, 0 to 1, 0 to 2, 0 to 3), listOf(0 to 2, 1 to 2, 2 to 2, 3 to 2)),
+            "J" to listOf(listOf(0 to 0, 1 to 0, 1 to 1, 1 to 2), listOf(0 to 1, 0 to 2, 1 to 1, 2 to 1), listOf(1 to 0, 1 to 1, 1 to 2, 2 to 2), listOf(0 to 1, 1 to 1, 2 to 0, 2 to 1)),
+            "L" to listOf(listOf(0 to 2, 1 to 0, 1 to 1, 1 to 2), listOf(0 to 1, 1 to 1, 2 to 1, 2 to 2), listOf(1 to 0, 1 to 1, 1 to 2, 2 to 0), listOf(0 to 0, 0 to 1, 1 to 1, 2 to 1)),
+            "O" to listOf(listOf(0 to 1, 0 to 2, 1 to 1, 1 to 2)),
+            "S" to listOf(listOf(0 to 1, 0 to 2, 1 to 0, 1 to 1), listOf(0 to 1, 1 to 1, 1 to 2, 2 to 2)),
+            "T" to listOf(listOf(0 to 1, 1 to 0, 1 to 1, 1 to 2), listOf(0 to 1, 1 to 1, 1 to 2, 2 to 1), listOf(1 to 0, 1 to 1, 1 to 2, 2 to 1), listOf(0 to 1, 1 to 0, 1 to 1, 2 to 1)),
+            "Z" to listOf(listOf(0 to 0, 0 to 1, 1 to 1, 1 to 2), listOf(0 to 2, 1 to 1, 1 to 2, 2 to 1)),
+        )
     }
 }
 
 class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngine<String, PacmanArenaState> {
     private val map = List(15) { row -> List(15) { col ->
-        if (row == 0 || col == 0 || row == 14 || col == 14 || (row % 4 == 0 && col in 3..11 && col != 7)) 0 else 1
+        if (row == 7 && (col == 0 || col == 14)) 1
+        else if (row == 0 || col == 0 || row == 14 || col == 14 || (row % 4 == 0 && col in 3..11 && col != 7)) 0 else 1
     } }
     private val pills = buildSet {
         map.forEachIndexed { row, cells -> cells.forEachIndexed { col, value ->
             if (value == 1 && !(row == 1 && col == 1)) add("$col:$row")
         } }
     }.toMutableSet()
+    private val powerPills = mutableSetOf("1:1", "13:1", "1:13", "13:13")
     private var x = 1
     private var y = 1
     private var direction = "STOP"
@@ -109,35 +163,58 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
     private var lives = 3
     private var score = 0
     private var tick = 0L
+    private var started = false
+    private var frightenedUntil = 0L
     private val ghosts = mutableListOf(13 to 13, 13 to 1, 1 to 13, 7 to 7)
+    private val eatenUntil = MutableList(4) { 0L }
 
     override fun input(value: String) {
-        if (value in setOf("UP", "RIGHT", "DOWN", "LEFT")) queuedDirection = value
+        if (value in setOf("UP", "RIGHT", "DOWN", "LEFT")) {
+            queuedDirection = value
+            started = true
+        }
     }
 
     override fun tick() {
+        if (!started) return
         queuedDirection?.let { queued ->
             val (qy, qx) = vector(queued)
-            if (map.getOrNull(y + qy)?.getOrNull(x + qx) == 1) {
+            val targetX = if (y == 7 && x + qx < 0) 14 else if (y == 7 && x + qx > 14) 0 else x + qx
+            if (map.getOrNull(y + qy)?.getOrNull(targetX) == 1) {
                 direction = queued
                 queuedDirection = null
             }
         }
         val (dy, dx) = vector(direction)
-        if (map.getOrNull(y + dy)?.getOrNull(x + dx) == 1) { y += dy; x += dx }
+        val targetX = if (y == 7 && x + dx < 0) 14 else if (y == 7 && x + dx > 14) 0 else x + dx
+        if (map.getOrNull(y + dy)?.getOrNull(targetX) == 1) { y += dy; x = targetX }
         if (pills.remove("$x:$y")) score += 10
-        if (tick % 5L != 4L) {
+        if (powerPills.remove("$x:$y")) { score += 50; frightenedUntil = tick + 420 }
+        if (tick % 4L != 3L) {
             ghosts.indices.forEach { index ->
+                if (eatenUntil[index] > tick) {
+                    ghosts[index] = 7 to 7
+                    return@forEach
+                }
                 val ghost = ghosts[index]
                 val candidates = listOf("UP", "RIGHT", "DOWN", "LEFT").map { vector(it) }
                     .map { (gy, gx) -> ghost.first + gx to ghost.second + gy }
                     .filter { (gx, gy) -> map.getOrNull(gy)?.getOrNull(gx) == 1 }
-                ghosts[index] = candidates.minByOrNull { (gx, gy) -> abs(gx - x) + abs(gy - y) } ?: ghost
+                ghosts[index] = if (tick < frightenedUntil) {
+                    candidates.maxByOrNull { (gx, gy) -> abs(gx - x) + abs(gy - y) } ?: ghost
+                } else candidates.minByOrNull { (gx, gy) -> abs(gx - x) + abs(gy - y) } ?: ghost
             }
         }
-        if (ghosts.any { it.first == x && it.second == y }) {
-            lives--
-            x = 1; y = 1
+        ghosts.forEachIndexed { index, ghost ->
+            if (ghost.first != x || ghost.second != y || eatenUntil[index] > tick) return@forEachIndexed
+            if (tick < frightenedUntil) {
+                score += 200
+                ghosts[index] = 7 to 7
+                eatenUntil[index] = tick + 600
+            } else {
+                lives--
+                x = 1; y = 1; direction = "STOP"
+            }
         }
         tick++
     }
@@ -148,11 +225,15 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
         completed = pills.isEmpty() || lives <= 0,
         tilemap = map,
         pills = pills.toSet(),
-        powerPills = emptySet(),
+        powerPills = powerPills.toSet(),
         players = listOf(PacmanActorState("solo", x.toFloat(), y.toFloat(), direction, lives, score, "#FFD600", playerName)),
         ghosts = ghosts.mapIndexed { index, point ->
-            PacmanActorState("ghost-$index", point.first.toFloat(), point.second.toFloat(), "LEFT", mode = "CHASE")
+            PacmanActorState(
+                "ghost-$index", point.first.toFloat(), point.second.toFloat(), "LEFT",
+                mode = if (eatenUntil[index] > tick) "EATEN" else if (tick < frightenedUntil) "FRIGHTENED" else "CHASE",
+            )
         },
+        status = if (started) "PLAYING" else "WAITING",
     )
 
     private fun vector(value: String): Pair<Int, Int> = when (value) {
