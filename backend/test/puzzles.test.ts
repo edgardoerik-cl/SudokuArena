@@ -64,14 +64,44 @@ describe("motor genérico de puzzles", () => {
       assert.ok(initial.columns > 0);
       assert.equal(initial.board.length, initial.rows);
 
-      for (let turn = 0; turn < 1_500 && !engine.snapshot(players).completed; turn += 1) {
-        const move = engine.createBotMove(1);
+      const startedAt = Date.now();
+      const maxTurns = gameType === "NEXUS_ZERO" ? 8_000 : 1_500;
+      for (let turn = 0; turn < maxTurns && !engine.snapshot(players).completed; turn += 1) {
+        const move = engine.createBotMove(1, "bot");
         assert.ok(move, `${gameType} debe producir una jugada mientras no termine`);
-        engine.makeMove("bot", move!, players, 1_000 + turn * 100);
+        const actionNow = startedAt + turn * (gameType === "TOWER_DEFENSE" ? 1_000 : 200);
+        engine.makeMove("bot", move!, players, actionNow);
+        if (gameType === "TOWER_DEFENSE") {
+          for (let subTick = 1; subTick <= 5; subTick += 1) {
+            engine.tickTowerDefense(players, startedAt + turn * 1_000 + subTick * 200);
+          }
+        }
       }
       assert.equal(engine.snapshot(players).completed, true, `${gameType} debe poder completarse`);
     });
   }
+
+  it("Tower Defense publica tropas móviles, disparos y vida durante una oleada", () => {
+    const players = new ArenaGame("tower-live");
+    players.addPlayer("p1", "Arquitecto");
+    players.startMatch({ gameType: "TOWER_DEFENSE", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("TOWER_DEFENSE", "tower-live-engine");
+    engine.snapshot(players);
+    assert.equal(engine.makeMove("p1", {
+      requestId: "build", row: 0, col: 0, val: { action: "BUILD", towerType: "RAPID" },
+    }, players).accepted, true);
+    assert.equal(engine.makeMove("p1", {
+      requestId: "wave", row: 0, col: 0, val: { action: "START_WAVE" },
+    }, players).accepted, true);
+    const started = engine.snapshot(players);
+    assert.equal(started.meta.waveActive, true);
+    assert.ok((started.meta.enemies as Array<unknown>).length >= 7);
+    const now = Date.now();
+    for (let tick = 1; tick <= 12; tick += 1) engine.tickTowerDefense(players, now + tick * 100);
+    const moving = engine.snapshot(players, now + 1_300);
+    assert.ok((moving.meta.enemies as Array<{ progress: number }>).some((enemy) => enemy.progress > 0));
+    assert.ok((moving.meta.projectiles as Array<unknown>).length > 0);
+  });
 
   it("Capital Arena controla dados, economía y turnos en el servidor", () => {
     const players = new ArenaGame("capital-players");

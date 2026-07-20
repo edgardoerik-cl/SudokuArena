@@ -6,6 +6,37 @@ import com.sudokuarena.domain.GenericCell
 import com.sudokuarena.domain.PuzzleDifficulty
 import kotlin.random.Random
 import kotlin.math.abs
+import kotlin.math.hypot
+
+private data class LocalTowerEnemy(
+    val id: String,
+    val kind: String,
+    var hp: Float,
+    val maxHp: Float,
+    var progress: Float,
+    val speed: Float,
+    val spawnAt: Long,
+    var slowUntil: Long = 0L,
+    var status: String = "WAITING",
+)
+
+private data class LocalTowerProjectile(
+    val id: String,
+    val towerRow: Int,
+    val towerCol: Int,
+    val targetId: String,
+    val color: String,
+    val firedAt: Long,
+    val arrivesAt: Long,
+)
+
+private fun localTowerPosition(progress: Float, path: List<Pair<Int, Int>>): Pair<Double, Double> {
+    val start = progress.toInt().coerceIn(0, path.lastIndex)
+    val end = (start + 1).coerceAtMost(path.lastIndex)
+    val fraction = (progress - start).coerceIn(0f, 1f)
+    return (path[start].first + (path[end].first - path[start].first) * fraction).toDouble() to
+        (path[start].second + (path[end].second - path[start].second) * fraction).toDouble()
+}
 
 data class LocalPuzzleMoveResult(
     val accepted: Boolean,
@@ -51,6 +82,11 @@ class LocalPuzzleEngine(
     private var towerCredits = 400
     private var towerWave = 0
     private var towerBaseHealth = 20
+    private var towerWaveActive = false
+    private var towerLastTickAt = 0L
+    private val towerEnemies = mutableListOf<LocalTowerEnemy>()
+    private val towerProjectiles = mutableListOf<LocalTowerProjectile>()
+    private val towerNextShotAt = mutableMapOf<String, Long>()
     private var reactorRemoved = 0
 
     fun snapshot() = GenericBoardState(
@@ -91,6 +127,18 @@ class LocalPuzzleEngine(
                 "baseHealth" to towerBaseHealth,
                 "credits" to mapOf(OWNER to towerCredits),
                 "maxWaves" to 20,
+                "waveActive" to towerWaveActive,
+                "remainingEnemies" to towerEnemies.count { it.status == "WAITING" || it.status == "MOVING" },
+                "enemies" to towerEnemies.map { enemy -> mapOf(
+                    "id" to enemy.id, "kind" to enemy.kind, "hp" to enemy.hp, "maxHp" to enemy.maxHp,
+                    "progress" to enemy.progress, "speed" to enemy.speed, "spawnAt" to enemy.spawnAt,
+                    "slowUntil" to enemy.slowUntil, "status" to enemy.status,
+                ) },
+                "projectiles" to towerProjectiles.map { projectile -> mapOf(
+                    "id" to projectile.id, "towerRow" to projectile.towerRow, "towerCol" to projectile.towerCol,
+                    "targetId" to projectile.targetId, "color" to projectile.color,
+                    "firedAt" to projectile.firedAt, "arrivesAt" to projectile.arrivesAt,
+                ) },
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.REACTOR_CHAIN) mapOf(
                 "removed" to reactorRemoved,
@@ -368,7 +416,7 @@ class LocalPuzzleEngine(
             val target = (blueprint.meta["target"] as? Number)?.toInt() ?: 256
             board.flatten().any { ((it.value as? Number)?.toInt() ?: 0) >= target } || mergeHasNoMoves()
         }
-        GameType.TOWER_DEFENSE -> towerBaseHealth <= 0 || towerWave >= 20
+        GameType.TOWER_DEFENSE -> towerBaseHealth <= 0 || (towerWave >= 20 && !towerWaveActive)
         GameType.REACTOR_CHAIN -> reactorRemoved >= ((blueprint.meta["targetRemoved"] as? Number)?.toInt() ?: 100)
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
@@ -861,7 +909,12 @@ class LocalPuzzleEngine(
                 ))
             },
             matrix(rows, columns) { _, _ -> null },
-            mapOf("actionMode" to true, "engine" to "COOP_TOWER_DEFENSE", "path" to path, "maxWaves" to 20),
+            mapOf(
+                "actionMode" to true,
+                "engine" to "COOP_TOWER_DEFENSE",
+                "path" to path.map { (row, col) -> mapOf("row" to row, "col" to col) },
+                "maxWaves" to 20,
+            ),
         )
     }
 
@@ -885,18 +938,38 @@ class LocalPuzzleEngine(
         val payload = raw as? Map<*, *>
         val action = payload?.get("action")?.toString()?.uppercase() ?: "BUILD"
         if (action == "START_WAVE") {
+            if (towerWaveActive) return reject("La oleada actual sigue en combate")
             towerWave++
-            val damage = board.flatten().sumOf { cell ->
-                val base = when (cell.meta["towerType"]) { "SNIPER" -> 8; "BLAST" -> 6; "FROST" -> 3; "RAPID" -> 4; else -> 0 }
-                base * ((cell.meta["level"] as? Number)?.toInt() ?: 1)
+            val now = System.currentTimeMillis()
+            val layers = 1 + towerWave / 5
+            towerEnemies.clear()
+            repeat(5 + towerWave * 2) { index ->
+                val kind = when {
+                    towerWave >= 12 && index % 7 == 0 -> "GOLEM"
+                    towerWave >= 7 && index % 5 == 0 -> "PHANTOM"
+                    index % 4 == 0 -> "BRUTE"
+                    else -> "SCOUT"
+                }
+                val hp = (when (kind) { "GOLEM" -> 110f; "BRUTE" -> 58f; "PHANTOM" -> 38f; else -> 28f }) * layers
+                val speed = when (kind) { "PHANTOM" -> 1.28f; "GOLEM" -> .46f; "BRUTE" -> .66f; else -> .9f }
+                towerEnemies += LocalTowerEnemy("w$towerWave-e$index", kind, hp, hp, 0f, speed, now + index * 620L)
             }
-            val enemies = 5 + towerWave * 2
-            val defeated = minOf(enemies, damage / maxOf(2, (1 + towerWave / 5) * 2))
-            towerBaseHealth = maxOf(0, towerBaseHealth - (enemies - defeated))
-            towerCredits += defeated * 8
-            return accept(defeated * 5)
+            towerProjectiles.clear()
+            towerWaveActive = true
+            towerLastTickAt = now
+            revision++
+            return LocalPuzzleMoveResult(true, snapshot(), message = "Oleada $towerWave entrando en la arena")
         }
         val target = board.getOrNull(row)?.getOrNull(col) ?: return reject("Terreno inválido")
+        if (action == "UPGRADE") {
+            val level = (target.meta["level"] as? Number)?.toInt() ?: return reject("Selecciona una torre")
+            if (level >= 3) return reject("Torre al nivel máximo")
+            val cost = level * 100
+            if (towerCredits < cost) return reject("Créditos insuficientes")
+            towerCredits -= cost
+            replace(row, col, target.copy(meta = target.meta + ("level" to level + 1)))
+            return accept(10)
+        }
         if (target.meta["buildable"] != true || target.meta["towerType"] != null) return reject("Selecciona un terreno libre")
         val type = payload?.get("towerType")?.toString()?.uppercase() ?: "RAPID"
         val cost = mapOf("RAPID" to 100, "BLAST" to 150, "SNIPER" to 180, "FROST" to 130)[type] ?: return reject("Torre inválida")
@@ -904,6 +977,60 @@ class LocalPuzzleEngine(
         towerCredits -= cost
         replace(row, col, target.copy(value = type, isRevealed = true, ownerId = OWNER, meta = target.meta + mapOf("towerType" to type, "level" to 1)))
         return accept(10)
+    }
+
+    fun tickTowerDefense(now: Long = System.currentTimeMillis()): Boolean {
+        if (gameType != GameType.TOWER_DEFENSE || !towerWaveActive) return false
+        val path = (blueprint.meta["path"] as? List<*>)?.mapNotNull { raw ->
+            val point = raw as? Map<*, *> ?: return@mapNotNull null
+            ((point["row"] as? Number)?.toInt() ?: return@mapNotNull null) to
+                ((point["col"] as? Number)?.toInt() ?: return@mapNotNull null)
+        }.orEmpty()
+        if (path.size < 2) return false
+        val dt = if (towerLastTickAt == 0L) .05f else ((now - towerLastTickAt) / 1_000f).coerceIn(.01f, .2f)
+        towerLastTickAt = now
+        towerEnemies.forEach { enemy ->
+            if (enemy.status == "WAITING" && now >= enemy.spawnAt) enemy.status = "MOVING"
+            if (enemy.status != "MOVING") return@forEach
+            enemy.progress += enemy.speed * (if (enemy.slowUntil > now) .58f else 1f) * dt
+            if (enemy.progress >= path.lastIndex) {
+                enemy.status = "LEAKED"
+                towerBaseHealth = (towerBaseHealth - when (enemy.kind) { "GOLEM" -> 3; "BRUTE" -> 2; else -> 1 }).coerceAtLeast(0)
+            }
+        }
+        if (towerBaseHealth <= 0) {
+            towerEnemies.filter { it.status == "WAITING" || it.status == "MOVING" }.forEach { it.status = "LEAKED" }
+        }
+        val active = towerEnemies.filter { it.status == "MOVING" }
+        board.forEachIndexed { towerRow, cells -> cells.forEachIndexed { towerCol, tower ->
+            val type = tower.meta["towerType"]?.toString() ?: return@forEachIndexed
+            val level = (tower.meta["level"] as? Number)?.toInt() ?: 1
+            val range = when (type) { "SNIPER" -> 6.4; "BLAST" -> 3.2; "FROST" -> 3.7; else -> 3.4 }
+            val key = "$towerRow:$towerCol"
+            if ((towerNextShotAt[key] ?: 0L) > now) return@forEachIndexed
+            val target = active.map { enemy ->
+                val point = localTowerPosition(enemy.progress, path)
+                enemy to hypot(point.first - towerRow.toDouble(), point.second - towerCol.toDouble())
+            }.filter { it.second <= range }.maxByOrNull { it.first.progress }?.first ?: return@forEachIndexed
+            val damage = (when (type) { "SNIPER" -> 22f; "BLAST" -> 13f; "FROST" -> 7f; else -> 9f }) * level
+            target.hp -= damage
+            if (type == "FROST") target.slowUntil = now + 1_700
+            if (target.hp <= 0) { target.hp = 0f; target.status = "DEFEATED" }
+            towerProjectiles += LocalTowerProjectile(
+                "$now-$key", towerRow, towerCol, target.id,
+                when (type) { "FROST" -> "#22D3EE"; "BLAST" -> "#FB923C"; "SNIPER" -> "#C084FC"; else -> "#60A5FA" },
+                now, now + if (type == "SNIPER") 120 else 240,
+            )
+            towerNextShotAt[key] = now + when (type) { "RAPID" -> 360L; "SNIPER" -> 1_100L; else -> 700L }
+        } }
+        towerProjectiles.removeAll { it.arrivesAt + 220 < now }
+        if (towerEnemies.none { it.status == "WAITING" || it.status == "MOVING" }) {
+            towerWaveActive = false
+            val defeated = towerEnemies.count { it.status == "DEFEATED" }
+            towerCredits += defeated * (8 + towerWave / 4)
+        }
+        revision++
+        return true
     }
 
     private fun reactorChainMove(row: Int, col: Int): LocalPuzzleMoveResult {

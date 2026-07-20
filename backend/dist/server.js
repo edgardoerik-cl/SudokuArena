@@ -428,6 +428,7 @@ function createRoom(hostPlayerId) {
         rematchVotes: new Set(),
         suddenDeath: false,
         genericEngine: null,
+        genericTick: null,
         tetrisEngine: null,
         tetrisTick: null,
         pacmanEngine: null,
@@ -500,6 +501,9 @@ function removeDisconnectedPlayer(room, playerId) {
             clearTimeout(room.resumeTimer);
         if (room.rpsTimer)
             clearTimeout(room.rpsTimer);
+        if (room.genericTick)
+            clearInterval(room.genericTick);
+        room.genericTick = null;
         if (room.tetrisTick)
             clearInterval(room.tetrisTick);
         if (room.pacmanTick)
@@ -708,6 +712,8 @@ function startMatch(room, rematch = false, startingPlayerId) {
         startPacmanLoop(room);
     if (room.demolitionEngine)
         startDemolitionLoop(room);
+    if (room.config.gameType === "TOWER_DEFENSE")
+        startGenericLoop(room);
     for (const botId of room.bots.keys())
         scheduleBotAction(room, botId);
     room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
@@ -731,6 +737,9 @@ function finishMatch(room, force = false) {
         clearTimeout(room.boardEventTimeout);
     if (room.rpsTimer)
         clearTimeout(room.rpsTimer);
+    if (room.genericTick)
+        clearInterval(room.genericTick);
+    room.genericTick = null;
     if (room.tetrisTick)
         clearInterval(room.tetrisTick);
     room.tetrisTick = null;
@@ -1087,6 +1096,9 @@ function maybeActivatePause(room) {
         clearTimeout(room.matchTimeout);
     room.matchTimeout = null;
     clearBotTimers(room);
+    if (room.genericTick)
+        clearInterval(room.genericTick);
+    room.genericTick = null;
     if (room.tetrisTick)
         clearInterval(room.tetrisTick);
     room.tetrisTick = null;
@@ -1127,6 +1139,8 @@ function resumeRoom(room) {
         startPacmanLoop(room);
     if (room.demolitionEngine)
         startDemolitionLoop(room);
+    if (room.config.gameType === "TOWER_DEFENSE")
+        startGenericLoop(room);
     emitRoomState(room);
     io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
 }
@@ -1141,6 +1155,20 @@ function startTetrisLoop(room) {
         snapshot.players.forEach((player) => room.game.setGenericScore(player.id, player.score));
         io.to(room.code).volatile.emit("tetris:state", snapshot);
         if (snapshot.completed)
+            finishMatch(room, true);
+    }, 100);
+}
+function startGenericLoop(room) {
+    if (!room.genericEngine || room.genericTick || room.config.gameType !== "TOWER_DEFENSE")
+        return;
+    room.genericTick = setInterval(() => {
+        if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.genericEngine)
+            return;
+        if (!room.genericEngine.tickTowerDefense(room.game))
+            return;
+        emitGenericState(room);
+        emitState(room);
+        if (room.genericEngine.snapshot(room.game).completed)
             finishMatch(room, true);
     }, 100);
 }
@@ -1313,6 +1341,8 @@ function shutdown() {
             clearTimeout(room.matchTimeout);
         if (room.resumeTimer)
             clearTimeout(room.resumeTimer);
+        if (room.genericTick)
+            clearInterval(room.genericTick);
         if (room.tetrisTick)
             clearInterval(room.tetrisTick);
         if (room.pacmanTick)

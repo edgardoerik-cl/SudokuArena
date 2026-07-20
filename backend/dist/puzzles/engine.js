@@ -66,6 +66,12 @@ export class GenericPuzzleEngine {
     towerWave = 0;
     towerBaseHealth = 20;
     towerLastReport = null;
+    towerWaveActive = false;
+    towerEnemies = [];
+    towerProjectiles = [];
+    towerLastTickAt = 0;
+    towerNextShotAt = new Map();
+    towerWaveKills = new Map();
     mergeBotStep = 0;
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
@@ -173,6 +179,10 @@ export class GenericPuzzleEngine {
                     baseHealth: this.towerBaseHealth,
                     credits: Object.fromEntries(this.towerCredits),
                     lastWave: this.towerLastReport,
+                    waveActive: this.towerWaveActive,
+                    enemies: this.towerEnemies.map((enemy) => ({ ...enemy })),
+                    projectiles: this.towerProjectiles.map((projectile) => ({ ...projectile })),
+                    remainingEnemies: this.towerEnemies.filter((enemy) => enemy.status === "WAITING" || enemy.status === "MOVING").length,
                 } : {})
             }
         };
@@ -998,6 +1008,110 @@ export class GenericPuzzleEngine {
                 this.towerCredits.set(player.id, startingCredits);
         }
     }
+    /**
+     * Simulación autoritativa de la oleada. El servidor conserva vida, recorrido
+     * y blancos; Compose interpola estos datos y no decide impactos.
+     */
+    tickTowerDefense(game, now = Date.now()) {
+        if (this.gameType !== "TOWER_DEFENSE" || !this.towerWaveActive)
+            return false;
+        const dt = this.towerLastTickAt > 0 ? Math.min(.2, Math.max(.01, (now - this.towerLastTickAt) / 1_000)) : .05;
+        this.towerLastTickAt = now;
+        const path = this.meta.path ?? [];
+        if (path.length < 2)
+            return false;
+        for (const enemy of this.towerEnemies) {
+            if (enemy.status === "WAITING" && now >= enemy.spawnAt)
+                enemy.status = "MOVING";
+            if (enemy.status !== "MOVING")
+                continue;
+            const slow = enemy.slowUntil > now ? .58 : 1;
+            enemy.progress += enemy.speed * slow * dt;
+            if (enemy.progress >= path.length - 1) {
+                enemy.status = "LEAKED";
+                this.towerBaseHealth = Math.max(0, this.towerBaseHealth - (enemy.kind === "GOLEM" ? 3 : enemy.kind === "BRUTE" ? 2 : 1));
+            }
+        }
+        if (this.towerBaseHealth <= 0) {
+            this.towerEnemies.forEach((enemy) => {
+                if (enemy.status === "WAITING" || enemy.status === "MOVING")
+                    enemy.status = "LEAKED";
+            });
+        }
+        const active = this.towerEnemies.filter((enemy) => enemy.status === "MOVING");
+        this.board.forEach((row, towerRow) => row.forEach((tower, towerCol) => {
+            const towerType = tower.meta.towerType?.toString();
+            if (!towerType || active.length === 0)
+                return;
+            const level = Number(tower.meta.level ?? 1);
+            const range = towerType === "SNIPER" ? 6.4 : towerType === "BLAST" ? 3.2 : towerType === "FROST" ? 3.7 : 3.4;
+            const cooldown = Math.max(.18, (towerType === "RAPID" ? .42 : towerType === "SNIPER" ? 1.25 : .78) - level * .06);
+            const key = `${towerRow}:${towerCol}`;
+            if ((this.towerNextShotAt.get(key) ?? 0) > now)
+                return;
+            const candidates = active.map((enemy) => {
+                const position = towerEnemyPosition(enemy.progress, path);
+                return { enemy, distance: Math.hypot(position.row - towerRow, position.col - towerCol) };
+            }).filter(({ distance }) => distance <= range)
+                .sort((a, b) => b.enemy.progress - a.enemy.progress);
+            const target = candidates[0]?.enemy;
+            if (!target)
+                return;
+            const damage = (towerType === "SNIPER" ? 22 : towerType === "BLAST" ? 13 : towerType === "FROST" ? 7 : 9) * level;
+            const hit = (enemy, multiplier = 1) => {
+                if (enemy.status !== "MOVING")
+                    return;
+                enemy.hp -= damage * multiplier;
+                if (towerType === "FROST")
+                    enemy.slowUntil = now + 1_700;
+                if (enemy.hp <= 0) {
+                    enemy.hp = 0;
+                    enemy.status = "DEFEATED";
+                    const owner = tower.ownerId ?? "team";
+                    this.towerWaveKills.set(owner, (this.towerWaveKills.get(owner) ?? 0) + 1);
+                }
+            };
+            hit(target);
+            if (towerType === "BLAST") {
+                const targetPosition = towerEnemyPosition(target.progress, path);
+                active.filter((enemy) => enemy.id !== target.id).forEach((enemy) => {
+                    const position = towerEnemyPosition(enemy.progress, path);
+                    if (Math.hypot(position.row - targetPosition.row, position.col - targetPosition.col) <= 1.15)
+                        hit(enemy, .55);
+                });
+            }
+            this.towerProjectiles.push({
+                id: randomUUID(), towerRow, towerCol, targetId: target.id,
+                color: towerType === "FROST" ? "#22D3EE" : towerType === "BLAST" ? "#FB923C" : towerType === "SNIPER" ? "#C084FC" : "#60A5FA",
+                firedAt: now, arrivesAt: now + (towerType === "SNIPER" ? 120 : 240),
+            });
+            this.towerNextShotAt.set(key, now + cooldown * 1_000);
+        }));
+        this.towerProjectiles = this.towerProjectiles.filter((projectile) => projectile.arrivesAt + 220 > now);
+        const pending = this.towerEnemies.some((enemy) => enemy.status === "WAITING" || enemy.status === "MOVING");
+        if (!pending) {
+            this.towerWaveActive = false;
+            const defeated = this.towerEnemies.filter((enemy) => enemy.status === "DEFEATED").length;
+            const leaks = this.towerEnemies.filter((enemy) => enemy.status === "LEAKED").length;
+            const reward = defeated * (8 + Math.floor(this.towerWave / 4));
+            const participants = [...this.towerCredits.keys()];
+            const shared = participants.length ? Math.floor(reward / participants.length) : 0;
+            participants.forEach((id) => this.towerCredits.set(id, (this.towerCredits.get(id) ?? 0) + shared));
+            for (const [ownerId, kills] of this.towerWaveKills) {
+                if (ownerId !== "team")
+                    game.applyGenericSuccess(ownerId, kills * 5, Math.min(25, kills * 2), now);
+            }
+            this.towerLastReport = {
+                wave: this.towerWave, enemies: this.towerEnemies.length, defeated, leaks,
+                modifier: this.towerWave >= 14 ? "RUNIC" : this.towerWave >= 12 ? "ARMORED" : this.towerWave >= 7 ? "STEALTH" : "NONE",
+            };
+            this.towerWaveKills.clear();
+            if (this.towerBaseHealth <= 0 || this.towerWave >= Number(this.meta.maxWaves ?? 20))
+                this.completed = true;
+        }
+        this.revision += 1;
+        return true;
+    }
     applyTowerDefenseMove(playerId, move, game) {
         this.syncTowerPlayers(game);
         const payload = typeof move.val === "object" && move.val !== null
@@ -1005,40 +1119,36 @@ export class GenericPuzzleEngine {
             : { action: move.val };
         const action = String(payload.action ?? "BUILD").toUpperCase();
         if (action === "START_WAVE") {
+            if (this.towerWaveActive) {
+                return { correct: false, neutral: true, message: "La oleada actual todavía está en combate" };
+            }
             if (this.towerWave >= Number(this.meta.maxWaves ?? 20)) {
                 return { correct: false, neutral: true, message: "Las oleadas ya terminaron" };
             }
             this.towerWave += 1;
-            const towers = this.board.flat().filter((target) => typeof target.meta.towerType === "string");
-            const damage = towers.reduce((total, tower) => {
-                const level = Number(tower.meta.level ?? 1);
-                const base = tower.meta.towerType === "SNIPER" ? 8
-                    : tower.meta.towerType === "BLAST" ? 6
-                        : tower.meta.towerType === "FROST" ? 3 : 4;
-                return total + base * level;
-            }, 0);
-            const enemies = 5 + this.towerWave * 2;
+            const enemyCount = 5 + this.towerWave * 2;
             const layers = 1 + Math.floor(this.towerWave / 5);
-            const effectiveDamage = damage + (towers.some((tower) => tower.meta.towerType === "FROST") ? 5 : 0);
-            const defeated = Math.min(enemies, Math.floor(effectiveDamage / Math.max(1, layers * 2)));
-            const leaks = Math.max(0, enemies - defeated);
-            this.towerBaseHealth = Math.max(0, this.towerBaseHealth - leaks);
-            const reward = defeated * (7 + layers);
-            const participants = [...this.towerCredits.keys()];
-            const shared = participants.length ? Math.floor(reward / participants.length) : 0;
-            participants.forEach((id) => this.towerCredits.set(id, (this.towerCredits.get(id) ?? 0) + shared));
-            this.towerLastReport = {
-                wave: this.towerWave, enemies, layers, defeated, leaks,
-                modifier: this.towerWave >= 14 ? "RUNIC" : this.towerWave >= 12 ? "ARMORED" : this.towerWave >= 7 ? "STEALTH" : "NONE",
-            };
-            if (this.towerBaseHealth <= 0 || this.towerWave >= Number(this.meta.maxWaves ?? 20))
-                this.completed = true;
+            const now = Date.now();
+            this.towerEnemies = Array.from({ length: enemyCount }, (_, index) => {
+                const kind = this.towerWave >= 12 && index % 7 === 0 ? "GOLEM"
+                    : this.towerWave >= 7 && index % 5 === 0 ? "PHANTOM"
+                        : index % 4 === 0 ? "BRUTE" : "SCOUT";
+                const maxHp = (kind === "GOLEM" ? 110 : kind === "BRUTE" ? 58 : kind === "PHANTOM" ? 38 : 28) * layers;
+                return {
+                    id: `w${this.towerWave}-e${index}-${randomUUID()}`,
+                    kind, hp: maxHp, maxHp, progress: 0,
+                    speed: kind === "PHANTOM" ? 1.28 : kind === "GOLEM" ? .46 : kind === "BRUTE" ? .66 : .9,
+                    spawnAt: now + index * 620, slowUntil: 0, status: "WAITING",
+                };
+            });
+            this.towerWaveActive = true;
+            this.towerLastTickAt = now;
+            this.towerProjectiles = [];
+            this.towerWaveKills.clear();
             return {
                 correct: true,
-                points: defeated * 5,
-                message: leaks > 0
-                    ? `Oleada ${this.towerWave}: ${defeated} derrotados, ${leaks} atravesaron`
-                    : `Oleada ${this.towerWave} perfecta`,
+                points: 0,
+                message: `Oleada ${this.towerWave}: ${enemyCount} tropas entrando en la arena`,
             };
         }
         if (cellIsTower(this.board[move.row][move.col]) && action === "UPGRADE") {
@@ -2339,6 +2449,15 @@ function boxesIntersect3d(first, second) {
 }
 function cellIsTower(cell) {
     return typeof cell.meta.towerType === "string";
+}
+function towerEnemyPosition(progress, path) {
+    const start = Math.max(0, Math.min(path.length - 1, Math.floor(progress)));
+    const end = Math.min(path.length - 1, start + 1);
+    const fraction = Math.max(0, Math.min(1, progress - start));
+    return {
+        row: path[start].row + (path[end].row - path[start].row) * fraction,
+        col: path[start].col + (path[end].col - path[start].col) * fraction,
+    };
 }
 function neighbourFor(row, col, side, rows, columns) {
     const target = side === "top" ? { row: row - 1, col }

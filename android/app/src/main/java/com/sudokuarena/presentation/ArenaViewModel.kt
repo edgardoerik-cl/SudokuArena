@@ -623,6 +623,16 @@ class ArenaViewModel(
                     }
                 }
             }
+            GameType.TOWER_DEFENSE -> viewModelScope.launch {
+                while (isActive && !mutableState.value.soloCompleted) {
+                    delay(50)
+                    if (!mutableState.value.isLocallyPaused && localPuzzleEngine?.tickTowerDefense() == true) {
+                        val snapshot = localPuzzleEngine?.snapshot() ?: continue
+                        mutableState.update { it.copy(genericBoard = snapshot) }
+                        if (snapshot.completed) finishSoloGame()
+                    }
+                }
+            }
             else -> null
         }
     }

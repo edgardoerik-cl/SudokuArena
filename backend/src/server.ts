@@ -58,6 +58,7 @@ interface RoomRuntime {
   rematchVotes: Set<string>;
   suddenDeath: boolean;
   genericEngine: GenericPuzzleEngine | null;
+  genericTick: NodeJS.Timeout | null;
   tetrisEngine: TetrisArenaEngine | null;
   tetrisTick: NodeJS.Timeout | null;
   pacmanEngine: PacmanArenaEngine | null;
@@ -474,6 +475,7 @@ function createRoom(hostPlayerId: string): RoomRuntime {
     rematchVotes: new Set(),
     suddenDeath: false,
     genericEngine: null,
+    genericTick: null,
     tetrisEngine: null,
     tetrisTick: null,
     pacmanEngine: null,
@@ -543,6 +545,8 @@ function removeDisconnectedPlayer(room: RoomRuntime, playerId: string): void {
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
     if (room.rpsTimer) clearTimeout(room.rpsTimer);
+    if (room.genericTick) clearInterval(room.genericTick);
+    room.genericTick = null;
     if (room.tetrisTick) clearInterval(room.tetrisTick);
     if (room.pacmanTick) clearInterval(room.pacmanTick);
     if (room.demolitionTick) clearInterval(room.demolitionTick);
@@ -749,6 +753,7 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   if (room.tetrisEngine) startTetrisLoop(room);
   if (room.pacmanEngine) startPacmanLoop(room);
   if (room.demolitionEngine) startDemolitionLoop(room);
+  if (room.config.gameType === "TOWER_DEFENSE") startGenericLoop(room);
   for (const botId of room.bots.keys()) scheduleBotAction(room, botId);
   room.matchTimeout = setTimeout(() => finishMatch(room), matchDurationMs);
 }
@@ -769,6 +774,8 @@ function finishMatch(room: RoomRuntime, force = false): void {
   room.endsAt = Date.now();
   if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
   if (room.rpsTimer) clearTimeout(room.rpsTimer);
+  if (room.genericTick) clearInterval(room.genericTick);
+  room.genericTick = null;
   if (room.tetrisTick) clearInterval(room.tetrisTick);
   room.tetrisTick = null;
   if (room.pacmanTick) clearInterval(room.pacmanTick);
@@ -1120,6 +1127,8 @@ function maybeActivatePause(room: RoomRuntime): void {
   if (room.matchTimeout) clearTimeout(room.matchTimeout);
   room.matchTimeout = null;
   clearBotTimers(room);
+  if (room.genericTick) clearInterval(room.genericTick);
+  room.genericTick = null;
   if (room.tetrisTick) clearInterval(room.tetrisTick);
   room.tetrisTick = null;
   if (room.pacmanTick) clearInterval(room.pacmanTick);
@@ -1153,6 +1162,7 @@ function resumeRoom(room: RoomRuntime): void {
   if (room.tetrisEngine) startTetrisLoop(room);
   if (room.pacmanEngine) startPacmanLoop(room);
   if (room.demolitionEngine) startDemolitionLoop(room);
+  if (room.config.gameType === "TOWER_DEFENSE") startGenericLoop(room);
   emitRoomState(room);
   io.to(room.code).emit("pause:ended", { endsAt: room.endsAt });
 }
@@ -1166,6 +1176,17 @@ function startTetrisLoop(room: RoomRuntime): void {
     snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
     io.to(room.code).volatile.emit("tetris:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
+  }, 100);
+}
+
+function startGenericLoop(room: RoomRuntime): void {
+  if (!room.genericEngine || room.genericTick || room.config.gameType !== "TOWER_DEFENSE") return;
+  room.genericTick = setInterval(() => {
+    if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.genericEngine) return;
+    if (!room.genericEngine.tickTowerDefense(room.game)) return;
+    emitGenericState(room);
+    emitState(room);
+    if (room.genericEngine.snapshot(room.game).completed) finishMatch(room, true);
   }, 100);
 }
 
@@ -1336,6 +1357,7 @@ function shutdown(): void {
     if (room.boardEventTimeout) clearTimeout(room.boardEventTimeout);
     if (room.matchTimeout) clearTimeout(room.matchTimeout);
     if (room.resumeTimer) clearTimeout(room.resumeTimer);
+    if (room.genericTick) clearInterval(room.genericTick);
     if (room.tetrisTick) clearInterval(room.tetrisTick);
     if (room.pacmanTick) clearInterval(room.pacmanTick);
     if (room.demolitionTick) clearInterval(room.demolitionTick);

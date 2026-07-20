@@ -3,6 +3,7 @@ package com.sudokuarena.presentation
 import android.graphics.Color as AndroidColor
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -872,6 +873,204 @@ private fun canArrowEscapeClient(
     }
 }
 
+private data class TowerVisualEnemy(
+    val id: String,
+    val kind: String,
+    val hp: Float,
+    val maxHp: Float,
+    val progress: Float,
+    val speed: Float,
+    val spawnAt: Long,
+    val slowUntil: Long,
+    val status: String,
+)
+
+private data class TowerVisualProjectile(
+    val id: String,
+    val towerRow: Int,
+    val towerCol: Int,
+    val targetId: String,
+    val color: Color,
+    val firedAt: Long,
+    val arrivesAt: Long,
+)
+
+@Composable
+private fun TowerDefenseGrid(
+    state: GenericBoardState,
+    players: Map<String, Player>,
+    selected: CellPosition?,
+    enabled: Boolean,
+    onCellSelected: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pulse by rememberInfiniteTransition(label = "towerArena").animateFloat(
+        0f, 1f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "towerPulse",
+    )
+    val receivedAt = remember(state.revision) { System.currentTimeMillis() }
+    val path = remember(state.meta) {
+        (state.meta["path"] as? List<*>)?.mapNotNull { raw ->
+            val point = raw as? Map<*, *> ?: return@mapNotNull null
+            val row = (point["row"] as? Number)?.toFloat() ?: return@mapNotNull null
+            val col = (point["col"] as? Number)?.toFloat() ?: return@mapNotNull null
+            row to col
+        }.orEmpty()
+    }
+    val enemies = (state.meta["enemies"] as? List<*>)?.mapNotNull { raw ->
+        val enemy = raw as? Map<*, *> ?: return@mapNotNull null
+        TowerVisualEnemy(
+            id = enemy["id"]?.toString() ?: return@mapNotNull null,
+            kind = enemy["kind"]?.toString() ?: "SCOUT",
+            hp = (enemy["hp"] as? Number)?.toFloat() ?: 0f,
+            maxHp = (enemy["maxHp"] as? Number)?.toFloat()?.coerceAtLeast(1f) ?: 1f,
+            progress = (enemy["progress"] as? Number)?.toFloat() ?: 0f,
+            speed = (enemy["speed"] as? Number)?.toFloat() ?: 0f,
+            spawnAt = (enemy["spawnAt"] as? Number)?.toLong() ?: 0L,
+            slowUntil = (enemy["slowUntil"] as? Number)?.toLong() ?: 0L,
+            status = enemy["status"]?.toString() ?: "WAITING",
+        )
+    }.orEmpty()
+    val projectiles = (state.meta["projectiles"] as? List<*>)?.mapNotNull { raw ->
+        val projectile = raw as? Map<*, *> ?: return@mapNotNull null
+        TowerVisualProjectile(
+            id = projectile["id"]?.toString() ?: return@mapNotNull null,
+            towerRow = (projectile["towerRow"] as? Number)?.toInt() ?: return@mapNotNull null,
+            towerCol = (projectile["towerCol"] as? Number)?.toInt() ?: return@mapNotNull null,
+            targetId = projectile["targetId"]?.toString() ?: return@mapNotNull null,
+            color = parseGenericColor(projectile["color"]?.toString() ?: "#60A5FA"),
+            firedAt = (projectile["firedAt"] as? Number)?.toLong() ?: 0L,
+            arrivesAt = (projectile["arrivesAt"] as? Number)?.toLong() ?: 0L,
+        )
+    }.orEmpty()
+    val ownerColors = remember(players) { players.mapValues { parseGenericColor(it.value.colorHex) } }
+    Canvas(
+        modifier
+            .fillMaxSize()
+            .background(Color(0xFF071426), RoundedCornerShape(18.dp))
+            .pointerInput(state.revision, enabled) {
+                detectTapGestures { tap ->
+                    if (!enabled || state.rows <= 0 || state.columns <= 0) return@detectTapGestures
+                    val col = (tap.x / size.width * state.columns).toInt().coerceIn(0, state.columns - 1)
+                    val row = (tap.y / size.height * state.rows).toInt().coerceIn(0, state.rows - 1)
+                    if (state.board[row][col].meta["path"] != true) onCellSelected(row, col)
+                }
+            },
+    ) {
+        if (state.rows <= 0 || state.columns <= 0) return@Canvas
+        val cw = size.width / state.columns
+        val ch = size.height / state.rows
+        val now = state.serverTime + (System.currentTimeMillis() - receivedAt)
+        fun point(row: Float, col: Float) = Offset((col + .5f) * cw, (row + .5f) * ch)
+        fun position(progress: Float): Offset {
+            if (path.isEmpty()) return Offset.Zero
+            val start = progress.toInt().coerceIn(0, path.lastIndex)
+            val end = (start + 1).coerceAtMost(path.lastIndex)
+            val fraction = (progress - start).coerceIn(0f, 1f)
+            val a = path[start]; val b = path[end]
+            return point(a.first + (b.first - a.first) * fraction, a.second + (b.second - a.second) * fraction)
+        }
+        drawRect(
+            androidx.compose.ui.graphics.Brush.radialGradient(
+                listOf(Color(0xFF183A61), Color(0xFF071426)),
+                center = center,
+                radius = size.maxDimension * .72f,
+            ),
+        )
+        // Textura tecnológica de fondo.
+        for (row in 0 until state.rows) for (col in 0 until state.columns) {
+            val origin = Offset(col * cw, row * ch)
+            drawRect(
+                Color(0xFF38BDF8).copy(alpha = if ((row + col) % 2 == 0) .035f else .018f),
+                origin + Offset(1f, 1f), Size(cw - 2f, ch - 2f),
+            )
+        }
+        if (path.size >= 2) {
+            path.zipWithNext().forEach { (a, b) ->
+                val start = point(a.first, a.second); val end = point(b.first, b.second)
+                drawLine(Color(0xFF22D3EE).copy(alpha = .16f), start, end, min(cw, ch) * .74f)
+                drawLine(Color(0xFF27364F), start, end, min(cw, ch) * .58f)
+                drawLine(
+                    Color(0xFF94A3B8).copy(alpha = .62f), start, end, maxOf(2f, min(cw, ch) * .035f),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 10f), pulse * 18f),
+                )
+            }
+            drawCircle(Color(0xFF22C55E).copy(alpha = .24f + pulse * .18f), min(cw, ch) * .42f, point(path.first().first, path.first().second))
+            drawCircle(Color(0xFFFACC15).copy(alpha = .28f + pulse * .2f), min(cw, ch) * .46f, point(path.last().first, path.last().second))
+        }
+        state.board.forEachIndexed { row, cells -> cells.forEachIndexed { col, cell ->
+            if (cell.meta["path"] == true) return@forEachIndexed
+            val towerType = cell.meta["towerType"]?.toString()
+            val towerCenter = point(row.toFloat(), col.toFloat())
+            if (selected?.row == row && selected.column == col) {
+                drawCircle(Color(0xFFFFD54F).copy(alpha = .22f), min(cw, ch) * .47f, towerCenter)
+                drawCircle(Color(0xFFFFD54F), min(cw, ch) * .39f, towerCenter, style = Stroke(maxOf(2f, cw * .035f)))
+            }
+            if (towerType == null) {
+                val padColor = Color(0xFF34D399)
+                drawCircle(padColor.copy(alpha = .06f), min(cw, ch) * .34f, towerCenter)
+                drawCircle(padColor.copy(alpha = .28f), min(cw, ch) * .27f, towerCenter, style = Stroke(maxOf(1f, cw * .025f)))
+                return@forEachIndexed
+            }
+            val towerColor = when (towerType) {
+                "BLAST" -> Color(0xFFFB923C); "SNIPER" -> Color(0xFFC084FC)
+                "FROST" -> Color(0xFF22D3EE); else -> Color(0xFF60A5FA)
+            }
+            val ownerColor = cell.ownerId?.let(ownerColors::get) ?: towerColor
+            val radius = min(cw, ch) * .26f
+            drawCircle(Color.Black.copy(alpha = .4f), radius * 1.18f, towerCenter + Offset(0f, radius * .22f))
+            drawCircle(ownerColor.copy(alpha = .24f + pulse * .08f), radius * 1.45f, towerCenter)
+            drawCircle(Color(0xFF172033), radius, towerCenter)
+            drawCircle(towerColor, radius * .72f, towerCenter)
+            val angle = pulse * Math.PI.toFloat() * 2f + (row + col) * .7f
+            val barrel = towerCenter + Offset(kotlin.math.cos(angle), kotlin.math.sin(angle)) * radius * 1.25f
+            drawLine(Color.White.copy(alpha = .92f), towerCenter, barrel, maxOf(3f, radius * .28f))
+            val level = (cell.meta["level"] as? Number)?.toInt() ?: 1
+            repeat(level) { index ->
+                drawCircle(Color(0xFFFFD54F), maxOf(1.7f, radius * .09f), towerCenter + Offset((index - (level - 1) / 2f) * radius * .35f, radius * .78f))
+            }
+        } }
+        val visualPositions = mutableMapOf<String, Offset>()
+        enemies.forEach { enemy ->
+            if (enemy.status == "DEFEATED" || enemy.status == "LEAKED" || now < enemy.spawnAt) return@forEach
+            val elapsed = ((now - state.serverTime).coerceAtLeast(0L) / 1_000f).coerceAtMost(.18f)
+            val projected = enemy.progress + if (enemy.status == "MOVING") enemy.speed * elapsed else 0f
+            val enemyCenter = position(projected)
+            visualPositions[enemy.id] = enemyCenter
+            val baseRadius = min(cw, ch) * when (enemy.kind) { "GOLEM" -> .30f; "BRUTE" -> .25f; else -> .20f }
+            val enemyColor = when (enemy.kind) {
+                "GOLEM" -> Color(0xFF8B5CF6); "BRUTE" -> Color(0xFFEF4444)
+                "PHANTOM" -> Color(0xFFA5F3FC); else -> Color(0xFFF97316)
+            }
+            drawCircle(Color.Black.copy(alpha = .42f), baseRadius * 1.1f, enemyCenter + Offset(2f, 3f))
+            if (enemy.slowUntil > now) drawCircle(Color(0xFF67E8F9).copy(alpha = .35f), baseRadius * 1.55f, enemyCenter, style = Stroke(3f))
+            if (enemy.kind == "GOLEM") {
+                drawRoundRect(enemyColor, enemyCenter - Offset(baseRadius, baseRadius), Size(baseRadius * 2, baseRadius * 2), cornerRadius = androidx.compose.ui.geometry.CornerRadius(baseRadius * .3f))
+            } else {
+                drawCircle(enemyColor, baseRadius, enemyCenter)
+                drawCircle(Color.White, baseRadius * .16f, enemyCenter + Offset(-baseRadius * .32f, -baseRadius * .16f))
+                drawCircle(Color.White, baseRadius * .16f, enemyCenter + Offset(baseRadius * .32f, -baseRadius * .16f))
+            }
+            val barWidth = baseRadius * 2.25f
+            val barOrigin = enemyCenter + Offset(-barWidth / 2f, -baseRadius * 1.55f)
+            drawRoundRect(Color(0xFF1F2937), barOrigin, Size(barWidth, maxOf(3f, ch * .055f)))
+            drawRoundRect(
+                if (enemy.hp / enemy.maxHp > .45f) Color(0xFF22C55E) else Color(0xFFEF4444),
+                barOrigin, Size(barWidth * (enemy.hp / enemy.maxHp).coerceIn(0f, 1f), maxOf(3f, ch * .055f)),
+            )
+        }
+        projectiles.forEach { projectile ->
+            val target = visualPositions[projectile.targetId] ?: return@forEach
+            val start = point(projectile.towerRow.toFloat(), projectile.towerCol.toFloat())
+            val travel = ((now - projectile.firedAt).toFloat() / (projectile.arrivesAt - projectile.firedAt).coerceAtLeast(1L)).coerceIn(0f, 1f)
+            val head = start + (target - start) * travel
+            drawLine(projectile.color.copy(alpha = .35f), start, head, 5f)
+            drawCircle(projectile.color.copy(alpha = .20f), min(cw, ch) * .18f, head)
+            drawCircle(Color.White, maxOf(2.5f, min(cw, ch) * .06f), head)
+            if (travel >= .96f) drawCircle(projectile.color.copy(alpha = .65f), min(cw, ch) * (.12f + pulse * .18f), target, style = Stroke(3f))
+        }
+    }
+}
+
 @Composable
 fun GenericPuzzleGrid(
     state: GenericBoardState,
@@ -886,6 +1085,10 @@ fun GenericPuzzleGrid(
     localPlayerId: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    if (state.gameType == GameType.TOWER_DEFENSE) {
+        TowerDefenseGrid(state, players, selected, enabled, onCellSelected, modifier)
+        return
+    }
     if (state.gameType == GameType.CAPITAL_ARENA) {
         CapitalArenaBoard(state, players, localPlayerId, onDirectMove, modifier)
         return
@@ -1907,8 +2110,25 @@ private fun GenericMoveControls(
             val credits = ((state.genericBoard?.meta?.get("credits") as? Map<*, *>)?.get(state.playerId) as? Number)?.toInt() ?: 0
             val wave = (state.genericBoard?.meta?.get("wave") as? Number)?.toInt() ?: 0
             val health = (state.genericBoard?.meta?.get("baseHealth") as? Number)?.toInt() ?: 20
+            val waveActive = state.genericBoard?.meta?.get("waveActive") == true
+            val remaining = (state.genericBoard?.meta?.get("remainingEnemies") as? Number)?.toInt() ?: 0
+            val selectedCell = state.selected?.let { state.genericBoard?.board?.getOrNull(it.row)?.getOrNull(it.column) }
+            val selectedTower = selectedCell?.meta?.get("towerType")?.toString()
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("BASE $health ♥ · OLEADA $wave/20 · $credits créditos", fontWeight = FontWeight.Black)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("◆ NÚCLEO $health", color = if (health <= 6) Color(0xFFDC2626) else Color(0xFF059669), fontWeight = FontWeight.Black)
+                    Text("OLEADA $wave/20", color = Color(0xFF7C3AED), fontWeight = FontWeight.Black)
+                    Text("◈ $credits", color = Color(0xFF0369A1), fontWeight = FontWeight.Black)
+                }
+                if (waveActive) {
+                    LinearProgressIndicator(
+                        progress = { (remaining / (5f + wave * 2f)).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(7.dp),
+                        color = Color(0xFFE11D48),
+                        trackColor = Color(0xFFE2E8F0),
+                    )
+                    Text("⚔ $remaining tropas siguen en el circuito", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf("RAPID" to "⚡100", "BLAST" to "💥150", "SNIPER" to "◎180", "FROST" to "❄130").forEach { (id, label) ->
                         OutlinedButton(
@@ -1925,17 +2145,23 @@ private fun GenericMoveControls(
                 Button(
                     onClick = {
                         val target = state.selected ?: return@Button
-                        onMoveAt(target.row, target.column, mapOf("action" to "BUILD", "towerType" to tower))
+                        if (selectedTower != null) onMoveAt(target.row, target.column, mapOf("action" to "UPGRADE"))
+                        else onMoveAt(target.row, target.column, mapOf("action" to "BUILD", "towerType" to tower))
                     },
                     enabled = enabled && state.selected != null,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("CONSTRUIR EN CASILLA SELECCIONADA", fontWeight = FontWeight.Black) }
+                ) {
+                    Text(
+                        if (selectedTower != null) "⬆ MEJORAR $selectedTower" else "＋ CONSTRUIR EN EL NODO",
+                        fontWeight = FontWeight.Black,
+                    )
+                }
                 Button(
                     onClick = { onMoveAt(0, 0, mapOf("action" to "START_WAVE")) },
-                    enabled = enabled && health > 0 && wave < 20,
+                    enabled = enabled && health > 0 && wave < 20 && !waveActive,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
-                ) { Text("▶ LANZAR OLEADA", fontWeight = FontWeight.Black) }
+                ) { Text(if (waveActive) "⚔ COMBATE EN CURSO" else "▶ LANZAR OLEADA", fontWeight = FontWeight.Black) }
             }
         }
         GameType.HANGMAN -> {

@@ -37,6 +37,22 @@ class LocalPuzzleEngineTest {
     }
 
     @Test
+    fun `Tower Defense local mantiene tropas visibles durante la oleada`() {
+        val engine = LocalPuzzleEngine(GameType.TOWER_DEFENSE)
+        assertTrue(engine.move(0, 0, mapOf("action" to "BUILD", "towerType" to "RAPID")).accepted)
+        assertTrue(engine.move(0, 0, mapOf("action" to "START_WAVE")).accepted)
+        val started = engine.snapshot()
+        assertEquals(true, started.meta["waveActive"])
+        assertTrue((started.meta["enemies"] as List<*>).isNotEmpty())
+        val now = System.currentTimeMillis()
+        repeat(12) { engine.tickTowerDefense(now + (it + 1) * 100L) }
+        val moving = engine.snapshot()
+        val enemies = moving.meta["enemies"] as List<Map<*, *>>
+        assertTrue(enemies.any { ((it["progress"] as? Number)?.toFloat() ?: 0f) > 0f })
+        assertTrue((moving.meta["projectiles"] as List<*>).isNotEmpty())
+    }
+
+    @Test
     fun `todos los juegos no Sudoku crean un tablero local jugable`() {
         val onlineOnly = setOf(
             GameType.SUDOKU,
