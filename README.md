@@ -73,17 +73,17 @@ npm run dev
 ```
 
 Abra `android/` en Android Studio y ejecute `app`. La compilación normal usa
-`https://sudoku-arena.bonto.run`. Para cambiar el destino explícitamente:
+`https://sudokuarena.onrender.com`. Para cambiar el destino explícitamente:
 
 ```powershell
 cd android
 .\build-apk.ps1 -SocketUrl "http://10.0.2.2:3000" # backend local desde emulador
 # o
-.\build-apk.ps1 -SocketUrl "https://sudoku-arena.bonto.run"
+.\build-apk.ps1 -SocketUrl "https://sudokuarena.onrender.com"
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.5.0.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.5.1.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor
