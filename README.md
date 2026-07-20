@@ -3,7 +3,10 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
-La versión `8.2.1` corrige la URL WebSocket de producción, la pantalla blanca de Flechas,
+La versión `8.3.0` añade Memoria Neón y 2048 Arena en solitario y multijugador,
+con Bots, dificultad, tutoriales, animaciones y progreso visual compartido. También
+incorpora una auditoría automática de los veinticuatro juegos. La versión `8.2.1`
+corrige la URL WebSocket de producción, la pantalla blanca de Flechas,
 el teclado virtual de Ahorcado y añade motores offline reales para los arcades y Hotseat
 para Damas/Chess Tactics. La versión `8.2.0` incorporó Demolición Arcade, controles virtuales para Pac-Man y Tetris,
 Flechas en Fuga con geometría espacial libre, cámara ampliable y poderes contextuales en Capital Arena,
@@ -11,11 +14,12 @@ además de validación estricta para Damas, Nexo Cero y Ahorcado. La versión `8
 Pac-Man Arena y El Ahorcado, además de carruseles alfabéticos con portadas locales y favoritos persistentes con DataStore
 y una interfaz adaptable que cambia en tiempo real
 entre orientación vertical y horizontal, chat global, Piedra/Papel/Tijeras para
-decidir el primer turno y veintiún juegos:
+decidir el primer turno y veinticuatro juegos:
 Sudoku, Buscaminas, Sopa de Letras, Crucigramas, El Gato, Timbiriche,
 Kakuro, Mathdoku, Hitori, Chess Tactics RPG, Nurikabe, Bridges, Tetris Arena,
 El Ahorcado, Flechas en Fuga, Pac-Man Arena, Letras Cruzadas, Código Secreto,
-Capital Arena, Nexo Cero y Damas Clásicas. Todos comparten salas, colores de conquista,
+Capital Arena, Nexo Cero, Damas Clásicas, Demolición Arcade, Memoria Neón y
+2048 Arena. Todos comparten salas, colores de conquista,
 Bots, energía, poderes y una matriz autoritativa sincronizada por Socket.IO.
 
 Los tableros se generan desde una semilla distinta y admiten dificultad
@@ -72,7 +76,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.2.1-debug.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.3.0-debug.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

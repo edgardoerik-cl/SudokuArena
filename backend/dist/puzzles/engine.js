@@ -47,6 +47,8 @@ export class GenericPuzzleEngine {
     hangmanErrors = new Map();
     hiddenWord;
     arrowRemoved = new Map();
+    memoryFirstPicks = new Map();
+    mergeBotStep = 0;
     constructor(gameType, gameId, options = {}) {
         this.gameType = gameType;
         this.gameId = gameId;
@@ -127,6 +129,10 @@ export class GenericPuzzleEngine {
                 ...(this.gameType === "ARROWS_ESCAPE" ? {
                     progress: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, removed.size])),
                     removedByPlayer: Object.fromEntries([...this.arrowRemoved].map(([id, removed]) => [id, [...removed]])),
+                } : {}),
+                ...(this.gameType === "MEMORY_NEON" ? {
+                    pairsFound: this.board.flat().filter((cell) => cell.ownerId !== null).length / 2,
+                    activePicks: Object.fromEntries([...this.memoryFirstPicks].map(([id, pick]) => [id, `${pick.row}:${pick.col}`])),
                 } : {})
             }
         };
@@ -197,7 +203,7 @@ export class GenericPuzzleEngine {
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
         }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS"].includes(this.gameType))) {
+        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048"].includes(this.gameType))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
         const outcome = this.applySpecificMove(playerId, move, cell, game, now);
@@ -246,6 +252,38 @@ export class GenericPuzzleEngine {
             return this.createSecretBotMove(playerId);
         if (this.gameType === "CAPITAL_ARENA")
             return this.createCapitalBotMove(playerId);
+        if (this.gameType === "MEMORY_NEON") {
+            const effectivePlayerId = playerId ?? this.memoryFirstPicks.keys().next().value;
+            const first = effectivePlayerId ? this.memoryFirstPicks.get(effectivePlayerId) : null;
+            if (first) {
+                const answer = this.answers[first.row][first.col];
+                for (let row = 0; row < this.board.length; row += 1)
+                    for (let col = 0; col < this.board[row].length; col += 1) {
+                        if ((row !== first.row || col !== first.col) && this.board[row][col].value === null
+                            && this.board[row][col].ownerId === null && this.answers[row][col] === answer) {
+                            return { requestId: `memory-bot-${randomUUID()}`, row, col, val: "FLIP" };
+                        }
+                    }
+            }
+            for (let row = 0; row < this.board.length; row += 1)
+                for (let col = 0; col < this.board[row].length; col += 1) {
+                    if (this.board[row][col].value === null && this.board[row][col].ownerId === null) {
+                        return { requestId: `memory-bot-${randomUUID()}`, row, col, val: "FLIP" };
+                    }
+                }
+            return null;
+        }
+        if (this.gameType === "MERGE_2048") {
+            // Mantener una esquina es una estrategia simple pero consistente; si un
+            // movimiento no cambia el tablero, los siguientes intentan otra dirección.
+            const directions = ["LEFT", "DOWN", "LEFT", "RIGHT", "DOWN", "LEFT", "UP"];
+            return {
+                requestId: `merge-bot-${randomUUID()}`,
+                row: 0,
+                col: 0,
+                val: directions[this.mergeBotStep++ % directions.length],
+            };
+        }
         if (this.gameType === "HANGMAN") {
             const target = this.board[0].findIndex((cell) => cell.value === null);
             if (target < 0)
@@ -434,6 +472,40 @@ export class GenericPuzzleEngine {
             return this.applySecretCodeMove(playerId, move, cell);
         if (this.gameType === "CAPITAL_ARENA")
             return this.applyCapitalMove(playerId, move, game);
+        if (this.gameType === "MERGE_2048")
+            return this.applyMerge2048Move(playerId, move);
+        if (this.gameType === "MEMORY_NEON") {
+            // La pareja fallida permanece visible hasta el siguiente intento para que
+            // el jugador pueda memorizarla; el próximo toque la limpia sin temporizadores.
+            this.board.flat().forEach((candidate) => {
+                if (candidate.meta.mismatch === true) {
+                    candidate.value = null;
+                    candidate.isRevealed = false;
+                    candidate.meta.mismatch = false;
+                }
+            });
+            if (cell.ownerId !== null || cell.value !== null) {
+                return { correct: false, neutral: true, message: "Carta no disponible" };
+            }
+            const answer = this.answers[move.row][move.col];
+            const first = this.memoryFirstPicks.get(playerId);
+            cell.value = answer ?? null;
+            cell.isRevealed = true;
+            if (!first) {
+                this.memoryFirstPicks.set(playerId, { row: move.row, col: move.col });
+                return { correct: true, points: 0 };
+            }
+            const firstCell = this.board[first.row][first.col];
+            this.memoryFirstPicks.delete(playerId);
+            if (this.answers[first.row][first.col] === answer) {
+                firstCell.ownerId = playerId;
+                cell.ownerId = playerId;
+                return { correct: true, points: 30 };
+            }
+            firstCell.meta.mismatch = true;
+            cell.meta.mismatch = true;
+            return { correct: true, points: 0 };
+        }
         if (this.gameType === "HANGMAN") {
             if ((this.hangmanErrors.get(playerId) ?? 0) >= 6) {
                 return { correct: false, neutral: true, points: 0, message: "Ya no te quedan vidas en esta ronda" };
@@ -609,6 +681,69 @@ export class GenericPuzzleEngine {
                 return values[0];
         }
         return null;
+    }
+    applyMerge2048Move(playerId, move) {
+        const direction = String(move.val ?? "").toUpperCase();
+        if (!["UP", "RIGHT", "DOWN", "LEFT"].includes(direction)) {
+            return { correct: false, neutral: true, message: "Dirección inválida" };
+        }
+        const previous = this.board.map((row) => row.map((cell) => Number(cell.value ?? 0)));
+        const next = previous.map((row) => [...row]);
+        let points = 0;
+        const slide = (line) => {
+            const compact = line.filter((value) => value > 0);
+            const result = [];
+            for (let index = 0; index < compact.length; index += 1) {
+                if (compact[index] === compact[index + 1]) {
+                    const merged = compact[index] * 2;
+                    result.push(merged);
+                    points += merged;
+                    index += 1;
+                }
+                else
+                    result.push(compact[index]);
+            }
+            while (result.length < 4)
+                result.push(0);
+            return result;
+        };
+        if (direction === "LEFT" || direction === "RIGHT") {
+            for (let row = 0; row < 4; row += 1) {
+                const source = direction === "RIGHT" ? [...previous[row]].reverse() : previous[row];
+                const result = slide(source);
+                next[row] = direction === "RIGHT" ? result.reverse() : result;
+            }
+        }
+        else {
+            for (let col = 0; col < 4; col += 1) {
+                const source = Array.from({ length: 4 }, (_, row) => previous[row][col]);
+                if (direction === "DOWN")
+                    source.reverse();
+                const result = slide(source);
+                if (direction === "DOWN")
+                    result.reverse();
+                result.forEach((value, row) => { next[row][col] = value; });
+            }
+        }
+        if (next.every((row, y) => row.every((value, x) => value === previous[y][x]))) {
+            return { correct: false, neutral: true, message: "Ese deslizamiento no mueve fichas" };
+        }
+        this.board.forEach((row, y) => row.forEach((cell, x) => {
+            const value = next[y][x];
+            cell.value = value === 0 ? null : value;
+            cell.isRevealed = value !== 0;
+            cell.ownerId = value !== 0 && value !== previous[y][x] ? playerId : null;
+        }));
+        const empty = this.board.flatMap((row, y) => row.map((cell, x) => ({ cell, y, x })))
+            .filter(({ cell }) => cell.value === null);
+        const spawned = empty[Math.floor(Math.random() * empty.length)];
+        if (spawned) {
+            spawned.cell.value = Math.random() < .9 ? 2 : 4;
+            spawned.cell.isRevealed = true;
+            spawned.cell.ownerId = null;
+        }
+        this.meta.highestTile = Math.max(...this.board.flat().map((cell) => Number(cell.value ?? 0)));
+        return { correct: true, points: Math.max(2, points) };
     }
     activeTeam(playerId) {
         return Math.max(0, this.turnOrder.indexOf(playerId)) % 2 === 0 ? "BLUE" : "RED";
@@ -1064,6 +1199,22 @@ export class GenericPuzzleEngine {
         }
         if (this.gameType === "ARROWS_ESCAPE")
             return [...this.arrowRemoved.values()].some((removed) => removed.size === this.board.length * this.board[0].length);
+        if (this.gameType === "MEMORY_NEON")
+            return this.board.flat().every((cell) => cell.ownerId !== null);
+        if (this.gameType === "MERGE_2048") {
+            if (this.board.flat().some((cell) => Number(cell.value ?? 0) >= Number(this.meta.target ?? 256)))
+                return true;
+            if (this.board.flat().some((cell) => cell.value === null))
+                return false;
+            for (let row = 0; row < 4; row += 1)
+                for (let col = 0; col < 4; col += 1) {
+                    const value = this.board[row][col].value;
+                    if (this.board[row + 1]?.[col]?.value === value || this.board[row]?.[col + 1]?.value === value)
+                        return false;
+                }
+            this.meta.gameOverReason = "NO_MOVES";
+            return true;
+        }
         if (this.gameType === "TIC_TAC_TOE")
             return this.ticTacToeWinner() !== null || this.board.flat().every((cell) => cell.value !== null);
         if (this.gameType === "CHECKERS") {

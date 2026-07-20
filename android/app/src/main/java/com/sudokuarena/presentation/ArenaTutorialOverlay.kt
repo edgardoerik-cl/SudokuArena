@@ -210,4 +210,14 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("Rompe la estructura", "Cada impacto daña un bloque. Algunos necesitan más de un golpe.", "●▰"),
         TutorialStep("Conserva tus vidas", "Si la bola cae por abajo pierdes una vida. Vacía el nivel para avanzar.", "♥"),
     )
+    GameType.MEMORY_NEON -> listOf(
+        TutorialStep("Encuentra parejas", "Toca una carta para verla y luego busca su símbolo gemelo.", "◇  →  ◆"),
+        TutorialStep("Conquista", "Una pareja correcta queda teñida con tu color y suma 30 puntos.", "◆ + ◆ = 30"),
+        TutorialStep("Carrera visual", "Las cartas fallidas vuelven a ocultarse. Memoriza su posición antes que tus rivales.", "👁  🧠  ⚡"),
+    )
+    GameType.MERGE_2048 -> listOf(
+        TutorialStep("Desliza", "Mueve todas las fichas con un gesto o con las cuatro flechas inferiores.", "←  ↑  ↓  →"),
+        TutorialStep("Combina", "Dos valores iguales se fusionan: 2+2=4, 4+4=8 y así sucesivamente.", "2 + 2 = 4"),
+        TutorialStep("Alcanza la meta", "La meta depende de la dificultad. Cada fusión suma puntos inmediatamente.", "128  →  256  →  512"),
+    )
 }

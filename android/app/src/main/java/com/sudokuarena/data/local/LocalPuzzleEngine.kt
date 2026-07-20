@@ -39,6 +39,7 @@ class LocalPuzzleEngine(
     private val capitalOwners = mutableMapOf<Int, String>()
     private val capitalLevels = mutableMapOf<Int, Int>()
     private var localTurnTeam = "BLUE"
+    private var memoryFirstPick: Pair<Int, Int>? = null
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
@@ -71,6 +72,33 @@ class LocalPuzzleEngine(
     fun move(row: Int, col: Int, value: Any?): LocalPuzzleMoveResult {
         val cell = board.getOrNull(row)?.getOrNull(col) ?: return reject("Movimiento fuera del tablero")
         if (gameType == GameType.CAPITAL_ARENA) return capitalMove(value)
+        if (gameType == GameType.MERGE_2048) return merge2048Move(value)
+        if (gameType == GameType.MEMORY_NEON) {
+            board.forEachIndexed { y, cells -> cells.forEachIndexed { x, candidate ->
+                if (candidate.meta["mismatch"] == true) {
+                    replace(y, x, candidate.copy(value = null, isRevealed = false, meta = candidate.meta + ("mismatch" to false)))
+                }
+            } }
+            val activeCell = board[row][col]
+            if (activeCell.ownerId != null || activeCell.value != null) return reject("Carta no disponible")
+            replace(row, col, activeCell.copy(value = blueprint.answers[row][col], isRevealed = true))
+            val first = memoryFirstPick
+            if (first == null) {
+                memoryFirstPick = row to col
+                return accept(0)
+            }
+            memoryFirstPick = null
+            val firstCell = board[first.first][first.second]
+            return if (blueprint.answers[first.first][first.second] == blueprint.answers[row][col]) {
+                replace(first.first, first.second, firstCell.copy(ownerId = OWNER))
+                replace(row, col, board[row][col].copy(ownerId = OWNER))
+                accept(30)
+            } else {
+                replace(first.first, first.second, firstCell.copy(meta = firstCell.meta + ("mismatch" to true)))
+                replace(row, col, board[row][col].copy(meta = board[row][col].meta + ("mismatch" to true)))
+                accept(0)
+            }
+        }
         if (cell.isBlocked || (cell.ownerId != null && gameType !in setOf(GameType.TETRIS_ARENA, GameType.NURIKABE, GameType.CROSS_LETTERS, GameType.WORD_SEARCH))) return reject("Casilla no disponible")
 
         if (gameType == GameType.CROSS_LETTERS) {
@@ -238,6 +266,11 @@ class LocalPuzzleEngine(
             board.flatten().count { it.meta["team"] == "RED" } == 0
         GameType.CHESS_TACTICS -> board.flatten().count { it.value == "KING" } < 2
         GameType.HANGMAN -> board.first().all { it.value != null } || hangmanErrors >= 6
+        GameType.MEMORY_NEON -> board.flatten().all { it.ownerId != null }
+        GameType.MERGE_2048 -> {
+            val target = (blueprint.meta["target"] as? Number)?.toInt() ?: 256
+            board.flatten().any { ((it.value as? Number)?.toInt() ?: 0) >= target } || mergeHasNoMoves()
+        }
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -252,6 +285,8 @@ class LocalPuzzleEngine(
         GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
         GameType.CHECKERS -> checkers()
         GameType.CHESS_TACTICS -> chessHotseat()
+        GameType.MEMORY_NEON -> memoryNeon()
+        GameType.MERGE_2048 -> merge2048()
         GameType.TETRIS_ARENA, GameType.PACMAN_ARENA, GameType.DEMOLITION_ARCADE ->
             result(listOf(listOf(GenericCell(isBlocked = true))), listOf(listOf(null)), mapOf("actionMode" to true))
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
@@ -262,6 +297,99 @@ class LocalPuzzleEngine(
         matrix(3, 3) { _, _ -> null },
         mapOf("turnBased" to true),
     )
+
+    private fun memoryNeon(): Blueprint {
+        val (rows, columns) = when (difficulty) {
+            PuzzleDifficulty.EASY -> 4 to 4
+            PuzzleDifficulty.EXPERT -> 6 to 6
+            else -> 4 to 6
+        }
+        val symbols = listOf("◆", "●", "▲", "★", "☀", "☾", "⚡", "✦", "⬢", "♣", "♥", "♠", "♫", "☂", "✿", "☯", "☕", "∞")
+        val values = symbols.take(rows * columns / 2).flatMap { listOf(it, it) }.shuffled(random)
+        return result(
+            matrix(rows, columns) { _, _ -> GenericCell(meta = mapOf("card" to true)) },
+            matrix(rows, columns) { row, col -> values[row * columns + col] },
+            mapOf(
+                "pairCount" to rows * columns / 2,
+                "instructions" to "Encuentra parejas. La primera carta queda visible y una pareja correcta se conquista.",
+            ),
+        )
+    }
+
+    private fun merge2048(): Blueprint {
+        val cells = MutableList(16) { GenericCell() }
+        listOf(0, 10).forEach { index -> cells[index] = GenericCell(value = 2, isRevealed = true) }
+        val target = when (difficulty) {
+            PuzzleDifficulty.EASY -> 128
+            PuzzleDifficulty.MEDIUM -> 256
+            PuzzleDifficulty.HARD -> 512
+            PuzzleDifficulty.EXPERT -> 1024
+        }
+        return result(
+            cells.chunked(4),
+            matrix(4, 4) { _, _ -> null },
+            mapOf("actionMode" to true, "engine" to "MERGE_2048", "target" to target, "instructions" to "Combina fichas iguales y alcanza $target."),
+        )
+    }
+
+    private fun merge2048Move(rawDirection: Any?): LocalPuzzleMoveResult {
+        val direction = rawDirection?.toString()?.uppercase()
+        if (direction !in setOf("UP", "RIGHT", "DOWN", "LEFT")) return reject("Dirección inválida")
+        val old = board.map { row -> row.map { (it.value as? Number)?.toInt() ?: 0 } }
+        val next = old.map { it.toMutableList() }.toMutableList()
+        var score = 0
+        fun slide(input: List<Int>): List<Int> {
+            val compact = input.filter { it > 0 }
+            val output = mutableListOf<Int>()
+            var index = 0
+            while (index < compact.size) {
+                if (index + 1 < compact.size && compact[index] == compact[index + 1]) {
+                    output += compact[index] * 2
+                    score += compact[index] * 2
+                    index += 2
+                } else {
+                    output += compact[index]
+                    index += 1
+                }
+            }
+            while (output.size < 4) output += 0
+            return output
+        }
+        if (direction == "LEFT" || direction == "RIGHT") {
+            repeat(4) { row ->
+                val source = if (direction == "RIGHT") old[row].reversed() else old[row]
+                next[row] = (if (direction == "RIGHT") slide(source).reversed() else slide(source)).toMutableList()
+            }
+        } else repeat(4) { col ->
+            val source = (0..3).map { old[it][col] }.let { if (direction == "DOWN") it.reversed() else it }
+            val result = slide(source).let { if (direction == "DOWN") it.reversed() else it }
+            repeat(4) { row -> next[row][col] = result[row] }
+        }
+        if (next == old) return reject("Ese deslizamiento no mueve fichas")
+        board = next.mapIndexed { row, values ->
+            values.mapIndexed { col, number ->
+                GenericCell(
+                    value = number.takeIf { it > 0 },
+                    isRevealed = number > 0,
+                    ownerId = OWNER.takeIf { number > 0 && number != old[row][col] },
+                )
+            }
+        }
+        val empty = board.flatMapIndexed { row, cells -> cells.mapIndexedNotNull { col, target -> if (target.value == null) row to col else null } }
+        empty.randomOrNull(random)?.let { (row, col) -> replace(row, col, GenericCell(value = if (random.nextFloat() < .9f) 2 else 4, isRevealed = true)) }
+        return accept(maxOf(2, score))
+    }
+
+    private fun mergeHasNoMoves(): Boolean {
+        if (board.flatten().any { it.value == null }) return false
+        repeat(4) { row -> repeat(4) { col ->
+            val value = board[row][col].value
+            if (board.getOrNull(row + 1)?.get(col)?.value == value ||
+                board[row].getOrNull(col + 1)?.value == value
+            ) return false
+        } }
+        return true
+    }
 
     private fun ticWinner(mark: String): Boolean {
         val lines = listOf(

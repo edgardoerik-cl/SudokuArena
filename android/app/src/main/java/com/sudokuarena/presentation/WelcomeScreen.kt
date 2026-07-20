@@ -465,6 +465,25 @@ private fun GameLoopPreview(game: GameType, modifier: Modifier = Modifier) {
                 drawCircle(accent, 11f, Offset(size.width * .56f, size.height * .38f))
                 drawLine(accent, Offset(size.width * .56f, size.height * .49f), Offset(size.width * .56f, size.height * (.58f + phase * .08f)), 4f)
             }
+            GameType.MEMORY_NEON -> repeat(8) { index ->
+                val col = index % 4
+                val row = index / 4
+                val flipped = ((phase * 8).toInt() + index) % 5 == 0
+                drawRoundRect(
+                    if (flipped) Color(0xFF22D3EE) else Color(0xFF312E81),
+                    Offset(size.width * (.16f + col * .18f), size.height * (.31f + row * .25f)),
+                    Size(size.width * .13f, size.height * .18f),
+                )
+            }
+            GameType.MERGE_2048 -> repeat(4) { index ->
+                val number = listOf("2", "4", "8", "16")[(index + (phase * 4).toInt()) % 4]
+                drawRoundRect(
+                    listOf(Color(0xFF67E8F9), Color(0xFF6366F1), Color(0xFFD946EF), Color(0xFFF59E0B))[index],
+                    Offset(size.width * (.19f + (index % 2) * .32f), size.height * (.22f + (index / 2) * .34f)),
+                    Size(size.width * .25f, size.height * .27f),
+                )
+                drawCircle(Color.White.copy(alpha = .55f), number.length * 2.5f, Offset(size.width * (.315f + (index % 2) * .32f), size.height * (.355f + (index / 2) * .34f)))
+            }
             else -> repeat(9) { index ->
                 val col = index % 3; val row = index / 3
                 drawRoundRect(
@@ -558,6 +577,7 @@ private fun gameGlyph(game: GameType): String = when (game) {
     GameType.CAPITAL_ARENA -> "💰"
     GameType.NEXUS_ZERO -> "±0"
     GameType.CHECKERS -> "⛀"; GameType.DEMOLITION_ARCADE -> "●▰"
+    GameType.MEMORY_NEON -> "◇◆"; GameType.MERGE_2048 -> "2048"
 }
 
 private fun gameMenuName(game: GameType): String = when (game) {
@@ -571,6 +591,7 @@ private fun gameMenuName(game: GameType): String = when (game) {
     GameType.CAPITAL_ARENA -> "Capital Arena"
     GameType.NEXUS_ZERO -> "Nexo Cero"
     GameType.CHECKERS -> "Damas Clásicas"; GameType.DEMOLITION_ARCADE -> "Demolición Arcade"
+    GameType.MEMORY_NEON -> "Memoria Neón"; GameType.MERGE_2048 -> "2048 Arena"
 }
 
 @Composable

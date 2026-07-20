@@ -20,6 +20,8 @@ export const GAME_TYPES = [
     "CAPITAL_ARENA",
     "NEXUS_ZERO",
     "CHECKERS",
-    "DEMOLITION_ARCADE"
+    "DEMOLITION_ARCADE",
+    "MEMORY_NEON",
+    "MERGE_2048"
 ];
 //# sourceMappingURL=types.js.map

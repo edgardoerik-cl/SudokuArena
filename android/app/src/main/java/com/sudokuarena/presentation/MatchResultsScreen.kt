@@ -219,4 +219,6 @@ private fun gameName(gameType: GameType): String = when (gameType) {
     GameType.NEXUS_ZERO -> "Nexo Cero"
     GameType.CHECKERS -> "Damas Clásicas"
     GameType.DEMOLITION_ARCADE -> "Demolición Arcade"
+    GameType.MEMORY_NEON -> "Memoria Neón"
+    GameType.MERGE_2048 -> "2048 Arena"
 }

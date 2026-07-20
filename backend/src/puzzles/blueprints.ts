@@ -27,8 +27,51 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "NEXUS_ZERO": return nexusZero(random, difficulty);
     case "CHECKERS": return checkers(difficulty);
     case "DEMOLITION_ARCADE": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "BREAKOUT_PHYSICS", difficulty } };
+    case "MEMORY_NEON": return memoryNeon(random, difficulty);
+    case "MERGE_2048": return merge2048(random, difficulty);
     case "SUDOKU": return latinPuzzle(random, 9);
   }
+}
+
+/** Carrera de memoria compartida: las respuestas nunca salen en el snapshot. */
+function memoryNeon(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const [rows, columns] = difficulty === "EASY" ? [4, 4]
+    : difficulty === "EXPERT" ? [6, 6] : [4, 6];
+  const pairCount = rows * columns / 2;
+  const symbols = ["◆", "●", "▲", "★", "☀", "☾", "⚡", "✦", "⬢", "♣", "♥", "♠", "♫", "☂", "✿", "☯", "☕", "∞"];
+  const shuffled = random.shuffle(symbols.slice(0, pairCount).flatMap((symbol) => [symbol, symbol]));
+  return {
+    board: matrix(rows, columns, (_row, _col) => cell(null, false, { card: true })),
+    answers: matrix<CellValue>(rows, columns, (row, col) => shuffled[row * columns + col]!),
+    meta: {
+      instructions: "Encuentra parejas. La primera carta queda visible; si aciertas, ambas quedan conquistadas.",
+      pairCount,
+      difficulty,
+    },
+  };
+}
+
+/** 2048 competitivo compartido. El servidor serializa cada deslizamiento. */
+function merge2048(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+  const board = matrix(4, 4, () => cell(null, false));
+  const open = random.shuffle(Array.from({ length: 16 }, (_, index) => index)).slice(0, 2);
+  open.forEach((index) => {
+    board[Math.floor(index / 4)]![index % 4]!.value = random.next() < .9 ? 2 : 4;
+    board[Math.floor(index / 4)]![index % 4]!.isRevealed = true;
+  });
+  const target = difficulty === "EASY" ? 128 : difficulty === "MEDIUM" ? 256
+    : difficulty === "HARD" ? 512 : 1024;
+  return {
+    board,
+    answers: matrix<CellValue>(4, 4, () => null),
+    meta: {
+      actionMode: true,
+      engine: "MERGE_2048",
+      target,
+      instructions: `Combina fichas iguales y alcanza ${target}. Desliza o usa las flechas.`,
+      difficulty,
+    },
+  };
 }
 
 function ticTacToe(difficulty: PuzzleDifficulty): PuzzleBlueprint {

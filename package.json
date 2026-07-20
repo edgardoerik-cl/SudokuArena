@@ -1,8 +1,8 @@
 {
   "name": "multi-arena",
-  "version": "8.2.1",
+  "version": "8.3.0",
   "private": true,
-  "description": "Multi Arena: veintiún juegos competitivos en una sola plataforma",
+  "description": "Multi Arena: veinticuatro juegos competitivos en una sola plataforma",
   "engines": {
     "node": ">=20"
   },

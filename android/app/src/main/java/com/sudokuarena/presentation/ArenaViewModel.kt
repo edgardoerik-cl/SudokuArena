@@ -383,7 +383,7 @@ class ArenaViewModel(
         val current = mutableState.value
         if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
-        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.TETRIS_ARENA, GameType.WORD_SEARCH))) return
+        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(GameType.NURIKABE, GameType.TETRIS_ARENA, GameType.WORD_SEARCH, GameType.MERGE_2048))) return
         submitGenericMove(CellPosition(row, column), value)
         if (current.gameType == GameType.NEXUS_ZERO) {
             mutableState.update { it.copy(selected = null) }

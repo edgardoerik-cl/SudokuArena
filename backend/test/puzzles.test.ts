@@ -385,4 +385,36 @@ describe("motor genérico de puzzles", () => {
     assert.equal(result.accepted, true);
     assert.equal(result.penaltyMs, 0);
   });
+
+  it("Memoria Neon no filtra respuestas y conquista parejas de forma autoritativa", () => {
+    const players = new ArenaGame("memory-players");
+    players.addPlayer("p1", "Memoria");
+    players.startMatch({ gameType: "MEMORY_NEON", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("MEMORY_NEON", "memory-contract", { seed: "memory" });
+    const initial = engine.snapshot(players);
+    assert.ok(initial.board.flat().every((cell) => cell.value === null));
+    const first = engine.createBotMove(1, "p1")!;
+    assert.equal(engine.makeMove("p1", first, players).accepted, true);
+    const second = engine.createBotMove(1, "p1")!;
+    assert.equal(engine.makeMove("p1", second, players).accepted, true);
+    const state = engine.snapshot(players);
+    assert.equal(state.board.flat().filter((cell) => cell.ownerId === "p1").length, 2);
+    assert.equal(state.meta.pairsFound, 1);
+  });
+
+  it("2048 Arena serializa deslizamientos y no penaliza un gesto sin movimiento", () => {
+    const players = new ArenaGame("merge-players");
+    players.addPlayer("p1", "Merge");
+    players.startMatch({ gameType: "MERGE_2048", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("MERGE_2048", "merge-contract", { seed: "merge", difficulty: "EASY" });
+    let accepted = 0;
+    for (let turn = 0; turn < 30 && !engine.snapshot(players).completed; turn += 1) {
+      const move = engine.createBotMove(1, "p1")!;
+      const result = engine.makeMove("p1", move, players, 1_000 + turn);
+      if (result.accepted) accepted += 1;
+      else assert.equal(result.penaltyMs, 0);
+    }
+    assert.ok(accepted > 0);
+    assert.ok(Number(engine.snapshot(players).meta.highestTile ?? 2) >= 4);
+  });
 });
