@@ -457,6 +457,217 @@ private fun HangmanGallows(errors: Float, pulse: Float, modifier: Modifier = Mod
     }
 }
 
+private data class SerpentineRoute(
+    val id: String,
+    val points: List<Offset>,
+    val direction: String,
+    val exitVector: Offset,
+    val thickness: Float,
+    val blockType: String,
+    val memberKeys: List<String>,
+)
+
+private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRoute> {
+    if (state.meta["pathModel"] != "SERPENTINE_V2") return emptyList()
+    return (state.meta["shapes"] as? List<*>)?.mapNotNull { raw ->
+        val route = raw as? Map<*, *> ?: return@mapNotNull null
+        val points = (route["points"] as? List<*>)?.mapNotNull { pointRaw ->
+            val point = pointRaw as? Map<*, *> ?: return@mapNotNull null
+            Offset(
+                (point["x"] as? Number)?.toFloat() ?: return@mapNotNull null,
+                (point["y"] as? Number)?.toFloat() ?: return@mapNotNull null,
+            )
+        }.orEmpty()
+        if (points.size < 2) return@mapNotNull null
+        val vector = route["exitVector"] as? Map<*, *>
+        SerpentineRoute(
+            id = route["id"]?.toString() ?: return@mapNotNull null,
+            points = points,
+            direction = route["direction"]?.toString() ?: "UP",
+            exitVector = Offset(
+                (vector?.get("x") as? Number)?.toFloat() ?: 0f,
+                (vector?.get("y") as? Number)?.toFloat() ?: -1f,
+            ),
+            thickness = (route["thickness"] as? Number)?.toFloat() ?: .014f,
+            blockType = route["blockType"]?.toString() ?: "NORMAL",
+            memberKeys = (route["memberKeys"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty(),
+        )
+    }.orEmpty()
+}
+
+private fun pointToRouteDistance(point: Offset, route: SerpentineRoute): Float =
+    route.points.zipWithNext().minOfOrNull { (start, end) ->
+        val delta = end - start
+        val square = delta.x * delta.x + delta.y * delta.y
+        if (square <= .000001f) (point - start).getDistance() else {
+            val t = (((point - start).x * delta.x + (point - start).y * delta.y) / square).coerceIn(0f, 1f)
+            (point - (start + delta * t)).getDistance()
+        }
+    } ?: Float.MAX_VALUE
+
+private fun canSerpentineEscape(route: SerpentineRoute, routes: List<SerpentineRoute>, removed: Set<String>): Boolean {
+    val head = route.points.last()
+    val vector = route.exitVector
+    val distance = listOfNotNull(
+        if (vector.x > 0) (1.08f - head.x) / vector.x else null,
+        if (vector.x < 0) (-.08f - head.x) / vector.x else null,
+        if (vector.y > 0) (1.08f - head.y) / vector.y else null,
+        if (vector.y < 0) (-.08f - head.y) / vector.y else null,
+    ).filter { it > 0 }.minOrNull() ?: return false
+    return routes.none { obstacle ->
+        obstacle.id != route.id && !obstacle.memberKeys.all(removed::contains) && (1..36).any { step ->
+            val sample = head + vector * (distance * step / 36f)
+            pointToRouteDistance(sample, obstacle) <= route.thickness + obstacle.thickness + .008f
+        }
+    }
+}
+
+private fun routeLength(points: List<Offset>): Float = points.zipWithNext().sumOf { (a, b) ->
+    (b - a).getDistance().toDouble()
+}.toFloat()
+
+private fun routePointAt(route: SerpentineRoute, distance: Float): Offset {
+    var remaining = distance
+    route.points.zipWithNext().forEach { (start, end) ->
+        val length = (end - start).getDistance()
+        if (remaining <= length) return start + (end - start) * (remaining / length.coerceAtLeast(.0001f))
+        remaining -= length
+    }
+    return route.points.last() + route.exitVector * remaining
+}
+
+private fun shiftedRoute(route: SerpentineRoute, progress: Float): List<Offset> {
+    val length = routeLength(route.points)
+    val travel = progress * (length + 1.35f)
+    return (0..24).map { step -> routePointAt(route, travel + length * step / 24f) }
+}
+
+@Composable
+private fun SerpentineArrowsBoard(
+    state: GenericBoardState,
+    players: Map<String, Player>,
+    enabled: Boolean,
+    localPlayerId: String?,
+    onDirectMove: (Int, Int, Any?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val routes = remember(state.meta) { parseSerpentineRoutes(state) }
+    val removed = remember(state.meta, localPlayerId) {
+        ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
+            ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
+    }
+    var previousRemoved by remember(state.gameId, localPlayerId) { mutableStateOf(removed) }
+    var exiting by remember(state.gameId, localPlayerId) { mutableStateOf(emptySet<String>()) }
+    val flight = remember(state.gameId, localPlayerId) { androidx.compose.animation.core.Animatable(1f) }
+    var blockedId by remember(state.gameId) { mutableStateOf<String?>(null) }
+    val bump = remember(state.gameId) { androidx.compose.animation.core.Animatable(0f) }
+    var action by remember(state.gameId) { mutableStateOf("ESCAPE") }
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    LaunchedEffect(removed) {
+        val fresh = removed - previousRemoved
+        previousRemoved = removed
+        if (fresh.isNotEmpty()) {
+            exiting = routes.filter { route -> route.memberKeys.any(fresh::contains) }.map { it.id }.toSet()
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            flight.snapTo(0f)
+            flight.animateTo(1f, tween(720, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+            exiting = emptySet()
+        }
+    }
+    val palette = remember(players) {
+        players.values.map { parseGenericColor(it.colorHex) }.ifEmpty {
+            listOf(Color(0xFF00B8D4), Color(0xFF7C3AED), Color(0xFFFF2D8D), Color(0xFFFF8A00))
+        }
+    }
+    Box(modifier.fillMaxWidth().aspectRatio(1.15f)) {
+        Canvas(
+            Modifier.fillMaxSize()
+                .background(Color(0xFF07152F), RoundedCornerShape(18.dp))
+                .pointerInput(routes, removed, enabled, action) {
+                    detectTapGestures { tap ->
+                        if (!enabled) return@detectTapGestures
+                        val normalized = Offset(tap.x / size.width, tap.y / size.height)
+                        val route = routes.filterNot { it.memberKeys.all(removed::contains) }
+                            .minByOrNull { candidate -> minOf(pointToRouteDistance(normalized, candidate), (normalized - candidate.points.last()).getDistance() * .75f) }
+                            ?.takeIf { candidate -> pointToRouteDistance(normalized, candidate) <= .055f || (normalized - candidate.points.last()).getDistance() <= .075f }
+                            ?: return@detectTapGestures
+                        val member = route.memberKeys.first().split(":").map(String::toInt)
+                        if (action != "ESCAPE" || canSerpentineEscape(route, routes, removed)) {
+                            onDirectMove(member[0], member[1], mapOf("action" to action))
+                            action = "ESCAPE"
+                        } else {
+                            blockedId = route.id
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            scope.launch {
+                                bump.snapTo(0f); bump.animateTo(1f, tween(360)); blockedId = null
+                            }
+                        }
+                    }
+                },
+        ) {
+            val gridColor = Color(0xFF38BDF8).copy(alpha = .08f)
+            repeat(12) { index ->
+                val x = size.width * index / 12f; val y = size.height * index / 12f
+                drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), 1f)
+                drawLine(gridColor, Offset(0f, y), Offset(size.width, y), 1f)
+            }
+            routes.forEachIndexed { index, route ->
+                val isRemoved = route.memberKeys.all(removed::contains)
+                val isExiting = route.id in exiting
+                if (isRemoved && !isExiting) return@forEachIndexed
+                val normalizedPoints = if (isExiting) shiftedRoute(route, flight.value) else route.points
+                val wiggle = if (blockedId == route.id) sin(bump.value * Math.PI.toFloat() * 8f) * .014f else 0f
+                val points = normalizedPoints.map { point -> Offset((point.x + wiggle) * size.width, point.y * size.height) }
+                if (points.size < 2) return@forEachIndexed
+                val path = Path().apply {
+                    moveTo(points.first().x, points.first().y)
+                    for (pointIndex in 1 until points.lastIndex) {
+                        val bend = points[pointIndex]
+                        val next = points[pointIndex + 1]
+                        val midpoint = (bend + next) * .5f
+                        quadraticTo(bend.x, bend.y, midpoint.x, midpoint.y)
+                    }
+                    lineTo(points.last().x, points.last().y)
+                }
+                val color = palette[index % palette.size]
+                val alpha = if (isExiting) 1f - flight.value * .75f else 1f
+                val stroke = maxOf(7f, route.thickness * size.minDimension)
+                drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
+                drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))
+                drawPath(path, Color.White.copy(alpha = .58f * alpha), style = Stroke(maxOf(1.5f, stroke * .18f)))
+                val head = points.last(); val before = points[points.lastIndex - 1]
+                val tangent = (head - before).let { delta -> delta / delta.getDistance().coerceAtLeast(.001f) }
+                val side = Offset(-tangent.y, tangent.x)
+                val headLength = stroke * 2.2f
+                val arrowHead = Path().apply {
+                    moveTo(head.x, head.y)
+                    lineTo(head.x - tangent.x * headLength + side.x * headLength * .62f, head.y - tangent.y * headLength + side.y * headLength * .62f)
+                    lineTo(head.x - tangent.x * headLength - side.x * headLength * .62f, head.y - tangent.y * headLength - side.y * headLength * .62f)
+                    close()
+                }
+                drawPath(arrowHead, color.copy(alpha = alpha))
+                if (route.blockType == "BOMB") drawCircle(Color(0xFFFFD600), stroke * .8f, points.first())
+            }
+        }
+        val rotateUsed = ((state.meta["rotateUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
+        val missileUsed = ((state.meta["missileUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(8.dp).zIndex(4f),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                { action = "ROTATE" }, enabled = enabled && rotateUsed < 2,
+                colors = ButtonDefaults.buttonColors(containerColor = if (action == "ROTATE") Color(0xFFFF2D8D) else Color(0xFF6D28D9)),
+            ) { Text("↻ Girar ${2 - rotateUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
+            Button(
+                { action = "MISSILE" }, enabled = enabled && missileUsed < 1,
+                colors = ButtonDefaults.buttonColors(containerColor = if (action == "MISSILE") Color(0xFFFF6D00) else Color(0xFF075985)),
+            ) { Text("➤ Misil ${1 - missileUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
+        }
+    }
+}
+
 @Composable
 private fun AnimatedArrowsGrid(
     state: GenericBoardState,
@@ -466,6 +677,11 @@ private fun AnimatedArrowsGrid(
     onDirectMove: (Int, Int, Any?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val serpentineRoutes = remember(state.meta) { parseSerpentineRoutes(state) }
+    if (serpentineRoutes.isNotEmpty()) {
+        SerpentineArrowsBoard(state, players, enabled, localPlayerId, onDirectMove, modifier)
+        return
+    }
     val textMeasurer = rememberTextMeasurer()
     val spatialShapes = remember(state.meta) { parseSpatialArrowShapes(state) }
     if (spatialShapes.isEmpty()) {
@@ -1389,6 +1605,7 @@ fun GenericPuzzleGrid(
                     GameType.TIC_TAC_TOE -> onDirectMove(row, col, "MARK")
                     GameType.HITORI -> onDirectMove(row, col, "BLOCK")
                     GameType.MEMORY_NEON -> onDirectMove(row, col, "FLIP")
+                    GameType.REACTOR_CHAIN -> onDirectMove(row, col, "CHAIN")
                     GameType.NURIKABE -> {
                         val next = when (state.board[row][col].value?.toString()) {
                             "RIVER" -> "ISLAND"

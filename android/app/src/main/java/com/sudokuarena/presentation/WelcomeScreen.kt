@@ -448,10 +448,17 @@ private fun GameLoopPreview(game: GameType, active: Boolean = true, modifier: Mo
         drawCircle(accent.copy(alpha = .12f), size.minDimension * .47f, center)
         when (game) {
             GameType.ARROWS_ESCAPE -> {
-                val x = size.width * (.25f + phase * .5f)
-                drawLine(accent, Offset(x - 15f, center.y), Offset(x + 15f, center.y), 6f)
-                drawLine(accent, Offset(x + 15f, center.y), Offset(x + 5f, center.y - 9f), 5f)
-                drawLine(accent, Offset(x + 15f, center.y), Offset(x + 5f, center.y + 9f), 5f)
+                val travel = phase * size.width * .22f
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(size.width * .2f + travel, size.height * .72f)
+                    quadraticTo(size.width * .46f + travel, size.height * .72f, size.width * .46f + travel, size.height * .48f)
+                    quadraticTo(size.width * .46f + travel, size.height * .25f, size.width * .74f + travel, size.height * .25f)
+                }
+                drawPath(path, accent.copy(alpha = .2f), style = androidx.compose.ui.graphics.drawscope.Stroke(14f))
+                drawPath(path, accent, style = androidx.compose.ui.graphics.drawscope.Stroke(5f))
+                val head = Offset(size.width * .74f + travel, size.height * .25f)
+                drawLine(accent, head, head - Offset(10f, 8f), 5f)
+                drawLine(accent, head, head - Offset(10f, -8f), 5f)
             }
             GameType.PACMAN_ARENA -> {
                 val x = size.width * (.2f + phase * .6f)

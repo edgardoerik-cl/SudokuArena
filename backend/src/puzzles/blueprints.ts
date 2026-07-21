@@ -483,77 +483,106 @@ function hangman(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlue
 }
 
 function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
-  const count = sizeFor(difficulty, 14, 20, 26, 32);
+  const count = sizeFor(difficulty, 12, 16, 20, 24);
   const board = matrix(1, count, () => cell(null, true));
   const answers = matrix<CellValue>(1, count, () => null);
-  const shapes: Array<{
-    id: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    offsets: Array<{ x: number; y: number }>;
-    direction: string;
-    pathType: string;
-    z: number;
-    depth: number;
-    blockType: string;
-    memberKeys: string[];
-  }> = [];
-  const templates = [
-    [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
-    [{ x: 0, y: 0 }, { x: 1, y: 0 }],
-    [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
-    [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }],
-    [{ x: 0, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }],
-    [{ x: 0, y: 0 }],
+  type Point = { x: number; y: number };
+  type Route = {
+    id: string; points: Point[]; direction: string; exitVector: Point;
+    thickness: number; blockType: string; memberKeys: string[]; removalOrder: number;
+  };
+  const shapes: Route[] = [];
+  const directions = [
+    { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
+    { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
   ];
+  const pointToSegment = (point: Point, start: Point, end: Point): number => {
+    const dx = end.x - start.x; const dy = end.y - start.y;
+    const square = dx * dx + dy * dy;
+    if (square === 0) return Math.hypot(point.x - start.x, point.y - start.y);
+    const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / square));
+    return Math.hypot(point.x - start.x - t * dx, point.y - start.y - t * dy);
+  };
+  const segments = (points: Point[]) => points.slice(1).map((point, index) => [points[index]!, point] as const);
+  const pathsTouch = (a: Point[], b: Point[], clearance = .025): boolean =>
+    segments(a).some(([a0, a1]) => segments(b).some(([b0, b1]) => {
+      for (let step = 0; step <= 8; step += 1) {
+        const t = step / 8;
+        if (pointToSegment({ x: a0.x + (a1.x - a0.x) * t, y: a0.y + (a1.y - a0.y) * t }, b0, b1) < clearance) return true;
+        if (pointToSegment({ x: b0.x + (b1.x - b0.x) * t, y: b0.y + (b1.y - b0.y) * t }, a0, a1) < clearance) return true;
+      }
+      return false;
+    }));
+  const rayToBorder = (points: Point[], vector: Point): Point[] => {
+    const head = points[points.length - 1]!;
+    const candidates = [
+      vector.x > 0 ? (1.08 - head.x) / vector.x : Number.POSITIVE_INFINITY,
+      vector.x < 0 ? (-.08 - head.x) / vector.x : Number.POSITIVE_INFINITY,
+      vector.y > 0 ? (1.08 - head.y) / vector.y : Number.POSITIVE_INFINITY,
+      vector.y < 0 ? (-.08 - head.y) / vector.y : Number.POSITIVE_INFINITY,
+    ].filter((value) => value > 0);
+    const distance = Math.min(...candidates);
+    return [head, { x: head.x + vector.x * distance, y: head.y + vector.y * distance }];
+  };
   for (let index = 0; index < count; index += 1) {
-    // Parametrización de corazón: las piezas flotan formando una silueta,
-    // pero sus coordenadas siguen siendo libres y no celdas visuales.
-    const angle = (index / count) * Math.PI * 2;
-    const heartX = 16 * Math.sin(angle) ** 3;
-    const heartY = 13 * Math.cos(angle) - 5 * Math.cos(2 * angle) - 2 * Math.cos(3 * angle) - Math.cos(4 * angle);
-    const offsets = random.pick(templates);
-    // Mantener separación inicial evita tableros geométricamente bloqueados.
-    // Las formas siguen siendo legibles porque el cliente amplía su trazo.
-    const unit = .010 + random.next() * .003;
-    const width = (Math.max(...offsets.map((point) => point.x)) + 1) * unit;
-    const height = (Math.max(...offsets.map((point) => point.y)) + 1) * unit;
-    const x = .5 + heartX / 44 + (random.next() - .5) * .025 - width / 2;
-    const y = .48 - heartY / 46 + (random.next() - .5) * .025 - height / 2;
-    const centerX = x + width / 2;
-    const centerY = y + height / 2;
-    const z = .18 + random.next() * .64;
-    const depth = Math.max(width, height) * (1.1 + random.next() * 1.8);
-    const distances = [
-      { axis: Math.abs(centerX - .5), direction: centerX < .5 ? "LEFT" : "RIGHT" },
-      { axis: Math.abs(centerY - .5), direction: centerY < .5 ? "UP" : "DOWN" },
-      { axis: Math.abs(z - .5), direction: z < .5 ? "FRONT" : "BACK" },
-    ];
-    const direction = distances.sort((a, b) => b.axis - a.axis)[0]!.direction;
-    const id = `shape-${index}`;
-    const pathType = difficulty === "EXPERT" && index % 5 === 0
-      ? (index % 2 === 0 ? "CURVE_LEFT" : "CURVE_RIGHT")
-      : "STRAIGHT";
-    const blockType = index % 13 === 0 ? "TIMER" : index % 11 === 0 ? "BOMB" : index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL";
-    shapes.push({ id, x, y, z, width, height, depth, offsets, direction, pathType, blockType, memberKeys: [`0:${index}`] });
-    board[0]![index] = cell(direction, true, {
-      arrow: direction,
-      shapeId: id,
+    let route: Route | null = null;
+    for (let attempt = 0; attempt < 350 && route === null; attempt += 1) {
+      const exit = random.pick(directions);
+      const grid = 20;
+      const head: Point = { x: random.int(3, grid - 3) / grid, y: random.int(3, grid - 3) / grid };
+      const points: Point[] = [head];
+      let cursor = head;
+      let backwards = { x: -exit.x, y: -exit.y };
+      const bends = random.int(2, sizeFor(difficulty, 3, 4, 5, 6));
+      for (let segment = 0; segment < bends; segment += 1) {
+        const length = random.int(2, 5) / grid;
+        cursor = { x: cursor.x + backwards.x * length, y: cursor.y + backwards.y * length };
+        points.unshift(cursor);
+        const turn = random.next() < .5 ? -1 : 1;
+        backwards = { x: -backwards.y * turn, y: backwards.x * turn };
+      }
+      if (points.some((point) => point.x < .055 || point.x > .945 || point.y < .055 || point.y > .945)) continue;
+      if (shapes.some((existing) => pathsTouch(points, existing.points))) continue;
+      if (shapes.some((existing) => pathsTouch(rayToBorder(points, exit), existing.points, .04))) continue;
+      route = {
+        id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .014,
+        blockType: index > 0 && index % 11 === 0 ? "BOMB" : index > 0 && index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL",
+        memberKeys: [`0:${index}`], removalOrder: index,
+      };
+    }
+    if (route === null) {
+      // Los fallbacks viven en un corredor perimetral reservado. Su cabeza ya
+      // mira hacia afuera, por lo que nunca crea un estado sin movimientos.
+      const side = index % 4; const slot = Math.floor(index / 4);
+      const axis = .12 + (slot % 6) * .145;
+      const fallback = side === 0
+        ? { points: [{ x: axis + .035, y: .075 }, { x: axis, y: .075 }, { x: axis, y: .025 }], direction: "UP", exitVector: { x: 0, y: -1 } }
+        : side === 1
+          ? { points: [{ x: .925, y: axis + .035 }, { x: .925, y: axis }, { x: .975, y: axis }], direction: "RIGHT", exitVector: { x: 1, y: 0 } }
+          : side === 2
+            ? { points: [{ x: axis - .035, y: .925 }, { x: axis, y: .925 }, { x: axis, y: .975 }], direction: "DOWN", exitVector: { x: 0, y: 1 } }
+            : { points: [{ x: .075, y: axis - .035 }, { x: .075, y: axis }, { x: .025, y: axis }], direction: "LEFT", exitVector: { x: -1, y: 0 } };
+      route = {
+        id: `route-${index}`, ...fallback, thickness: .012,
+        blockType: "NORMAL", memberKeys: [`0:${index}`], removalOrder: index,
+      };
+    }
+    shapes.push(route);
+    board[0]![index] = cell(route.direction, true, {
+      arrow: route.direction,
+      shapeId: route.id,
       shapeAnchor: true,
-      pathType,
-      blockType,
-      timerSeconds: blockType === "TIMER" ? Math.max(6, 13 - Math.floor(index / 13)) : null,
-      z,
+      pathType: "SERPENTINE",
+      blockType: route.blockType,
     });
-    answers[0]![index] = direction;
+    answers[0]![index] = route.direction;
   }
   return {
     board,
     answers,
     meta: {
       freeSpace: true,
+      pathModel: "SERPENTINE_V2",
       worldWidth: 1,
       worldHeight: 1,
       totalBlocks: count,
@@ -562,7 +591,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       rotatePowerUses: 2,
       missilePowerUses: 1,
       shapes,
-      instructions: "Orbita la figura 3D y toca un bloque. Debe escapar por X, Y o profundidad Z sin atravesar otro volumen.",
+      instructions: "Toca una ruta o su punta. La flecha solo escapa si el rayo de su cabeza llega al borde sin cruzar otra ruta.",
       difficulty,
     },
   };

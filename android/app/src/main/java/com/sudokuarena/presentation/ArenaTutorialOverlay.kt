@@ -180,9 +180,9 @@ private fun gameTutorialSteps(gameType: GameType): List<TutorialStep> = when (ga
         TutorialStep("✨", "Tres ayudas", "Revelación descubre una letra, Descarte elimina tres letras falsas y Último Aliento evita una derrota fatal una sola vez."),
     )
     GameType.ARROWS_ESCAPE -> listOf(
-        TutorialStep("◫", "Explora la figura 3D", "Arrastra para orbitar la cámara y pellizca para acercar o alejar. Un toque corto selecciona el bloque bajo el dedo."),
-        TutorialStep("➜", "Busca una salida", "El bloque vuela solo si toda su trayectoria está libre. Si choca, rebota, parpadea y consume un intento fallido."),
-        TutorialStep("↻ 🚀", "Cambia el puzzle", "Rotar gira una flecha bloqueada 90°. El misil atraviesa obstáculos. Las bombas liberadas eliminan dos bloques cercanos."),
+        TutorialStep("〰➜", "Lee cada camino", "Cada flecha es una ruta serpenteante. Puedes tocar su punta o cualquier parte de la línea brillante."),
+        TutorialStep("➜", "Comprueba la salida", "Prolonga mentalmente la dirección de la punta hasta el borde. Si cruza otra ruta, la flecha rebota; si está libre, recorre su camino y escapa."),
+        TutorialStep("↻ 🚀", "Desbloquea el laberinto", "Girar cambia la salida de una ruta bloqueada. El misil la libera atravesando obstáculos y las rutas bomba despejan vecinas."),
     )
     GameType.PACMAN_ARENA -> listOf(
         TutorialStep("↕", "Programa el próximo giro", "Desliza en cualquier zona del laberinto. La dirección queda en memoria y Pac-Man gira automáticamente al llegar a una intersección válida."),

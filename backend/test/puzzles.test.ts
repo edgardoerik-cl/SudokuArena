@@ -307,13 +307,30 @@ describe("motor genérico de puzzles", () => {
     assert.equal((state.meta.discardedByPlayer as Record<string, string[]>).p1.length, 3);
   });
 
-  it("Flechas modela formas padre con offsets y colisión conjunta", () => {
+  it("Flechas modela rutas serpenteantes con salida vectorial y solución", () => {
     const blueprint = createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "complex-shapes", difficulty: "EXPERT" });
-    const shapes = blueprint.meta.shapes as Array<{ id: string; offsets: Array<{ x: number; y: number }>; direction: string }>;
-    assert.ok(shapes.some((shape) => shape.offsets.length >= 3));
-    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "FRONT", "BACK"].includes(shape.direction)));
-    assert.ok(shapes.every((shape: any) => typeof shape.z === "number" && typeof shape.depth === "number"));
+    const shapes = blueprint.meta.shapes as Array<{
+      id: string; points: Array<{ x: number; y: number }>; direction: string;
+      exitVector: { x: number; y: number }; thickness: number; removalOrder: number;
+    }>;
+    assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
+    assert.ok(shapes.every((shape) => shape.points.length >= 2));
+    assert.ok(shapes.some((shape) => shape.points.length >= 4));
+    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
+    assert.ok(shapes.every((shape) => Math.abs(shape.exitVector.x) + Math.abs(shape.exitVector.y) === 1));
+    assert.ok(shapes.every((shape) => shape.thickness > 0));
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
+  });
+
+  it("Reactor Chain acepta el toque directo de un grupo conectado", () => {
+    const players = new ArenaGame("reactor-touch");
+    players.addPlayer("p1", "Cadena");
+    players.startMatch({ gameType: "REACTOR_CHAIN", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "EASY" }, "p1");
+    const engine = new GenericPuzzleEngine("REACTOR_CHAIN", "reactor-touch", { seed: "guaranteed-chain", difficulty: "EASY" });
+    const before = Number(engine.snapshot(players).meta.removed ?? 0);
+    const result = engine.makeMove("p1", { requestId: "chain-tap", row: 0, col: 0, val: "CHAIN" }, players);
+    assert.equal(result.accepted, true);
+    assert.ok(Number(engine.snapshot(players).meta.removed) >= before + 3);
   });
 
   it("Chess Tactics configura las seis clases, cooldowns y rangos clásicos", () => {

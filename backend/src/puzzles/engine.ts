@@ -691,10 +691,12 @@ export class GenericPuzzleEngine {
         const shape = (this.meta.shapes as Array<Record<string, unknown>>).find((candidate) => candidate.id === shapeId);
         if (!shape) return { correct: false, neutral: true };
         const next = ({
-          UP: "RIGHT", RIGHT: "DOWN", DOWN: "LEFT", LEFT: "FRONT",
-          FRONT: "BACK", BACK: "UP",
+          UP: "RIGHT", RIGHT: "DOWN", DOWN: "LEFT", LEFT: "UP",
         } as Record<string, string>)[String(shape.direction)] ?? "UP";
         shape.direction = next;
+        shape.exitVector = next === "UP" ? { x: 0, y: -1 }
+          : next === "RIGHT" ? { x: 1, y: 0 }
+            : next === "DOWN" ? { x: 0, y: 1 } : { x: -1, y: 0 };
         members.forEach(({ cell: member }) => { member.value = next; member.meta.arrow = next; });
         this.arrowRotateUses.set(playerId, used + 1);
         return { correct: true, points: 0 };
@@ -734,14 +736,19 @@ export class GenericPuzzleEngine {
       }
       members.forEach(({ row, col }) => removed.add(`${row}:${col}`));
       if (shape?.blockType === "BOMB") {
-        const sourceX = Number(shape.x ?? 0); const sourceY = Number(shape.y ?? 0);
+        const sourcePoints = shape.points as Array<{ x: number; y: number }> | undefined;
+        const sourceHead = sourcePoints?.[sourcePoints.length - 1];
+        const sourceX = Number(sourceHead?.x ?? shape.x ?? 0); const sourceY = Number(sourceHead?.y ?? shape.y ?? 0);
         const candidates = (this.meta.shapes as Array<Record<string, unknown>>)
           .filter((candidate) => candidate.id !== shapeId)
           .filter((candidate) => !(candidate.memberKeys as string[]).every((key) => removed.has(key)))
-          .sort((a, b) =>
-            Math.hypot(Number(a.x ?? 0) - sourceX, Number(a.y ?? 0) - sourceY)
-            - Math.hypot(Number(b.x ?? 0) - sourceX, Number(b.y ?? 0) - sourceY)
-          )
+          .sort((a, b) => {
+            const aPoints = a.points as Array<{ x: number; y: number }> | undefined;
+            const bPoints = b.points as Array<{ x: number; y: number }> | undefined;
+            const aHead = aPoints?.[aPoints.length - 1]; const bHead = bPoints?.[bPoints.length - 1];
+            return Math.hypot(Number(aHead?.x ?? a.x ?? 0) - sourceX, Number(aHead?.y ?? a.y ?? 0) - sourceY)
+              - Math.hypot(Number(bHead?.x ?? b.x ?? 0) - sourceX, Number(bHead?.y ?? b.y ?? 0) - sourceY);
+          })
           .slice(0, 2);
         candidates.forEach((candidate) => (candidate.memberKeys as string[]).forEach((key) => removed.add(key)));
       }
@@ -1583,6 +1590,49 @@ export class GenericPuzzleEngine {
   }
 
   private canArrowShapeEscape(shapeId: string, removed: Set<string>, directionOverride?: string): boolean {
+    if (this.meta.pathModel === "SERPENTINE_V2") {
+      type Point = { x: number; y: number };
+      type Route = { id: string; points: Point[]; direction: string; exitVector: Point; thickness: number; memberKeys: string[] };
+      const routes = this.meta.shapes as Route[];
+      const route = routes.find((candidate) => candidate.id === shapeId);
+      if (!route || route.points.length < 2) return false;
+      const vector = directionOverride
+        ? directionOverride === "UP" ? { x: 0, y: -1 }
+          : directionOverride === "RIGHT" ? { x: 1, y: 0 }
+            : directionOverride === "DOWN" ? { x: 0, y: 1 } : { x: -1, y: 0 }
+        : route.exitVector;
+      const head = route.points[route.points.length - 1]!;
+      const candidates = [
+        vector.x > 0 ? (1.08 - head.x) / vector.x : Number.POSITIVE_INFINITY,
+        vector.x < 0 ? (-.08 - head.x) / vector.x : Number.POSITIVE_INFINITY,
+        vector.y > 0 ? (1.08 - head.y) / vector.y : Number.POSITIVE_INFINITY,
+        vector.y < 0 ? (-.08 - head.y) / vector.y : Number.POSITIVE_INFINITY,
+      ].filter((value) => value > 0);
+      const distance = Math.min(...candidates);
+      const rayEnd = { x: head.x + vector.x * distance, y: head.y + vector.y * distance };
+      const pointToSegment = (point: Point, start: Point, end: Point): number => {
+        const dx = end.x - start.x; const dy = end.y - start.y; const square = dx * dx + dy * dy;
+        if (square === 0) return Math.hypot(point.x - start.x, point.y - start.y);
+        const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / square));
+        return Math.hypot(point.x - start.x - t * dx, point.y - start.y - t * dy);
+      };
+      const rayBlockedBy = (obstacle: Route): boolean => {
+        for (let index = 1; index < obstacle.points.length; index += 1) {
+          const start = obstacle.points[index - 1]!; const end = obstacle.points[index]!;
+          for (let step = 1; step <= 32; step += 1) {
+            const t = step / 32;
+            const point = { x: head.x + (rayEnd.x - head.x) * t, y: head.y + (rayEnd.y - head.y) * t };
+            if (pointToSegment(point, start, end) <= route.thickness + obstacle.thickness + .008) return true;
+          }
+        }
+        return false;
+      };
+      return !routes.some((obstacle) =>
+        obstacle.id !== route.id
+        && !obstacle.memberKeys.every((key) => removed.has(key))
+        && rayBlockedBy(obstacle)
+      );
+    }
     if (this.meta.freeSpace === true) {
       type SpatialShape = {
         id: string; x: number; y: number; z: number; width: number; height: number; depth: number;

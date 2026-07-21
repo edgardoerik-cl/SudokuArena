@@ -116,6 +116,10 @@ class LocalPuzzleEngine(
             if (gameType == GameType.ARROWS_ESCAPE) mapOf(
                 "rotateUses" to mapOf(OWNER to arrowRotateUses),
                 "missileUses" to mapOf(OWNER to arrowMissileUses),
+                "removedByPlayer" to mapOf(OWNER to board.firstOrNull().orEmpty().mapIndexedNotNull { index, cell ->
+                    if (cell.ownerId == OWNER) "0:$index" else null
+                }),
+                "progress" to mapOf(OWNER to board.firstOrNull().orEmpty().count { it.ownerId == OWNER }),
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.NURIKABE) mapOf(
                 "sonarUses" to mapOf(OWNER to nurikabeSonarUses),
@@ -282,17 +286,7 @@ class LocalPuzzleEngine(
                 replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
                 return accept(15)
             }
-            val direction = cell.value?.toString() ?: return reject("Flecha inválida")
-            val (dy, dx) = when (direction) {
-                "UP" -> -1 to 0; "RIGHT" -> 0 to 1; "DOWN" -> 1 to 0; else -> 0 to -1
-            }
-            var y = row + dy
-            var x = col + dx
-            while (board.getOrNull(y)?.getOrNull(x) != null) {
-                if (board[y][x].ownerId == null) return reject("La trayectoria está bloqueada")
-                y += dy
-                x += dx
-            }
+            if (!localArrowCanEscape(col)) return reject("La punta todavía está bloqueada por otra ruta")
             replace(row, col, cell.copy(ownerId = OWNER, isRevealed = true))
             return accept(10)
         }
@@ -686,16 +680,92 @@ class LocalPuzzleEngine(
         )
     }
 
+    private fun localArrowCanEscape(index: Int): Boolean {
+        val shapes = blueprint.meta["shapes"] as? List<*> ?: return false
+        val route = shapes.getOrNull(index) as? Map<*, *> ?: return false
+        fun pointsOf(raw: Map<*, *>): List<Pair<Float, Float>> = (raw["points"] as? List<*>)?.mapNotNull { item ->
+            val point = item as? Map<*, *> ?: return@mapNotNull null
+            ((point["x"] as? Number)?.toFloat() ?: return@mapNotNull null) to
+                ((point["y"] as? Number)?.toFloat() ?: return@mapNotNull null)
+        }.orEmpty()
+        val points = pointsOf(route)
+        val head = points.lastOrNull() ?: return false
+        val direction = board.firstOrNull()?.getOrNull(index)?.value?.toString() ?: route["direction"]?.toString()
+        val vector = when (direction) {
+            "UP" -> 0f to -1f; "RIGHT" -> 1f to 0f; "DOWN" -> 0f to 1f; else -> -1f to 0f
+        }
+        val distance = listOfNotNull(
+            if (vector.first > 0) (1.08f - head.first) / vector.first else null,
+            if (vector.first < 0) (-.08f - head.first) / vector.first else null,
+            if (vector.second > 0) (1.08f - head.second) / vector.second else null,
+            if (vector.second < 0) (-.08f - head.second) / vector.second else null,
+        ).filter { it > 0 }.minOrNull() ?: return false
+        fun pointSegmentDistance(point: Pair<Float, Float>, start: Pair<Float, Float>, end: Pair<Float, Float>): Float {
+            val dx = end.first - start.first; val dy = end.second - start.second
+            val square = dx * dx + dy * dy
+            if (square == 0f) return kotlin.math.hypot(point.first - start.first, point.second - start.second)
+            val t = (((point.first - start.first) * dx + (point.second - start.second) * dy) / square).coerceIn(0f, 1f)
+            return kotlin.math.hypot(point.first - start.first - t * dx, point.second - start.second - t * dy)
+        }
+        return shapes.indices.none { obstacleIndex ->
+            if (obstacleIndex == index || board.first()[obstacleIndex].ownerId == OWNER) return@none false
+            val obstacle = shapes[obstacleIndex] as? Map<*, *> ?: return@none false
+            val obstaclePoints = pointsOf(obstacle)
+            val clearance = ((route["thickness"] as? Number)?.toFloat() ?: .014f) +
+                ((obstacle["thickness"] as? Number)?.toFloat() ?: .014f) + .008f
+            obstaclePoints.zipWithNext().any { (start, end) ->
+                (1..32).any { step ->
+                    val t = step / 32f
+                    val sample = (head.first + vector.first * distance * t) to (head.second + vector.second * distance * t)
+                    pointSegmentDistance(sample, start, end) <= clearance
+                }
+            }
+        }
+    }
+
     private fun arrowsEscape(): Blueprint {
-        val size = size(5, 6, 7, 8)
-        val values = matrix<Any?>(size, size) { row, col ->
-            val distances = listOf(row to "UP", size - 1 - col to "RIGHT", size - 1 - row to "DOWN", col to "LEFT")
-            distances.minBy { it.first }.second
+        val count = size(12, 16, 20, 24)
+        val columns = 4
+        val shapes = (0 until count).map { index ->
+            val column = index % columns
+            val layer = index / columns
+            val fromTop = column % 2 == 0
+            val centerX = (column + .5f) / columns
+            val baseY = if (fromTop) .12f + layer * .135f else .88f - layer * .135f
+            val direction = if (fromTop) "UP" else "DOWN"
+            val points = if (fromTop) listOf(
+                mapOf("x" to centerX - .055f, "y" to baseY + .09f),
+                mapOf("x" to centerX + .045f, "y" to baseY + .09f),
+                mapOf("x" to centerX + .045f, "y" to baseY + .035f),
+                mapOf("x" to centerX, "y" to baseY),
+            ) else listOf(
+                mapOf("x" to centerX + .055f, "y" to baseY - .09f),
+                mapOf("x" to centerX - .045f, "y" to baseY - .09f),
+                mapOf("x" to centerX - .045f, "y" to baseY - .035f),
+                mapOf("x" to centerX, "y" to baseY),
+            )
+            mapOf(
+                "id" to "route-$index", "points" to points, "direction" to direction,
+                "exitVector" to mapOf("x" to 0, "y" to if (fromTop) -1 else 1),
+                "thickness" to .014f, "blockType" to if (index > 0 && index % 7 == 0) "BOMB" else "NORMAL",
+                "memberKeys" to listOf("0:$index"), "removalOrder" to index,
+            )
         }
         return result(
-            values.map { row -> row.map { value -> GenericCell(value = value, isRevealed = true, meta = mapOf("arrow" to value)) } },
-            values,
-            mapOf("totalBlocks" to size * size),
+            listOf(shapes.mapIndexed { index, shape ->
+                val direction = shape["direction"]
+                GenericCell(direction, true, meta = mapOf(
+                    "arrow" to direction, "shapeId" to "route-$index", "shapeAnchor" to true,
+                    "pathType" to "SERPENTINE", "blockType" to shape["blockType"],
+                ))
+            }),
+            listOf(shapes.map { it["direction"] }),
+            mapOf(
+                "freeSpace" to true, "pathModel" to "SERPENTINE_V2", "worldWidth" to 1, "worldHeight" to 1,
+                "totalBlocks" to count, "totalShapes" to count, "rotatePowerUses" to 2, "missilePowerUses" to 1,
+                "shapes" to shapes,
+                "instructions" to "Toca una ruta o su punta cuando el trayecto de salida hasta el borde esté libre.",
+            ),
         )
     }
 

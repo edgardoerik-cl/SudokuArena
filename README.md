@@ -3,6 +3,10 @@
 Prototipo de referencia con servidor autoritativo en Node.js/Socket.IO y cliente
 Android nativo en Kotlin/Jetpack Compose.
 
+La versión `8.8.0` reconstruye Flechas en Fuga como un laberinto de rutas
+serpenteantes basado en vectores, con validación autoritativa segmento-rayo,
+renderizado Canvas/Path, toque sobre toda la trayectoria y extracción animada.
+También corrige el envío táctil de grupos en Reactor Chain.
 La versión `8.5.0` corrige Ahorcado, peones de Chess y el layout de Capital;
 añade Hold/Bomba y bolsa completa a Tetris, Pac-Man con inicio bajo demanda,
 fantasmas al 75% y jaula de diez segundos, Drops de Demolición, combos y
@@ -83,7 +87,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.7.0.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.8.0.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor
