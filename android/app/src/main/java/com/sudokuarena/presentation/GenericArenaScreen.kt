@@ -469,6 +469,8 @@ private data class SerpentineRoute(
     val blockType: String,
     val arrowType: String,
     val memberKeys: List<String>,
+    val gridX: Int?,
+    val gridY: Int?,
 )
 
 private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRoute> {
@@ -496,6 +498,8 @@ private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRout
             blockType = route["blockType"]?.toString() ?: "NORMAL",
             arrowType = route["arrowType"]?.toString() ?: "STRAIGHT",
             memberKeys = (route["memberKeys"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty(),
+            gridX = (route["gridX"] as? Number)?.toInt(),
+            gridY = (route["gridY"] as? Number)?.toInt(),
         )
     }.orEmpty()
 }
@@ -525,6 +529,25 @@ private fun canSerpentineEscape(route: SerpentineRoute, routes: List<SerpentineR
             pointToRouteDistance(sample, obstacle) <= route.thickness + obstacle.thickness + .008f
         }
     }
+}
+
+private fun canGridArrowEscape(route: SerpentineRoute, routes: List<SerpentineRoute>, removed: Set<String>): Boolean {
+    val x = route.gridX ?: return false
+    val y = route.gridY ?: return false
+    val stepX = route.exitVector.x.toInt()
+    val stepY = route.exitVector.y.toInt()
+    val occupied = routes.asSequence()
+        .filter { it.id != route.id && !it.memberKeys.all(removed::contains) }
+        .mapNotNull { candidate -> candidate.gridX?.let { gx -> candidate.gridY?.let { gy -> gx to gy } } }
+        .toHashSet()
+    var cursorX = x + stepX
+    var cursorY = y + stepY
+    while (cursorX in 0 until 100 && cursorY in 0 until 100) {
+        if ((cursorX to cursorY) in occupied) return false
+        cursorX += stepX
+        cursorY += stepY
+    }
+    return true
 }
 
 private fun routeLength(points: List<Offset>): Float = points.zipWithNext().sumOf { (a, b) ->
@@ -557,6 +580,7 @@ private fun SerpentineArrowsBoard(
     modifier: Modifier = Modifier,
 ) {
     val routes = remember(state.meta) { parseSerpentineRoutes(state) }
+    val gridBased = state.meta["gridBased"] == true
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
             ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
@@ -612,7 +636,9 @@ private fun SerpentineArrowsBoard(
                             ?.takeIf { candidate -> pointToRouteDistance(normalized, candidate) <= .055f || (normalized - candidate.points.last()).getDistance() <= .075f }
                             ?: return@detectTapGestures
                         val member = route.memberKeys.first().split(":").map(String::toInt)
-                        if (action != "ESCAPE" || canSerpentineEscape(route, routes, removed)) {
+                        val canEscape = if (gridBased) canGridArrowEscape(route, routes, removed)
+                            else canSerpentineEscape(route, routes, removed)
+                        if (action != "ESCAPE" || canEscape) {
                             onDirectMove(member[0], member[1], mapOf("action" to action))
                             action = "ESCAPE"
                         } else {
@@ -655,17 +681,21 @@ private fun SerpentineArrowsBoard(
                     else -> Color(0xFFFF4081)
                 }
                 val alpha = if (isExiting) 1f - flight.value * .75f else 1f
-                val stroke = maxOf(7f, route.thickness * size.minDimension)
+                val stroke = if (gridBased) maxOf(1.35f, route.thickness * size.minDimension * zoom)
+                    else maxOf(7f, route.thickness * size.minDimension)
                 drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
                 drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))
                 drawPath(path, Color.White.copy(alpha = .58f * alpha), style = Stroke(maxOf(1.5f, stroke * .18f)))
                 if (route.arrowType == "LONG_SPEAR") {
                     drawPath(path, Color(0xFFFFF59D).copy(alpha = .8f * alpha), style = Stroke(maxOf(1f, stroke * .22f)))
                 }
-                val head = points.last(); val before = points[points.lastIndex - 1]
-                val tangent = (head - before).let { delta -> delta / delta.getDistance().coerceAtLeast(.001f) }
+                val head = points.last()
+                val tangent = if (gridBased) route.exitVector else {
+                    val before = points[points.lastIndex - 1]
+                    (head - before).let { delta -> delta / delta.getDistance().coerceAtLeast(.001f) }
+                }
                 val side = Offset(-tangent.y, tangent.x)
-                val headLength = stroke * 2.2f
+                val headLength = stroke * if (gridBased) 1.7f else 2.2f
                 val arrowHead = Path().apply {
                     moveTo(head.x, head.y)
                     lineTo(head.x - tangent.x * headLength + side.x * headLength * .62f, head.y - tangent.y * headLength + side.y * headLength * .62f)

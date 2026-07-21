@@ -504,6 +504,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
   type Route = {
     id: string; points: Point[]; direction: string; exitVector: Point;
     thickness: number; blockType: string; arrowType: string; memberKeys: string[]; removalOrder: number;
+    gridX?: number; gridY?: number;
   };
   const shapes: Route[] = [];
   const directions = [
@@ -515,8 +516,9 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
     const x = (gx - 50) / 34; const y = (51 - gy) / 32;
     if (Math.pow(x * x + y * y - 1, 3) - x * x * y * y * y <= 0) heartCells.push({ x: gx / 100, y: gy / 100 });
   }
-  const densityStep = sizeFor(difficulty, 4, 3, 2, 1);
-  const selectedCells = heartCells.filter((_cell, index) => index % densityStep === 0);
+  // Cada ruta ocupa varios puntos de la malla; muestreamos las cabezas para
+  // mantener el payload y el Canvas fluidos sin perder la silueta 100x100.
+  const selectedCells = heartCells.filter((_cell, index) => index % 6 === 0);
   const count = selectedCells.length;
   const board = matrix(1, count, () => cell(null, true));
   const answers = matrix<CellValue>(1, count, () => null);
@@ -557,12 +559,24 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       { name: "LEFT", x: -1, y: 0, distance: grid.x },
     ].sort((a, b) => a.distance - b.distance);
     const exit = distances[0]!;
-    const tail = { x: grid.x - exit.x * .006, y: grid.y - exit.y * .006 };
+    const back = { x: -exit.x, y: -exit.y };
+    const side = { x: -exit.y, y: exit.x };
+    const at = (backDistance: number, sideDistance = 0): Point => ({
+      x: grid.x + back.x * backDistance + side.x * sideDistance,
+      y: grid.y + back.y * backDistance + side.y * sideDistance,
+    });
+    const arrowType = ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"][index % 5]!;
+    const routePoints = arrowType === "STRAIGHT" ? [at(.05), grid]
+      : arrowType === "ELBOW_90" ? [at(.06, .03), at(.06), grid]
+        : arrowType === "L_SHAPE" ? [at(.08, -.03), at(.08), at(.035), grid]
+          : arrowType === "S_SHAPE" ? [at(.09, .03), at(.09), at(.055), at(.055, -.03), at(.02, -.03), at(.02), grid]
+            : [at(.10), at(.075), at(.05), at(.025), grid];
     const direct: Route = {
-      id: `route-${index}`, points: [tail, grid], direction: exit.name,
+      id: `route-${index}`, points: routePoints, direction: exit.name,
       exitVector: { x: exit.x, y: exit.y }, thickness: .0032,
       blockType: index > 0 && index % 97 === 0 ? "BOMB" : "NORMAL",
-      arrowType: "GRID_ARROW", memberKeys: [`0:${index}`],
+      arrowType, memberKeys: [`0:${index}`],
+      gridX: Math.round(grid.x * 100), gridY: Math.round(grid.y * 100),
       removalOrder: Math.round(exit.distance * 100) * 10000 + index,
     };
     shapes.push(direct);
@@ -640,6 +654,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
     meta: {
       freeSpace: true,
       pathModel: "SERPENTINE_V2",
+      gridBased: true,
       silhouette: "HEART",
       worldWidth: 100,
       worldHeight: 100,

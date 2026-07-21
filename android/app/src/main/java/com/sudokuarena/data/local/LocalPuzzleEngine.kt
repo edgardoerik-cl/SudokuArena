@@ -760,6 +760,28 @@ class LocalPuzzleEngine(
     private fun localArrowCanEscape(index: Int): Boolean {
         val shapes = blueprint.meta["shapes"] as? List<*> ?: return false
         val route = shapes.getOrNull(index) as? Map<*, *> ?: return false
+        if (blueprint.meta["gridBased"] == true) {
+            val gridX = (route["gridX"] as? Number)?.toInt() ?: return false
+            val gridY = (route["gridY"] as? Number)?.toInt() ?: return false
+            val vector = route["exitVector"] as? Map<*, *> ?: return false
+            val stepX = (vector["x"] as? Number)?.toInt() ?: 0
+            val stepY = (vector["y"] as? Number)?.toInt() ?: 0
+            val occupied = shapes.indices.asSequence()
+                .filter { it != index && board.firstOrNull()?.getOrNull(it)?.ownerId != OWNER }
+                .mapNotNull { shapeIndex ->
+                    val candidate = shapes[shapeIndex] as? Map<*, *> ?: return@mapNotNull null
+                    val x = (candidate["gridX"] as? Number)?.toInt() ?: return@mapNotNull null
+                    val y = (candidate["gridY"] as? Number)?.toInt() ?: return@mapNotNull null
+                    x to y
+                }.toHashSet()
+            var x = gridX + stepX
+            var y = gridY + stepY
+            while (x in 0 until 100 && y in 0 until 100) {
+                if ((x to y) in occupied) return false
+                x += stepX; y += stepY
+            }
+            return true
+        }
         fun pointsOf(raw: Map<*, *>): List<Pair<Float, Float>> = (raw["points"] as? List<*>)?.mapNotNull { item ->
             val point = item as? Map<*, *> ?: return@mapNotNull null
             ((point["x"] as? Number)?.toFloat() ?: return@mapNotNull null) to
@@ -801,6 +823,74 @@ class LocalPuzzleEngine(
     }
 
     private fun arrowsEscape(): Blueprint {
+        val heartCells = buildList {
+            for (gridY in 4..96) for (gridX in 4..96) {
+                val x = (gridX - 50) / 34.0
+                val y = (51 - gridY) / 32.0
+                val base = x * x + y * y - 1.0
+                if (base * base * base - x * x * y * y * y <= 0.0) {
+                    add(gridX to gridY)
+                }
+            }
+        }
+        val shapes = heartCells.filterIndexed { index, _ -> index % 6 == 0 }.mapIndexed { index, (gridX, gridY) ->
+            val exits = listOf(
+                Triple("UP", 0 to -1, gridY),
+                Triple("RIGHT", 1 to 0, 100 - gridX),
+                Triple("DOWN", 0 to 1, 100 - gridY),
+                Triple("LEFT", -1 to 0, gridX),
+            )
+            val (direction, vector, distance) = exits.minBy { it.third }
+            val x = gridX / 100f
+            val y = gridY / 100f
+            val backX = -vector.first.toFloat(); val backY = -vector.second.toFloat()
+            val sideX = -vector.second.toFloat(); val sideY = vector.first.toFloat()
+            fun point(back: Float, side: Float = 0f) = mapOf("x" to x + backX * back + sideX * side, "y" to y + backY * back + sideY * side)
+            val arrowType = listOf("STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR")[index % 5]
+            val points = when (arrowType) {
+                "STRAIGHT" -> listOf(point(.05f), point(0f))
+                "ELBOW_90" -> listOf(point(.06f, .03f), point(.06f), point(0f))
+                "L_SHAPE" -> listOf(point(.08f, -.03f), point(.08f), point(.035f), point(0f))
+                "S_SHAPE" -> listOf(point(.09f, .03f), point(.09f), point(.055f), point(.055f, -.03f), point(.02f, -.03f), point(.02f), point(0f))
+                else -> listOf(point(.10f), point(.075f), point(.05f), point(.025f), point(0f))
+            }
+            mapOf(
+                "id" to "route-$index",
+                "points" to points,
+                "direction" to direction,
+                "exitVector" to mapOf("x" to vector.first, "y" to vector.second),
+                "thickness" to .0032f,
+                "blockType" to if (index > 0 && index % 97 == 0) "BOMB" else "NORMAL",
+                "arrowType" to arrowType,
+                "memberKeys" to listOf("0:$index"),
+                "gridX" to gridX,
+                "gridY" to gridY,
+                "removalOrder" to distance * 10_000 + index,
+            )
+        }
+        return result(
+            listOf(shapes.mapIndexed { index, shape ->
+                val direction = shape["direction"]
+                GenericCell(direction, true, meta = mapOf(
+                    "arrow" to direction, "shapeId" to "route-$index", "shapeAnchor" to true,
+                    "pathType" to "GRID", "blockType" to shape["blockType"], "arrowType" to shape["arrowType"],
+                ))
+            }),
+            listOf(shapes.map { it["direction"] }),
+            mapOf(
+                "freeSpace" to true, "pathModel" to "SERPENTINE_V2", "gridBased" to true,
+                "silhouette" to "HEART", "worldWidth" to 100, "worldHeight" to 100,
+                "logicalRows" to 100, "logicalColumns" to 100,
+                "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
+                "maxFailedTaps" to size(8, 7, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
+                "shapes" to shapes,
+                "instructions" to "Corazón 100×100: elimina primero las flechas con trayectoria libre hasta el borde.",
+            ),
+        )
+    }
+
+    @Suppress("unused")
+    private fun arrowsEscapeLegacy(): Blueprint {
         val count = size(12, 16, 20, 24)
         val columns = 4
         val shapes = (0 until count).map { index ->

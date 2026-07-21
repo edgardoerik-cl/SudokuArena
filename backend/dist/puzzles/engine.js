@@ -1980,6 +1980,24 @@ export class GenericPuzzleEngine {
             if (!route || route.points.length < 2)
                 return false;
             const activeRoutes = routes.filter((candidate) => !candidate.memberKeys.every((key) => removed.has(key)));
+            if (this.meta.gridBased === true && route.gridX !== undefined && route.gridY !== undefined) {
+                const vector = directionOverride === "UP" ? { x: 0, y: -1 }
+                    : directionOverride === "RIGHT" ? { x: 1, y: 0 }
+                        : directionOverride === "DOWN" ? { x: 0, y: 1 }
+                            : directionOverride === "LEFT" ? { x: -1, y: 0 }
+                                : route.exitVector;
+                const occupied = new Set(activeRoutes.filter((candidate) => candidate.id !== route.id)
+                    .map((candidate) => `${candidate.gridX}:${candidate.gridY}`));
+                let x = route.gridX + vector.x;
+                let y = route.gridY + vector.y;
+                while (x >= 0 && x < 100 && y >= 0 && y < 100) {
+                    if (occupied.has(`${x}:${y}`))
+                        return false;
+                    x += vector.x;
+                    y += vector.y;
+                }
+                return true;
+            }
             const guaranteed = [...activeRoutes].sort((a, b) => Number(a.removalOrder ?? 0)
                 - Number(b.removalOrder ?? 0))[0];
             // Salvaguarda de generaciÃ³n: siempre existe al menos una ruta liberable.

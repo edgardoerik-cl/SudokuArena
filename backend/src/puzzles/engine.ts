@@ -1870,11 +1870,26 @@ export class GenericPuzzleEngine {
   private canArrowShapeEscape(shapeId: string, removed: Set<string>, directionOverride?: string): boolean {
     if (this.meta.pathModel === "SERPENTINE_V2") {
       type Point = { x: number; y: number };
-      type Route = { id: string; points: Point[]; direction: string; exitVector: Point; thickness: number; memberKeys: string[] };
+      type Route = { id: string; points: Point[]; direction: string; exitVector: Point; thickness: number; memberKeys: string[]; gridX?: number; gridY?: number };
       const routes = this.meta.shapes as Route[];
       const route = routes.find((candidate) => candidate.id === shapeId);
       if (!route || route.points.length < 2) return false;
       const activeRoutes = routes.filter((candidate) => !candidate.memberKeys.every((key) => removed.has(key)));
+      if (this.meta.gridBased === true && route.gridX !== undefined && route.gridY !== undefined) {
+        const vector = directionOverride === "UP" ? { x: 0, y: -1 }
+          : directionOverride === "RIGHT" ? { x: 1, y: 0 }
+            : directionOverride === "DOWN" ? { x: 0, y: 1 }
+              : directionOverride === "LEFT" ? { x: -1, y: 0 }
+                : route.exitVector;
+        const occupied = new Set(activeRoutes.filter((candidate) => candidate.id !== route.id)
+          .map((candidate) => `${candidate.gridX}:${candidate.gridY}`));
+        let x = route.gridX + vector.x; let y = route.gridY + vector.y;
+        while (x >= 0 && x < 100 && y >= 0 && y < 100) {
+          if (occupied.has(`${x}:${y}`)) return false;
+          x += vector.x; y += vector.y;
+        }
+        return true;
+      }
       const guaranteed = [...activeRoutes].sort((a, b) =>
         Number((a as unknown as { removalOrder?: number }).removalOrder ?? 0)
           - Number((b as unknown as { removalOrder?: number }).removalOrder ?? 0)
