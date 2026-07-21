@@ -181,16 +181,18 @@ fun RoomLobbyScreen(
                             }
                         }
                     }
-                    Text("DIFICULTAD DEL PUZZLE", style = MaterialTheme.typography.labelLarge)
+                    Text(if (room.config.gameType == GameType.TIC_TAC_TOE) "TIPO DE GATO" else "DIFICULTAD DEL PUZZLE", style = MaterialTheme.typography.labelLarge)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        PuzzleDifficulty.entries.forEach { difficulty ->
+                        val shownDifficulties = if (room.config.gameType == GameType.TIC_TAC_TOE)
+                            listOf(PuzzleDifficulty.EASY, PuzzleDifficulty.MEDIUM) else PuzzleDifficulty.entries
+                        shownDifficulties.forEach { difficulty ->
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 RadioButton(
                                     selected = room.config.puzzleDifficulty == difficulty,
                                     onClick = { if (isHost) onPuzzleDifficultyChanged(difficulty) },
                                     enabled = isHost,
                                 )
-                                Text(difficulty.name.take(3), style = MaterialTheme.typography.labelSmall)
+                                Text(if (room.config.gameType == GameType.TIC_TAC_TOE) if (difficulty == PuzzleDifficulty.EASY) "Clásico" else "Ultimate" else difficulty.name.take(3), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }

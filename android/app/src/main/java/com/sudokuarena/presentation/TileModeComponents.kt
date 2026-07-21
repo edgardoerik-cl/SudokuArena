@@ -83,7 +83,17 @@ fun SoloSetupScreen(
         ) {
             Text("${gameTitle(gameType).uppercase()} · SOLITARIO", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("La partida se ejecuta localmente y puede pausarse.", modifier = Modifier.padding(vertical = 14.dp))
-            Text("DIFICULTAD", style = MaterialTheme.typography.labelLarge)
+            Text(if (gameType == GameType.TIC_TAC_TOE) "TIPO DE GATO" else "DIFICULTAD", style = MaterialTheme.typography.labelLarge)
+            if (gameType == GameType.TIC_TAC_TOE) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    listOf(PuzzleDifficulty.EASY to "Clásico 3×3", PuzzleDifficulty.MEDIUM to "Ultimate 9×9").forEach { (mode, label) ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = (difficulty == PuzzleDifficulty.EASY) == (mode == PuzzleDifficulty.EASY), onClick = { onDifficultyChanged(mode) })
+                            Text(label)
+                        }
+                    }
+                }
+            } else {
             val difficultyContent: @Composable (PuzzleDifficulty) -> Unit = { level ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = difficulty == level, onClick = { onDifficultyChanged(level) })
@@ -104,6 +114,7 @@ fun SoloSetupScreen(
                 ) { PuzzleDifficulty.entries.forEach { difficultyContent(it) } }
             } else {
                 PuzzleDifficulty.entries.forEach { difficultyContent(it) }
+            }
             }
             if (gameType == GameType.SUDOKU) {
                 Card(Modifier.fillMaxWidth()) {

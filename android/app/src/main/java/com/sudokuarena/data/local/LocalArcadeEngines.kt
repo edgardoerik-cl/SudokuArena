@@ -7,6 +7,7 @@ import com.sudokuarena.domain.DemolitionDropState
 import com.sudokuarena.domain.DemolitionPlayerState
 import com.sudokuarena.domain.PacmanActorState
 import com.sudokuarena.domain.PacmanArenaState
+import com.sudokuarena.domain.PacmanFruitState
 import com.sudokuarena.domain.TetrisArenaState
 import com.sudokuarena.domain.TetrisPlayerState
 import kotlin.math.abs
@@ -174,6 +175,10 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
     private var tick = 0L
     private var started = false
     private var frightenedUntil = 0L
+    private var level = 1
+    private var fruit: PacmanFruitState? = null
+    private val fruitMilestones = mutableSetOf<Int>()
+    private val initialPelletCount = pills.size + powerPills.size
     private val ghosts = mutableListOf(13 to 13, 13 to 1, 1 to 13, 7 to 7)
     private val eatenUntil = MutableList(4) { 0L }
 
@@ -199,6 +204,16 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
         if (map.getOrNull(y + dy)?.getOrNull(targetX) == 1) { y += dy; x = targetX }
         if (pills.remove("$x:$y")) score += 10
         if (powerPills.remove("$x:$y")) { score += 50; frightenedUntil = tick + 100 }
+        fruit?.let { bonus -> if (bonus.x.toInt() == x && bonus.y.toInt() == y) { score += bonus.points; fruit = null } }
+        val remaining = pills.size + powerPills.size
+        val milestone = when {
+            remaining <= initialPelletCount * .30 -> 70
+            remaining <= initialPelletCount * .70 -> 30
+            else -> 0
+        }
+        if (milestone > 0 && fruit == null && fruitMilestones.add(milestone)) {
+            fruit = PacmanFruitState(7f, 9f, if (level < 4) "CHERRY" else "STRAWBERRY", if (level < 4) 100 else 300)
+        }
         if (tick % 4L != 3L) {
             ghosts.indices.forEach { index ->
                 if (eatenUntil[index] > tick) {
@@ -226,12 +241,21 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
             }
         }
         tick++
+        if (pills.isEmpty() && powerPills.isEmpty() && level < 100) {
+            level++; refillLevel(); x = 1; y = 1; direction = "STOP"; started = false
+        }
+    }
+
+    private fun refillLevel() {
+        pills.clear(); powerPills.clear(); fruit = null; fruitMilestones.clear()
+        map.forEachIndexed { row, cells -> cells.forEachIndexed { col, value -> if (value == 1) pills += "$col:$row" } }
+        listOf("1:1", "13:1", "1:13", "13:13").forEach { pills.remove(it); powerPills += it }
     }
 
     override fun snapshot() = PacmanArenaState(
         serverTime = System.currentTimeMillis(),
         tick = tick,
-        completed = pills.isEmpty() || lives <= 0,
+        completed = lives <= 0 || level >= 100,
         tilemap = map,
         pills = pills.toSet(),
         powerPills = powerPills.toSet(),
@@ -244,6 +268,8 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
         },
         status = if (started) "PLAYING" else "WAITING",
         frightenedUntil = if (frightenedUntil > tick) System.currentTimeMillis() + (frightenedUntil - tick) * 100 else 0,
+        level = level,
+        fruit = fruit,
     )
 
     private fun vector(value: String): Pair<Int, Int> = when (value) {

@@ -593,7 +593,7 @@ private fun SerpentineArrowsBoard(
     )
     Box(modifier.fillMaxWidth().aspectRatio(1.34f)) {
         Canvas(
-            Modifier.fillMaxSize()
+            Modifier.fillMaxSize().padding(bottom = 58.dp)
                 .background(Color(0xFF07152F), RoundedCornerShape(18.dp))
                 .pointerInput(enabled) {
                     detectTransformGestures { _, pan, zoomChange, _ ->
@@ -693,7 +693,8 @@ private fun SerpentineArrowsBoard(
         val rotateUsed = ((state.meta["rotateUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
         val missileUsed = ((state.meta["missileUses"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
         Row(
-            Modifier.align(Alignment.BottomCenter).padding(8.dp).zIndex(4f),
+            Modifier.align(Alignment.BottomCenter).padding(horizontal = 8.dp, vertical = 4.dp).zIndex(4f)
+                .background(Color(0xFF07152F), RoundedCornerShape(14.dp)),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Button(
@@ -1266,7 +1267,7 @@ private fun ReactorChainBoard(
     GameFxHost(fx, modifier.fillMaxSize()) {
       Box(Modifier.fillMaxSize()) {
         Canvas(
-            Modifier.fillMaxSize().background(Color(0xFF07152F), RoundedCornerShape(18.dp))
+            Modifier.fillMaxSize().padding(top = 34.dp).background(Color(0xFF07152F), RoundedCornerShape(18.dp))
                 .pointerInput(state.revision, enabled) {
                     detectTapGestures { tap ->
                         if (!enabled || state.rows <= 0 || state.columns <= 0) return@detectTapGestures
@@ -1339,12 +1340,19 @@ private fun ReactorChainBoard(
             }
         }
         Text(
-            if (state.meta["noMoves"] == true) "SIN MOVIMIENTOS" else "NIVEL ${state.meta["level"] ?: 1}/100",
+            if (state.meta["noMoves"] == true) "PERDISTE · SIN MOVIMIENTOS" else "NIVEL ${state.meta["level"] ?: 1}",
             color = if (state.meta["noMoves"] == true) Color(0xFFFF5252) else Color.White,
             fontSize = 11.sp, fontWeight = FontWeight.Black,
             modifier = Modifier.align(Alignment.TopStart).padding(9.dp).zIndex(4f)
                 .background(Color(0xBB07152F), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
         )
+        if (state.meta["noMoves"] == true) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).zIndex(8f),
+                shape = RoundedCornerShape(20.dp), color = Color(0xEE2A0710),
+                border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFFF5252)),
+            ) { Text("PERDISTE\nNo quedan combinaciones", color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp, modifier = Modifier.padding(24.dp)) }
+        }
         if (false) Row(
             Modifier.align(Alignment.BottomCenter).padding(7.dp).zIndex(4f),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2053,6 +2061,13 @@ fun GenericPuzzleGrid(
             }
         }
         if (state.gameType == GameType.TIC_TAC_TOE && state.rows == 9 && state.columns == 9) {
+            val zones = (state.meta["miniWinners"] as? Map<*, *>).orEmpty()
+            zones.forEach { (key, winner) ->
+                val parts = key.toString().split(":"); if (parts.size != 2 || winner == "DRAW") return@forEach
+                val miniRow = parts[0].toIntOrNull() ?: return@forEach; val miniCol = parts[1].toIntOrNull() ?: return@forEach
+                val zoneColor = if (winner == "X") Color(0xFF00B8D4) else Color(0xFFFF2D8D)
+                drawRect(zoneColor.copy(alpha = .22f), Offset(miniCol * 3f * cellWidth, miniRow * 3f * cellHeight), Size(3f * cellWidth, 3f * cellHeight))
+            }
             for (index in 0..3) {
                 val x = index * 3f * cellWidth
                 val y = index * 3f * cellHeight
@@ -2888,6 +2903,10 @@ private fun GenericMoveControls(
             }
         }
         GameType.TIC_TAC_TOE -> {
+            if (state.genericBoard?.meta?.get("variant") == "CLASSIC") {
+                Text("Gato clásico · consigue tres fichas en línea", fontWeight = FontWeight.Black)
+                return
+            }
             val target = state.selected
             val used = ((state.genericBoard?.meta?.get("ticUsedPowers") as? Map<*, *>)?.get(state.playerId) as? List<*>)
                 ?.map { it.toString() }?.toSet().orEmpty()

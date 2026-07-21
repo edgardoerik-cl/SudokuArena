@@ -356,6 +356,14 @@ class LocalPuzzleEngine(
         }
         if (gameType == GameType.TIC_TAC_TOE) {
             if (cell.value != null) return reject("Casilla ocupada")
+            if (blueprint.meta["variant"] == "CLASSIC") {
+                replace(row, col, cell.copy(value = "X", isRevealed = true, ownerId = OWNER))
+                if (!ticWinner("X")) {
+                    val empty = board.flatMapIndexed { y, cells -> cells.mapIndexedNotNull { x, target -> if (target.value == null) y to x else null } }.randomOrNull(random)
+                    if (empty != null) replace(empty.first, empty.second, board[empty.first][empty.second].copy(value = "O", isRevealed = true, ownerId = "LOCAL_BOT"))
+                }
+                return accept(if (ticWinner("X")) 100 else 10)
+            }
             val requestedMini = row / 3 to col / 3
             if (ticForcedMini != null && requestedMini != ticForcedMini && miniHasSpace(ticForcedMini!!)) {
                 return reject("Debes jugar en el mini-tablero resaltado")
@@ -461,7 +469,10 @@ class LocalPuzzleEngine(
         GameType.SUDOKU -> error("Sudoku usa RandomSudokuGenerator")
     }
 
-    private fun ticTacToe(): Blueprint = result(
+    private fun ticTacToe(): Blueprint = if (difficulty == PuzzleDifficulty.EASY) result(
+        matrix(3, 3) { _, _ -> GenericCell() }, matrix(3, 3) { _, _ -> null },
+        mapOf("turnBased" to true, "variant" to "CLASSIC"),
+    ) else result(
         matrix(9, 9) { row, col -> GenericCell(meta = mapOf(
             "miniRow" to row / 3, "miniCol" to col / 3,
             "localRow" to row % 3, "localCol" to col % 3,

@@ -92,6 +92,10 @@ const suddenDeathDurationMs = Number.isFinite(requestedSuddenDeathDuration) && r
   ? requestedSuddenDeathDuration
   : SUDDEN_DEATH_DURATION_MS;
 const rpsEnabled = process.env.RPS_ENABLED !== "false";
+const RPS_START_GAMES = new Set<GameType>([
+  "MINESWEEPER", "CROSSWORD", "DOTS_AND_BOXES", "HANGMAN", "TIC_TAC_TOE", "CHECKERS", "CHESS_TACTICS", "CAPITAL_ARENA",
+]);
+function shouldUseRps(room: RoomRuntime): boolean { return rpsEnabled && RPS_START_GAMES.has(room.config.gameType); }
 const rooms = new Map<string, RoomRuntime>();
 const disconnectTimers = new Map<string, NodeJS.Timeout>();
 const leaderboard = new LeaderboardStore();
@@ -208,7 +212,7 @@ io.on("connection", (socket) => {
     if (room.phase !== "LOBBY") return emitRoomError(socket, "MATCH_STARTED", "La partida ya comenzó");
     const minimumError = validatePlayerCount(room);
     if (minimumError) return emitRoomError(socket, "INVALID_PLAYER_COUNT", minimumError);
-    if (rpsEnabled) startRps(room);
+    if (shouldUseRps(room)) startRps(room);
     else startMatch(room);
   });
 
@@ -228,13 +232,13 @@ io.on("connection", (socket) => {
     room.rematchVotes.add(playerId);
     const humans = room.game.snapshot().players.filter((player) => !player.isBot);
     if (humans.length <= 1) {
-      if (rpsEnabled) startRps(room, true);
+      if (shouldUseRps(room)) startRps(room, true);
       else startMatch(room, true);
       return;
     }
     emitRoomState(room);
     if (humans.every((player) => room.rematchVotes.has(player.id))) {
-      if (rpsEnabled) startRps(room, true);
+      if (shouldUseRps(room)) startRps(room, true);
       else startMatch(room, true);
     }
   });
@@ -865,7 +869,15 @@ function processPlacement(room: RoomRuntime, playerId: string, payload: PlacePro
 function processGenericMove(room: RoomRuntime, playerId: string, payload: GenericMove, responder?: Socket): void {
   const engine = room.genericEngine;
   if (!engine) return;
-  const result = engine.makeMove(playerId, payload, room.game);
+  let result;
+  try {
+    result = engine.makeMove(playerId, payload, room.game);
+  } catch (error) {
+    console.error("generic move rejected safely", room.config.gameType, error);
+    responder?.emit("generic:move-rejected", { requestId: payload?.requestId ?? "", code: "INVALID_PAYLOAD", message: "La palabra o posición excede el tablero" });
+    emitGenericState(room);
+    return;
+  }
   if (!result.accepted) {
     responder?.emit("generic:move-rejected", result);
     if (room.config.gameType === "CHECKERS") responder?.emit("InvalidMove", result);
@@ -1198,9 +1210,13 @@ function startGenericLoop(room: RoomRuntime): void {
 
 function startPacmanLoop(room: RoomRuntime): void {
   if (!room.pacmanEngine || room.pacmanTick) return;
+  let networkFrame = 0;
   room.pacmanTick = setInterval(() => {
     if (rooms.get(room.code) !== room || room.phase !== "PLAYING" || !room.pacmanEngine) return;
-    room.pacmanEngine.tick();
+    // Publicamos a 20 FPS, pero la cuadrícula autoritativa avanza a 6,67 pasos/s.
+    // Así el input responde inmediatamente sin acelerar el juego.
+    networkFrame += 1;
+    if (networkFrame % 3 === 0) room.pacmanEngine.tick();
     const snapshot = room.pacmanEngine.snapshot();
     snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
     io.to(room.code).volatile.emit("pacman:state", snapshot);

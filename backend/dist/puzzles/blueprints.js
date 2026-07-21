@@ -72,6 +72,12 @@ function merge2048(random, difficulty) {
     };
 }
 function ticTacToe(difficulty) {
+    if (difficulty === "EASY")
+        return {
+            board: matrix(3, 3, () => cell(null, false)),
+            answers: matrix(3, 3, () => null),
+            meta: { turnBased: true, marks: ["X", "O"], variant: "CLASSIC", instructions: "Gato clásico: consigue tres fichas consecutivas.", difficulty },
+        };
     return {
         board: matrix(9, 9, (row, col) => cell(null, false, {
             miniRow: Math.floor(row / 3), miniCol: Math.floor(col / 3),
@@ -561,10 +567,8 @@ function arrowsEscape(random, difficulty) {
             }
             if (points.some((point) => point.x < .055 || point.x > .945 || point.y < .055 || point.y > .945))
                 continue;
-            if (shapes.some((existing) => pathsTouch(points, existing.points)))
-                continue;
-            if (shapes.some((existing) => pathsTouch(rayToBorder(points, exit), existing.points, .04)))
-                continue;
+            // Las rutas pueden entrelazarse visualmente: el orden de extracción
+            // autoritativo garantiza una salida y permite llenar realmente el corazón.
             route = {
                 id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .009,
                 arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5],

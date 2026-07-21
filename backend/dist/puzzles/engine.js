@@ -399,8 +399,8 @@ export class GenericPuzzleEngine {
                 }
             }
             const candidates = [];
-            for (let row = 0; row < 9; row += 1)
-                for (let col = 0; col < 9; col += 1) {
+            for (let row = 0; row < this.board.length; row += 1)
+                for (let col = 0; col < this.board[row].length; col += 1) {
                     if (forced && !miniWinners[`${forced.row}:${forced.col}`]
                         && (Math.floor(row / 3) !== forced.row || Math.floor(col / 3) !== forced.col))
                         continue;
@@ -654,6 +654,19 @@ export class GenericPuzzleEngine {
             const action = String(payload.action ?? move.val ?? "MARK").toUpperCase();
             const playerIndex = Math.max(0, this.turnOrder.indexOf(playerId));
             const mark = playerIndex % 2 === 0 ? "X" : "O";
+            if (this.meta.variant === "CLASSIC") {
+                if (cell.value !== null)
+                    return { correct: false, neutral: true, message: "Casilla ocupada" };
+                cell.value = mark;
+                cell.ownerId = playerId;
+                cell.isRevealed = true;
+                const winner = this.classicTicWinner();
+                if (winner) {
+                    this.meta.winnerMark = winner;
+                    this.meta.winnerPlayerId = playerId;
+                }
+                return { correct: true, points: winner ? 100 : 10 };
+            }
             const usedPowers = (this.meta.ticUsedPowers ?? {});
             const mine = new Set(usedPowers[playerId] ?? []);
             if (["PUSH", "SHIELD", "BOMB"].includes(action)) {
@@ -732,6 +745,12 @@ export class GenericPuzzleEngine {
             const miniWinner = this.ticRegionWinner(miniRow * 3, miniCol * 3);
             if (miniWinner)
                 miniWinners[`${miniRow}:${miniCol}`] = miniWinner;
+            else {
+                const currentRegionFull = this.board.slice(miniRow * 3, miniRow * 3 + 3)
+                    .flatMap((row) => row.slice(miniCol * 3, miniCol * 3 + 3)).every((candidate) => candidate.value !== null);
+                if (currentRegionFull)
+                    miniWinners[`${miniRow}:${miniCol}`] = "DRAW";
+            }
             this.meta.miniWinners = miniWinners;
             const nextMini = { row: move.row % 3, col: move.col % 3 };
             const nextKey = `${nextMini.row}:${nextMini.col}`;
@@ -741,7 +760,8 @@ export class GenericPuzzleEngine {
             const winner = this.ticTacToeWinner();
             if (winner) {
                 this.meta.winnerMark = winner;
-                this.meta.winnerPlayerId = playerId;
+                if (winner !== "DRAW")
+                    this.meta.winnerPlayerId = playerId;
                 this.completed = true;
             }
             return { correct: true, points: winner ? 100 : 10 };
@@ -956,18 +976,13 @@ export class GenericPuzzleEngine {
     ticTacToeWinner() {
         if (this.board.length === 9) {
             const miniWinners = (this.meta.miniWinners ?? {});
-            const virtual = Array.from({ length: 3 }, (_, row) => Array.from({ length: 3 }, (_, col) => miniWinners[`${row}:${col}`] ?? ""));
-            const lines = [
-                [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
-                [[0, 0], [1, 0], [2, 0]], [[0, 1], [1, 1], [2, 1]], [[0, 2], [1, 2], [2, 2]],
-                [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
-            ];
-            for (const line of lines) {
-                const values = line.map(([row, col]) => virtual[row][col]);
-                if (values[0] && values.every((value) => value === values[0]))
-                    return values[0];
-            }
-            return null;
+            if (Object.keys(miniWinners).length < 9)
+                return null;
+            const x = Object.values(miniWinners).filter((value) => value === "X").length;
+            const o = Object.values(miniWinners).filter((value) => value === "O").length;
+            if (x !== o)
+                return x > o ? "X" : "O";
+            return "DRAW";
         }
         const lines = [
             [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
@@ -978,6 +993,21 @@ export class GenericPuzzleEngine {
             const values = line.map(([row, col]) => String(this.board[row][col].value ?? ""));
             if (values[0] && values.every((value) => value === values[0]))
                 return values[0];
+        }
+        return null;
+    }
+    classicTicWinner() {
+        if (this.board.length !== 3)
+            return null;
+        const lines = [
+            [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
+            [[0, 0], [1, 0], [2, 0]], [[0, 1], [1, 1], [2, 1]], [[0, 2], [1, 2], [2, 2]],
+            [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
+        ];
+        for (const line of lines) {
+            const values = line.map(([row, col]) => this.board[row][col].value);
+            if (values[0] != null && values.every((value) => value === values[0]))
+                return String(values[0]);
         }
         return null;
     }
@@ -2142,7 +2172,9 @@ export class GenericPuzzleEngine {
             return true;
         }
         if (this.gameType === "TIC_TAC_TOE")
-            return this.ticTacToeWinner() !== null;
+            return this.meta.variant === "CLASSIC"
+                ? this.classicTicWinner() !== null || this.board.flat().every((cell) => cell.value !== null)
+                : this.ticTacToeWinner() !== null;
         if (this.gameType === "CHECKERS") {
             const teams = new Set(this.board.flat().map((cell) => cell.meta.team).filter(Boolean));
             return teams.size <= 1;
@@ -2556,7 +2588,7 @@ export class GenericPuzzleEngine {
         const payload = typeof move.val === "object" && move.val !== null ? move.val : { word: move.val };
         const word = normalizeSpanishWord(String(payload.word ?? ""));
         const direction = String(payload.direction ?? "H").toUpperCase();
-        if (!SPANISH_WORDS.has(word) || !["H", "V"].includes(direction) || word.length < 2)
+        if (!SPANISH_WORDS.has(word) || !["H", "V"].includes(direction) || word.length < 2 || [...word].length > 15)
             return { correct: false };
         const rowStep = direction === "V" ? 1 : 0;
         const colStep = direction === "H" ? 1 : 0;

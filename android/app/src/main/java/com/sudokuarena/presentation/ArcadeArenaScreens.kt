@@ -254,7 +254,7 @@ fun PacmanArenaScreen(state: ArenaUiState, onInput: (String) -> Unit, onPause: (
         },
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ArcadeTopBar("Pac-Man Arena", "♥ ${me?.lives ?: 3} · ${me?.score ?: 0} pts", onPause, onExit)
+        ArcadeTopBar("Pac-Man Arena · Nivel ${arena?.level ?: 1}", "♥ ${me?.lives ?: 3} · ${me?.score ?: 0} pts", onPause, onExit)
         BoxWithConstraints(
             Modifier.weight(1f).fillMaxWidth().background(Color(0xFF02030F), RoundedCornerShape(16.dp))
                 .pointerInput(me?.id, me?.lives) {
