@@ -507,9 +507,11 @@ function arrowsEscape(random, difficulty) {
             if (Math.pow(x * x + y * y - 1, 3) - x * x * y * y * y <= 0)
                 heartCells.push({ x: gx / 100, y: gy / 100 });
         }
-    // Cada ruta ocupa varios puntos de la malla; muestreamos las cabezas para
-    // mantener el payload y el Canvas fluidos sin perder la silueta 100x100.
-    const selectedCells = heartCells.filter((_cell, index) => index % 6 === 0);
+    // Progresión legible y predecible: cada dificultad duplica la anterior.
+    // El muestreo uniforme conserva la silueta completa incluso con 32 rutas.
+    const requestedCount = sizeFor(difficulty, 32, 64, 128, 256);
+    const selectedCells = Array.from({ length: Math.min(requestedCount, heartCells.length) }, (_unused, index) => heartCells[Math.floor((index + .5) * heartCells.length / requestedCount)]);
+    const arrowThickness = difficulty === "EASY" ? .007 : difficulty === "MEDIUM" ? .006 : difficulty === "HARD" ? .0048 : .0038;
     const count = selectedCells.length;
     const board = matrix(1, count, () => cell(null, true));
     const answers = matrix(1, count, () => null);
@@ -567,7 +569,7 @@ function arrowsEscape(random, difficulty) {
                         : [at(.10), at(.075), at(.05), at(.025), grid];
         const direct = {
             id: `route-${index}`, points: routePoints, direction: exit.name,
-            exitVector: { x: exit.x, y: exit.y }, thickness: .0032,
+            exitVector: { x: exit.x, y: exit.y }, thickness: arrowThickness,
             blockType: index > 0 && index % 97 === 0 ? "BOMB" : "NORMAL",
             arrowType, memberKeys: [`0:${index}`],
             gridX: Math.round(grid.x * 100), gridY: Math.round(grid.y * 100),
@@ -656,6 +658,7 @@ function arrowsEscape(random, difficulty) {
             logicalColumns: 100,
             totalBlocks: count,
             totalShapes: shapes.length,
+            arrowCount: count,
             maxFailedTaps: sizeFor(difficulty, 8, 7, 6, 5),
             rotatePowerUses: 2,
             missilePowerUses: 1,

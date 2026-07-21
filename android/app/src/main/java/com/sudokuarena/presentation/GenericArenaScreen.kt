@@ -615,10 +615,13 @@ private fun SerpentineArrowsBoard(
         (point.x - .5f) * zoom + .5f + panOffset.x,
         (point.y - .5f) * zoom + .5f + panOffset.y,
     )
-    Box(modifier.fillMaxWidth().aspectRatio(1.34f)) {
+    Box(
+        modifier.fillMaxWidth().aspectRatio(1.34f)
+            .background(Color(0xFF020817), RoundedCornerShape(18.dp)),
+    ) {
         Canvas(
             Modifier.fillMaxSize().padding(bottom = 58.dp)
-                .background(Color(0xFF07152F), RoundedCornerShape(18.dp))
+                .background(Color(0xFF020817))
                 .pointerInput(enabled) {
                     detectTransformGestures { _, pan, zoomChange, _ ->
                         if (!enabled) return@detectTransformGestures

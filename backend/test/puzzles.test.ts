@@ -314,6 +314,7 @@ describe("motor genérico de puzzles", () => {
       exitVector: { x: number; y: number }; thickness: number; removalOrder: number;
     }>;
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
+    assert.equal(shapes.length, 256);
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
     assert.ok(shapes.some((shape) => shape.points.length >= 4));
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));
@@ -325,6 +326,10 @@ describe("motor genérico de puzzles", () => {
     assert.ok(shapes.every((shape) => Math.abs(Math.hypot(shape.exitVector.x, shape.exitVector.y) - 1) < .01));
     assert.ok(shapes.every((shape) => shape.thickness > 0));
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
+    const counts = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
+      Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `count-${difficulty}`, difficulty }).meta.totalShapes)
+    );
+    assert.deepEqual(counts, [32, 64, 128, 256]);
   });
 
   it("Reactor Chain acepta el toque directo de un grupo conectado", () => {

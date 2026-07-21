@@ -833,7 +833,17 @@ class LocalPuzzleEngine(
                 }
             }
         }
-        val shapes = heartCells.filterIndexed { index, _ -> index % 6 == 0 }.mapIndexed { index, (gridX, gridY) ->
+        val requestedCount = size(32, 64, 128, 256)
+        val selectedCells = List(requestedCount.coerceAtMost(heartCells.size)) { index ->
+            heartCells[((index + .5) * heartCells.size / requestedCount).toInt()]
+        }
+        val arrowThickness = when (difficulty) {
+            PuzzleDifficulty.EASY -> .007f
+            PuzzleDifficulty.MEDIUM -> .006f
+            PuzzleDifficulty.HARD -> .0048f
+            PuzzleDifficulty.EXPERT -> .0038f
+        }
+        val shapes = selectedCells.mapIndexed { index, (gridX, gridY) ->
             val exits = listOf(
                 Triple("UP", 0 to -1, gridY),
                 Triple("RIGHT", 1 to 0, 100 - gridX),
@@ -859,7 +869,7 @@ class LocalPuzzleEngine(
                 "points" to points,
                 "direction" to direction,
                 "exitVector" to mapOf("x" to vector.first, "y" to vector.second),
-                "thickness" to .0032f,
+                "thickness" to arrowThickness,
                 "blockType" to if (index > 0 && index % 97 == 0) "BOMB" else "NORMAL",
                 "arrowType" to arrowType,
                 "memberKeys" to listOf("0:$index"),
@@ -882,6 +892,7 @@ class LocalPuzzleEngine(
                 "silhouette" to "HEART", "worldWidth" to 100, "worldHeight" to 100,
                 "logicalRows" to 100, "logicalColumns" to 100,
                 "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
+                "arrowCount" to shapes.size,
                 "maxFailedTaps" to size(8, 7, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
                 "shapes" to shapes,
                 "instructions" to "Corazón 100×100: elimina primero las flechas con trayectoria libre hasta el borde.",
