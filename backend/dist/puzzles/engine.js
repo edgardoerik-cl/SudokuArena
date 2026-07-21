@@ -759,7 +759,9 @@ export class GenericPuzzleEngine {
                     miniWinners[`${miniRow}:${miniCol}`] = "DRAW";
             }
             this.meta.miniWinners = miniWinners;
-            const nextMini = { row: move.row % 3, col: move.col % 3 };
+            // Variante solicitada: ambos jugadores continúan dentro de la zona actual
+            // hasta que alguien la conquista; entonces el siguiente elige zona libre.
+            const nextMini = { row: miniRow, col: miniCol };
             const nextKey = `${nextMini.row}:${nextMini.col}`;
             const nextFull = this.board.slice(nextMini.row * 3, nextMini.row * 3 + 3)
                 .flatMap((row) => row.slice(nextMini.col * 3, nextMini.col * 3 + 3)).every((candidate) => candidate.value !== null);

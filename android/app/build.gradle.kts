@@ -12,8 +12,8 @@ android {
         applicationId = "com.sudokuarena"
         minSdk = 26
         targetSdk = 36
-        versionCode = 43
-        versionName = "8.10.2"
+        versionCode = 44
+        versionName = "8.10.3"
 
         val socketUrl = providers.gradleProperty("SOCKET_URL")
             // La APK normal siempre apunta a producción. Para desarrollo local:

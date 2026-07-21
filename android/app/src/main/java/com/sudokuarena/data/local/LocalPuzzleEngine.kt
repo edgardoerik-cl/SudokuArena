@@ -96,6 +96,8 @@ class LocalPuzzleEngine(
     private var reactorPowerEnergy = 0
     private var reactorScore = 0
     private var ticForcedMini: Pair<Int, Int>? = null
+    private val ticMiniWinners = mutableMapOf<String, String>()
+    private val ticMiniOwners = mutableMapOf<String, String>()
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
@@ -162,8 +164,10 @@ class LocalPuzzleEngine(
                 "levelProgress" to reactorScore % 600,
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.TIC_TAC_TOE) mapOf(
-                "variant" to "ULTIMATE_INFINITE",
+                "variant" to (blueprint.meta["variant"] ?: "ULTIMATE_INFINITE"),
                 "forcedMini" to ticForcedMini?.let { mapOf("row" to it.first, "col" to it.second) },
+                "miniWinners" to ticMiniWinners.toMap(),
+                "miniOwners" to ticMiniOwners.toMap(),
                 "instructions" to "Gato Ultimate: tu casilla local decide el mini-tablero del rival.",
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.CAPITAL_ARENA) mapOf(
@@ -365,12 +369,19 @@ class LocalPuzzleEngine(
                 return accept(if (ticWinner("X")) 100 else 10)
             }
             val requestedMini = row / 3 to col / 3
+            if (ticMiniWinners.containsKey("${requestedMini.first}:${requestedMini.second}")) return reject("Mini-tablero conquistado")
             if (ticForcedMini != null && requestedMini != ticForcedMini && miniHasSpace(ticForcedMini!!)) {
                 return reject("Debes jugar en el mini-tablero resaltado")
             }
             replace(row, col, cell.copy(value = "X", isRevealed = true, ownerId = OWNER))
             if (!ticWinner("X")) {
-                val botMini = row % 3 to col % 3
+                if (miniWinner(requestedMini, "X")) {
+                    ticMiniWinners["${requestedMini.first}:${requestedMini.second}"] = "X"
+                    ticMiniOwners["${requestedMini.first}:${requestedMini.second}"] = OWNER
+                    ticForcedMini = null
+                    return accept(30)
+                }
+                val botMini = requestedMini
                 val allEmpty = board.flatMapIndexed { y, cells -> cells.mapIndexedNotNull { x, target -> if (target.value == null) y to x else null } }
                 val forcedEmpty = allEmpty.filter { (y, x) -> y / 3 == botMini.first && x / 3 == botMini.second }
                 val empty = forcedEmpty.ifEmpty { allEmpty }
@@ -378,7 +389,13 @@ class LocalPuzzleEngine(
                 if (bot != null) {
                     val target = board[bot.first][bot.second]
                     replace(bot.first, bot.second, target.copy(value = "O", isRevealed = true, ownerId = "LOCAL_BOT"))
-                    ticForcedMini = (bot.first % 3 to bot.second % 3).takeIf(::miniHasSpace)
+                    val humanWon = miniWinner(requestedMini, "X")
+                    val botWon = miniWinner(requestedMini, "O")
+                    if (humanWon || botWon) {
+                        ticMiniWinners["${requestedMini.first}:${requestedMini.second}"] = if (humanWon) "X" else "O"
+                        ticMiniOwners["${requestedMini.first}:${requestedMini.second}"] = if (humanWon) OWNER else "LOCAL_BOT"
+                        ticForcedMini = null
+                    } else ticForcedMini = requestedMini.takeIf(::miniHasSpace)
                 }
             }
             return accept(if (ticWinner("X")) 100 else 10)
@@ -606,6 +623,10 @@ class LocalPuzzleEngine(
 
     private fun miniHasSpace(mini: Pair<Int, Int>): Boolean = (0..2).any { row -> (0..2).any { col ->
         board.getOrNull(mini.first * 3 + row)?.getOrNull(mini.second * 3 + col)?.value == null
+    } }
+
+    private fun miniWinner(mini: Pair<Int, Int>, mark: String): Boolean = ticLines().any { line -> line.all { (row, col) ->
+        board.getOrNull(mini.first * 3 + row)?.getOrNull(mini.second * 3 + col)?.value == mark
     } }
 
     private fun checkers(): Blueprint = result(

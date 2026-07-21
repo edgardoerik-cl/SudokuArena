@@ -33,6 +33,7 @@ import com.sudokuarena.data.HttpLeaderboardRepository
 import com.sudokuarena.data.local.PlayerPreferences
 import com.sudokuarena.data.local.RandomSudokuGenerator
 import com.sudokuarena.presentation.ArenaRoute
+import com.sudokuarena.presentation.AboutScreen
 import com.sudokuarena.presentation.ArenaViewModel
 import com.sudokuarena.presentation.WelcomeScreen
 import com.sudokuarena.presentation.MultiplayerEntryScreen
@@ -130,7 +131,9 @@ private fun MultiArenaApp() {
                     screen = "GAME"
                 },
                 onMultiplayerMode = { screen = "MULTIPLAYER_ENTRY" },
+                onAbout = { screen = "ABOUT" },
             )
+            "ABOUT" -> AboutScreen(onBack = { screen = "WELCOME" })
             "SOLO_SETUP" -> SoloSetupScreen(
                 gameType = selectedGameType,
                 isColorMode = soloColorMode,

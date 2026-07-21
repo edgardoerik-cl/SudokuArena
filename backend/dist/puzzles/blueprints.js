@@ -497,7 +497,7 @@ function arrowsEscape(random, difficulty) {
     // Un lienzo grande y denso: las cabezas dibujan colectivamente un corazon.
     // Modelo lógico 100×100, serializado de forma dispersa para no enviar diez
     // mil celdas vacías por WebSocket. Las rutas sí usan coordenadas de esa malla.
-    const count = sizeFor(difficulty, 72, 88, 104, 120);
+    const count = sizeFor(difficulty, 625, 750, 875, 1000);
     const board = matrix(1, count, () => cell(null, true));
     const answers = matrix(1, count, () => null);
     const shapes = [];
@@ -505,6 +505,14 @@ function arrowsEscape(random, difficulty) {
         { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
         { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
     ];
+    const heartCells = [];
+    for (let gy = 4; gy <= 96; gy += 1)
+        for (let gx = 4; gx <= 96; gx += 1) {
+            const x = (gx - 50) / 34;
+            const y = (51 - gy) / 32;
+            if (Math.pow(x * x + y * y - 1, 3) - x * x * y * y * y <= 0)
+                heartCells.push({ x: gx / 100, y: gy / 100 });
+        }
     const pointToSegment = (point, start, end) => {
         const dx = end.x - start.x;
         const dy = end.y - start.y;
@@ -539,13 +547,9 @@ function arrowsEscape(random, difficulty) {
     for (let index = 0; index < count; index += 1) {
         let route = null;
         for (let attempt = 0; attempt < 350 && route === null; attempt += 1) {
-            const angle = Math.PI * 2 * index / count;
-            // Curva paramÃ©trica de corazÃ³n, normalizada y con una ligera variaciÃ³n
-            // procedural para que cada nivel conserve la silueta sin repetirse.
-            const head = {
-                x: Math.round((.5 + .31 * Math.pow(Math.sin(angle), 3) + (random.next() - .5) * .02) * 100) / 100,
-                y: Math.round((.49 - .24 * Math.cos(angle) + .095 * Math.cos(2 * angle) + .045 * Math.cos(3 * angle)) * 100) / 100,
-            };
+            // Distribución densa por todo el interior del corazón, no sólo su borde.
+            const base = heartCells[(index * 37 + attempt * 101) % heartCells.length];
+            const head = { ...base };
             const outward = { x: head.x - .5, y: head.y - .48 };
             const outwardLength = Math.hypot(outward.x, outward.y) || 1;
             const exit = [...directions].sort((a, b) => (b.x * outward.x + b.y * outward.y) / outwardLength - (a.x * outward.x + a.y * outward.y) / outwardLength)[0];

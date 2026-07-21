@@ -88,6 +88,7 @@ fun WelcomeScreen(
     onSoloMode: () -> Unit,
     onDailyChallenge: () -> Unit,
     onMultiplayerMode: () -> Unit,
+    onAbout: () -> Unit,
 ) {
     var savedNickname by remember(initialNickname) { mutableStateOf(initialNickname.trim()) }
     var firstNickname by remember { mutableStateOf("") }
@@ -208,6 +209,7 @@ fun WelcomeScreen(
                     ControlIcon(ControlIconType.TROPHY)
                 }
                 AudioToggleButton()
+                FloatingActionButton(onClick = onAbout) { Text("i", fontWeight = FontWeight.Black, fontSize = 22.sp) }
             }
         }
     }

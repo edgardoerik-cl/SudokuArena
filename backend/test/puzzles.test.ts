@@ -261,8 +261,8 @@ describe("motor genérico de puzzles", () => {
       engine.makeMove(id, { requestId, row, col, val: "MARK" }, players);
     assert.equal(play("p1", 0, 0, "x1").accepted, true);
     assert.equal(play("p2", 1, 0, "o1").accepted, true);
-    assert.equal(play("p1", 0, 1, "fuera-del-mini").accepted, false);
-    assert.equal(play("p1", 3, 0, "x2").accepted, true);
+    assert.equal(play("p1", 0, 1, "mismo-mini").accepted, true);
+    assert.equal(play("p2", 3, 0, "fuera-del-mini").accepted, false);
     assert.equal(engine.snapshot(players).board.length, 9);
   });
 
