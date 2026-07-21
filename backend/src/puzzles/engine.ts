@@ -1376,7 +1376,7 @@ export class GenericPuzzleEngine {
         }
         this.board.flat().forEach((cell, index) => { cell.value = values[index]!; cell.meta = { reactorOrb: true }; });
         this.ensureReactorMove();
-        this.meta.lastPower = { playerId, action, at: Date.now() };
+        this.meta.lastPower = { playerId, type: action, at: Date.now() };
         return { correct: true, points: 10, message: "Mezcla prismÃ¡tica" };
       }
       const selected = this.board[move.row]?.[move.col];
@@ -1390,7 +1390,7 @@ export class GenericPuzzleEngine {
             .filter(({ row, col }) => Math.abs(row - move.row) <= 1 && Math.abs(col - move.col) <= 1);
       this.removeAndCollapseReactors(removed, playerId);
       this.meta.removed = Number(this.meta.removed ?? 0) + removed.length;
-      this.meta.lastPower = { playerId, action, cells: removed, at: Date.now() };
+      this.meta.lastPower = { playerId, type: action, cells: removed, at: Date.now() };
       this.meta.lastChain = { playerId, size: removed.length, color: 0, cells: removed, power: action, at: Date.now() };
       return { correct: true, points: removed.length * 8, message: `${action}: ${removed.length} nÃºcleos` };
     }
