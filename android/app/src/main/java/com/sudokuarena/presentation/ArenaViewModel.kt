@@ -891,7 +891,10 @@ class ArenaViewModel(
             }
             is RealtimeEvent.TetrisStateUpdated -> mutableState.update { current ->
                 val acknowledged = event.state.players.firstOrNull { it.id == current.playerId }?.lastInputSeq ?: 0L
-                if (!isSoloMode && acknowledged < tetrisInputSeq) current
+                // 0 identifica un backend anterior al ACK secuencial. Se acepta
+                // como fallback para que el cliente siga siendo compatible
+                // mientras Render termina un despliegue progresivo.
+                if (!isSoloMode && acknowledged > 0L && acknowledged < tetrisInputSeq) current
                 else current.copy(tetrisState = event.state, serverNowMs = event.state.serverTime)
             }
             is RealtimeEvent.PacmanStateUpdated -> mutableState.update {
