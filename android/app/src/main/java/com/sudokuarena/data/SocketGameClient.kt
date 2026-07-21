@@ -575,6 +575,7 @@ private fun parsePacmanState(json: JSONObject): PacmanArenaState {
         players = actors("players"),
         ghosts = actors("ghosts"),
         status = json.optString("status", "WAITING"),
+        frightenedUntil = json.optLong("frightenedUntil"),
     )
 }
 
@@ -629,6 +630,9 @@ private fun parseDemolitionState(json: JSONObject): DemolitionArenaState = Demol
             }.orEmpty(),
             laserUntil = player.optLong("laserUntil"),
             speedUntil = player.optLong("speedUntil"),
+            wideUntil = player.optLong("wideUntil"),
+            missileUntil = player.optLong("missileUntil"),
+            missileX = player.optDouble("missileX", .5).toFloat(),
         )
     }.orEmpty(),
 )

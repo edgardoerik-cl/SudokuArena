@@ -24,6 +24,7 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val displayPositions = mutableMapOf<String, PointF>()
     @Volatile private var arenaState: PacmanArenaState? = null
+    @Volatile private var stateReceivedAt: Long = 0
     @Volatile private var running = false
     private var renderThread: Thread? = null
 
@@ -35,6 +36,7 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
 
     fun updateState(state: PacmanArenaState?) {
         arenaState = state
+        stateReceivedAt = System.currentTimeMillis()
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -120,9 +122,24 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
             }
         }
 
+        // Casa central cerrada: los fantasmas comidos esperan aquí y solo los
+        // ojos permanecen visibles durante su regeneración.
+        val ghostHouse = RectF(left + tile * 5.55f, top + tile * 6.15f, left + tile * 9.45f, top + tile * 8.85f)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(115, 20, 8, 48)
+        canvas.drawRoundRect(ghostHouse, tile * .28f, tile * .28f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = tile * .09f
+        paint.color = Color.rgb(255, 45, 141)
+        canvas.drawRoundRect(ghostHouse, tile * .28f, tile * .28f, paint)
+        paint.color = Color.rgb(0, 229, 255)
+        canvas.drawLine(left + tile * 6.45f, top + tile * 6.15f, left + tile * 8.55f, top + tile * 6.15f, paint)
+
         val smoothing = 1f - exp(-deltaSeconds * 13f)
-        state.players.forEach { drawActor(canvas, it, true, left, top, tile, smoothing, timeSeconds) }
-        state.ghosts.forEach { drawActor(canvas, it, false, left, top, tile, smoothing, timeSeconds) }
+        state.players.forEach { drawActor(canvas, it, true, left, top, tile, smoothing, timeSeconds, false) }
+        val serverNow = state.serverTime + (System.currentTimeMillis() - stateReceivedAt).coerceAtLeast(0L)
+        val warning = state.frightenedUntil > serverNow && state.frightenedUntil - serverNow <= 3_000
+        state.ghosts.forEach { drawActor(canvas, it, false, left, top, tile, smoothing, timeSeconds, warning) }
     }
 
     private fun drawActor(
@@ -134,6 +151,7 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         tile: Float,
         smoothing: Float,
         timeSeconds: Float,
+        frightenedWarning: Boolean,
     ) {
         val targetX = left + (actor.x + .5f) * tile
         val targetY = top + (actor.y + .5f) * tile
@@ -164,10 +182,11 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
             return
         }
 
+        val identityColor = listOf(Color.RED, Color.MAGENTA, Color.CYAN, Color.rgb(255, 143, 0))[abs(actor.id.hashCode()) % 4]
         val ghostColor = when (actor.mode) {
-            "FRIGHTENED" -> Color.rgb(41, 98, 255)
+            "FRIGHTENED" -> if (frightenedWarning && (timeSeconds * 7f).toInt() % 2 == 0) identityColor else Color.rgb(41, 98, 255)
             "EATEN" -> Color.TRANSPARENT
-            else -> listOf(Color.RED, Color.MAGENTA, Color.CYAN, Color.rgb(255, 143, 0))[abs(actor.id.hashCode()) % 4]
+            else -> identityColor
         }
         if (actor.mode != "EATEN") {
             paint.color = ghostColor

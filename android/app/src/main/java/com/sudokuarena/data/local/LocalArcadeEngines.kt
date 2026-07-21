@@ -196,7 +196,7 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
         val targetX = if (y == 7 && x + dx < 0) 14 else if (y == 7 && x + dx > 14) 0 else x + dx
         if (map.getOrNull(y + dy)?.getOrNull(targetX) == 1) { y += dy; x = targetX }
         if (pills.remove("$x:$y")) score += 10
-        if (powerPills.remove("$x:$y")) { score += 50; frightenedUntil = tick + 420 }
+        if (powerPills.remove("$x:$y")) { score += 50; frightenedUntil = tick + 100 }
         if (tick % 4L != 3L) {
             ghosts.indices.forEach { index ->
                 if (eatenUntil[index] > tick) {
@@ -217,7 +217,7 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
             if (tick < frightenedUntil) {
                 score += 200
                 ghosts[index] = 7 to 7
-                eatenUntil[index] = tick + 600
+                eatenUntil[index] = tick + 300
             } else {
                 lives--
                 x = 1; y = 1; direction = "STOP"
@@ -241,6 +241,7 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
             )
         },
         status = if (started) "PLAYING" else "WAITING",
+        frightenedUntil = if (frightenedUntil > tick) System.currentTimeMillis() + (frightenedUntil - tick) * 100 else 0,
     )
 
     private fun vector(value: String): Pair<Int, Int> = when (value) {

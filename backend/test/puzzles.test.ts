@@ -251,7 +251,7 @@ describe("motor genérico de puzzles", () => {
     assert.equal(engine.snapshot(players, 1_001).meta.currentPlayerTurn, "p1");
   });
 
-  it("El Gato detecta una de las ocho líneas de victoria", () => {
+  it("El Gato Ultimate aplica el mini-tablero forzado", () => {
     const players = new ArenaGame("gato");
     players.addPlayer("p1", "X"); players.addPlayer("p2", "O");
     players.startMatch({ gameType: "TIC_TAC_TOE", powersEnabled: false, teamMode: "DUEL", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
@@ -261,9 +261,9 @@ describe("motor genérico de puzzles", () => {
       engine.makeMove(id, { requestId, row, col, val: "MARK" }, players);
     assert.equal(play("p1", 0, 0, "x1").accepted, true);
     assert.equal(play("p2", 1, 0, "o1").accepted, true);
-    assert.equal(play("p1", 0, 1, "x2").accepted, true);
-    assert.equal(play("p2", 1, 1, "o2").accepted, true);
-    assert.equal(play("p1", 0, 2, "x3").completed, true);
+    assert.equal(play("p1", 0, 1, "fuera-del-mini").accepted, false);
+    assert.equal(play("p1", 3, 0, "x2").accepted, true);
+    assert.equal(engine.snapshot(players).board.length, 9);
   });
 
   it("Ahorcado enmascara la palabra y conserva el turno al acertar", () => {
@@ -316,8 +316,9 @@ describe("motor genérico de puzzles", () => {
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
     assert.ok(shapes.some((shape) => shape.points.length >= 4));
-    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
-    assert.ok(shapes.every((shape) => Math.abs(shape.exitVector.x) + Math.abs(shape.exitVector.y) === 1));
+    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));
+    assert.ok(shapes.some((shape) => shape.direction.startsWith("ANGLE_")));
+    assert.ok(shapes.every((shape) => Math.abs(Math.hypot(shape.exitVector.x, shape.exitVector.y) - 1) < .01));
     assert.ok(shapes.every((shape) => shape.thickness > 0));
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
   });

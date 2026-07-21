@@ -36,7 +36,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -358,7 +360,13 @@ fun DemolitionArenaScreen(state: ArenaUiState, onPaddle: (Float) -> Unit, onPaus
                 drawRoundRect(Color.White.copy(alpha = .65f), Offset(brick.x * size.width + 2f, brick.y * size.height + 2f), Size(brick.width * size.width - 4f, brick.height * size.height - 4f), style = Stroke(2f))
             }
             val paddleColor = runCatching { Color(android.graphics.Color.parseColor(player.colorHex)) }.getOrDefault(Color.Cyan)
-            drawRoundRect(paddleColor, Offset((player.paddleX - .11f) * size.width, .92f * size.height), Size(.22f * size.width, .026f * size.height))
+            val paddleWidth = if (player.wideUntil > (arena?.serverTime ?: 0L)) .38f else .22f
+            drawRoundRect(
+                brush = Brush.horizontalGradient(listOf(paddleColor.copy(alpha = .55f), Color.White, paddleColor)),
+                topLeft = Offset((player.paddleX - paddleWidth / 2f) * size.width, .92f * size.height),
+                size = Size(paddleWidth * size.width, .026f * size.height),
+                cornerRadius = CornerRadius(14f, 14f),
+            )
             val balls = player.balls.ifEmpty {
                 listOf(com.sudokuarena.domain.DemolitionBallState(
                     "legacy", player.ballX, player.ballY, player.velocityX, player.velocityY,
@@ -372,16 +380,26 @@ fun DemolitionArenaScreen(state: ArenaUiState, onPaddle: (Float) -> Unit, onPaus
             }
             player.drops.forEach { drop ->
                 val color = when (drop.type) {
-                    "MULTIBALL" -> Color.Cyan
+                    "MULTIBALL_2" -> Color.Cyan
+                    "MULTIBALL_5" -> Color(0xFF7C4DFF)
+                    "MULTIBALL_10" -> Color(0xFFFF3CAC)
+                    "PADDLE_WIDE" -> Color(0xFF00E676)
+                    "MISSILE" -> Color(0xFFFF6D00)
                     "LASER" -> Color.Red
                     else -> Color.Yellow
                 }
                 drawCircle(color, size.minDimension * .025f, Offset(drop.x * size.width, drop.y * size.height))
                 drawCircle(Color.White, size.minDimension * .029f, Offset(drop.x * size.width, drop.y * size.height), style = Stroke(2f))
+                drawLine(Color.White.copy(alpha = .35f), Offset(drop.x * size.width, (drop.y - .09f) * size.height), Offset(drop.x * size.width, drop.y * size.height), 4f)
             }
             if (player.laserUntil > (arena?.serverTime ?: 0L)) {
                 drawLine(Color.Red, Offset((player.paddleX - .06f) * size.width, .91f * size.height), Offset((player.paddleX - .06f) * size.width, 0f), 3f)
                 drawLine(Color.Red, Offset((player.paddleX + .06f) * size.width, .91f * size.height), Offset((player.paddleX + .06f) * size.width, 0f), 3f)
+            }
+            if (player.missileUntil > (arena?.serverTime ?: 0L)) {
+                val x = player.missileX * size.width
+                drawLine(Color(0xFFFF6D00), Offset(x, .91f * size.height), Offset(x, .04f * size.height), 10f)
+                drawLine(Color.White, Offset(x, .91f * size.height), Offset(x, .04f * size.height), 3f)
             }
         }
         Text("Desliza horizontalmente para mover la plataforma", color = Color(0xFFB8C7E8), fontSize = 12.sp, modifier = Modifier.align(Alignment.CenterHorizontally))

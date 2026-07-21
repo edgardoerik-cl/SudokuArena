@@ -85,11 +85,13 @@ class LocalPuzzleEngine(
     private var towerWave = 0
     private var towerBaseHealth = 20
     private var towerWaveActive = false
+    private var towerWaveStartedAt = 0L
     private var towerLastTickAt = 0L
     private val towerEnemies = mutableListOf<LocalTowerEnemy>()
     private val towerProjectiles = mutableListOf<LocalTowerProjectile>()
     private val towerNextShotAt = mutableMapOf<String, Long>()
     private var reactorRemoved = 0
+    private var reactorLastChain: Map<String, Any?>? = null
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
@@ -150,6 +152,7 @@ class LocalPuzzleEngine(
             if (gameType == GameType.REACTOR_CHAIN) mapOf(
                 "removed" to reactorRemoved,
                 "targetRemoved" to (blueprint.meta["targetRemoved"] ?: 100),
+                "lastChain" to reactorLastChain,
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
@@ -908,7 +911,7 @@ class LocalPuzzleEngine(
         fun line(values: List<Int?>): List<Int?> {
             val output = mutableListOf<Int>()
             values.filterNotNull().forEach { value ->
-                if (output.lastOrNull()?.plus(value) == 0) { output.removeAt(output.lastIndex); merges++ }
+                if (merges < 1 && output.lastOrNull()?.plus(value) == 0) { output.removeAt(output.lastIndex); merges++ }
                 else output += value
             }
             return output.map<Int, Int?> { it } + List(size - output.size) { null }
@@ -1010,6 +1013,22 @@ class LocalPuzzleEngine(
     private fun towerDefenseMove(row: Int, col: Int, raw: Any?): LocalPuzzleMoveResult {
         val payload = raw as? Map<*, *>
         val action = payload?.get("action")?.toString()?.uppercase() ?: "BUILD"
+        if (action in setOf("EMP", "ORBITAL", "REPAIR", "OVERCLOCK")) {
+            val cost = mapOf("EMP" to 180, "ORBITAL" to 280, "REPAIR" to 220, "OVERCLOCK" to 200).getValue(action)
+            if (towerCredits < cost) return reject("Créditos insuficientes")
+            towerCredits -= cost
+            val now = System.currentTimeMillis()
+            when (action) {
+                "EMP" -> towerEnemies.filter { it.status == "MOVING" }.forEach { it.hp -= 15f; it.slowUntil = now + 4_500; if (it.hp <= 0) it.status = "DEFEATED" }
+                "ORBITAL" -> towerEnemies.filter { it.status == "MOVING" }.forEach { it.hp -= 80f; if (it.hp <= 0) it.status = "DEFEATED" }
+                "REPAIR" -> towerBaseHealth = (towerBaseHealth + 5).coerceAtMost(20)
+                else -> board = board.map { cells -> cells.map { cell ->
+                    if (cell.ownerId == OWNER && cell.meta["towerType"] != null) cell.copy(meta = cell.meta + ("overclockUntil" to now + 12_000)) else cell
+                } }
+            }
+            revision++
+            return LocalPuzzleMoveResult(true, snapshot(), points = 10, message = "Habilidad $action activada")
+        }
         if (action == "START_WAVE") {
             if (towerWaveActive) return reject("La oleada actual sigue en combate")
             towerWave++
@@ -1024,11 +1043,12 @@ class LocalPuzzleEngine(
                     else -> "SCOUT"
                 }
                 val hp = (when (kind) { "GOLEM" -> 110f; "BRUTE" -> 58f; "PHANTOM" -> 38f; else -> 28f }) * layers
-                val speed = when (kind) { "PHANTOM" -> 1.28f; "GOLEM" -> .46f; "BRUTE" -> .66f; else -> .9f }
-                towerEnemies += LocalTowerEnemy("w$towerWave-e$index", kind, hp, hp, 0f, speed, now + index * 620L)
+                val speed = when (kind) { "PHANTOM" -> 1.65f; "GOLEM" -> .82f; "BRUTE" -> 1.02f; else -> 1.32f }
+                towerEnemies += LocalTowerEnemy("w$towerWave-e$index", kind, hp, hp, 0f, speed, now + index * 420L)
             }
             towerProjectiles.clear()
             towerWaveActive = true
+            towerWaveStartedAt = now
             towerLastTickAt = now
             revision++
             return LocalPuzzleMoveResult(true, snapshot(), message = "Oleada $towerWave entrando en la arena")
@@ -1062,6 +1082,10 @@ class LocalPuzzleEngine(
         if (path.size < 2) return false
         val dt = if (towerLastTickAt == 0L) .05f else ((now - towerLastTickAt) / 1_000f).coerceIn(.01f, .2f)
         towerLastTickAt = now
+        if (towerWaveStartedAt > 0 && now - towerWaveStartedAt >= 75_000) {
+            towerEnemies.filter { it.status == "WAITING" || it.status == "MOVING" }.forEach { it.status = "LEAKED" }
+            towerBaseHealth = (towerBaseHealth - 1).coerceAtLeast(0)
+        }
         towerEnemies.forEach { enemy ->
             if (enemy.status == "WAITING" && now >= enemy.spawnAt) enemy.status = "MOVING"
             if (enemy.status != "MOVING") return@forEach
@@ -1078,6 +1102,7 @@ class LocalPuzzleEngine(
         board.forEachIndexed { towerRow, cells -> cells.forEachIndexed { towerCol, tower ->
             val type = tower.meta["towerType"]?.toString() ?: return@forEachIndexed
             val level = (tower.meta["level"] as? Number)?.toInt() ?: 1
+            val overclocked = (tower.meta["overclockUntil"] as? Number)?.toLong()?.let { it > now } == true
             val range = when (type) { "SNIPER" -> 6.4; "BLAST" -> 3.2; "FROST" -> 3.7; else -> 3.4 }
             val key = "$towerRow:$towerCol"
             if ((towerNextShotAt[key] ?: 0L) > now) return@forEachIndexed
@@ -1085,7 +1110,7 @@ class LocalPuzzleEngine(
                 val point = localTowerPosition(enemy.progress, path)
                 enemy to hypot(point.first - towerRow.toDouble(), point.second - towerCol.toDouble())
             }.filter { it.second <= range }.maxByOrNull { it.first.progress }?.first ?: return@forEachIndexed
-            val damage = (when (type) { "SNIPER" -> 22f; "BLAST" -> 13f; "FROST" -> 7f; else -> 9f }) * level
+            val damage = (when (type) { "SNIPER" -> 22f; "BLAST" -> 13f; "FROST" -> 7f; else -> 9f }) * level * if (overclocked) 1.35f else 1f
             target.hp -= damage
             if (type == "FROST") target.slowUntil = now + 1_700
             if (target.hp <= 0) { target.hp = 0f; target.status = "DEFEATED" }
@@ -1095,7 +1120,7 @@ class LocalPuzzleEngine(
                 damage, type,
                 now, now + if (type == "SNIPER") 120 else 240,
             )
-            towerNextShotAt[key] = now + when (type) { "RAPID" -> 360L; "SNIPER" -> 1_100L; else -> 700L }
+            towerNextShotAt[key] = now + ((when (type) { "RAPID" -> 360L; "SNIPER" -> 1_100L; else -> 700L }) * if (overclocked) .55 else 1.0).toLong()
         } }
         towerProjectiles.removeAll { it.arrivesAt + 220 < now }
         if (towerEnemies.none { it.status == "WAITING" || it.status == "MOVING" }) {
@@ -1132,6 +1157,11 @@ class LocalPuzzleEngine(
         }
         board = next
         reactorRemoved += group.size
+        reactorLastChain = mapOf(
+            "playerId" to OWNER, "size" to group.size, "color" to color,
+            "cells" to group.map { (y, x) -> mapOf("row" to y, "col" to x) },
+            "at" to System.currentTimeMillis(),
+        )
         return accept(group.size * group.size)
     }
 
@@ -1237,7 +1267,15 @@ class LocalPuzzleEngine(
     }
 
     private fun capitalArena(): Blueprint {
-        val names = listOf("SALIDA") + (1 until 40).map { "Distrito $it" }
+        val names = listOf(
+            "SALIDA", "Av. Mediterráneo", "ARCA COMUNAL", "Av. Báltica", "IMPUESTO", "Ferrocarril Reading",
+            "Av. Oriental", "SUERTE", "Av. Vermont", "Av. Connecticut", "CÁRCEL", "Plaza San Carlos", "Eléctrica",
+            "Av. States", "Av. Virginia", "Ferrocarril Pensilvania", "Plaza St. James", "ARCA COMUNAL", "Av. Tennessee",
+            "Av. Nueva York", "PARKING", "Av. Kentucky", "SUERTE", "Av. Indiana", "Av. Illinois", "Ferrocarril B&O",
+            "Av. Atlántico", "Av. Ventnor", "Agua", "Jardines Marvin", "IR A CÁRCEL", "Av. Pacífico",
+            "Av. Carolina", "ARCA COMUNAL", "Av. Pensilvania", "Short Line", "Parque Place", "IMPUESTO LUJO",
+            "Paseo Tablado", "Palacio Multi Arena",
+        )
         val coordinates = buildList {
             for (col in 10 downTo 0) add(10 to col)
             for (row in 9 downTo 0) add(row to 0)

@@ -277,7 +277,7 @@ export class PacmanArenaEngine {
                 player.score = (player.score ?? 0) + 10;
             if (this.powerPills.delete(key)) {
                 player.score = (player.score ?? 0) + 50;
-                this.frightenedUntil = now + 7_000;
+                this.frightenedUntil = now + 10_000;
             }
         }
         this.ghosts.forEach((ghost, index) => {
@@ -310,7 +310,9 @@ export class PacmanArenaEngine {
                     ghost.x = 7;
                     ghost.y = 7;
                     ghost.direction = "STOP";
-                    ghost.eatenUntil = now + 10_000;
+                    // Los ojos regresan a la casa central y el fantasma queda regenerando
+                    // treinta segundos antes de atravesar nuevamente la compuerta.
+                    ghost.eatenUntil = now + 30_000;
                 }
                 else {
                     if (ghost.mode === "EATEN")
@@ -328,6 +330,8 @@ export class PacmanArenaEngine {
         return {
             serverTime: Date.now(), tick: this.tickNumber, completed: this.completed, tilemap: PACMAN_MAP,
             status: this.started ? "PLAYING" : "WAITING",
+            frightenedUntil: this.frightenedUntil,
+            ghostHouse: { x: 7, y: 7, width: 3, height: 2 },
             pills: [...this.pills], powerPills: [...this.powerPills],
             players: [...this.players.values()], ghosts: this.ghosts,
         };
@@ -420,6 +424,10 @@ export class DemolitionArenaEngine {
                 drops: [],
                 laserUntil: 0,
                 speedUntil: 0,
+                wideUntil: 0,
+                missileUntil: 0,
+                missileX: .5,
+                nextSkyDropAt: Date.now() + 30_000,
             });
         });
     }
@@ -457,8 +465,20 @@ export class DemolitionArenaEngine {
     }
     integrate(player, deltaSeconds) {
         const now = Date.now();
+        // Una capsula global cae cada 30 s aunque el jugador no rompa un bloque especial.
+        if (now >= player.nextSkyDropAt) {
+            const skyTypes = ["PADDLE_WIDE", "MULTIBALL_2", "MULTIBALL_5", "MULTIBALL_10", "MISSILE"];
+            player.drops.push({
+                id: `sky-${now}`,
+                x: .08 + Math.random() * .84,
+                y: -.04,
+                type: skyTypes[Math.floor(Math.random() * skyTypes.length)],
+            });
+            player.nextSkyDropAt = now + 30_000;
+        }
         player.drops.forEach((drop) => { drop.y += deltaSeconds * .22; });
-        const caught = player.drops.filter((drop) => drop.y >= .88 && drop.y <= .97 && Math.abs(drop.x - player.paddleX) <= .13);
+        const paddleWidth = player.wideUntil > now ? .38 : .21;
+        const caught = player.drops.filter((drop) => drop.y >= .88 && drop.y <= .97 && Math.abs(drop.x - player.paddleX) <= paddleWidth / 2 + .025);
         caught.forEach((drop) => this.applyDemolitionDrop(player, drop.type, now));
         player.drops = player.drops.filter((drop) => drop.y <= 1 && !caught.includes(drop));
         if (player.laserUntil > now && this.tickNumber % 12 === 0) {
@@ -469,6 +489,15 @@ export class DemolitionArenaEngine {
                 if (target.hp <= 0)
                     player.bricks = player.bricks.filter((brick) => brick.id !== target.id);
                 player.score += 8 * player.level;
+            }
+        }
+        if (player.missileUntil > now && this.tickNumber % 5 === 0) {
+            player.missileX = player.paddleX;
+            const victims = player.bricks.filter((brick) => Math.abs(brick.x + brick.width / 2 - player.missileX) <= .045);
+            if (victims.length > 0) {
+                const victimIds = new Set(victims.map((brick) => brick.id));
+                player.bricks = player.bricks.filter((brick) => !victimIds.has(brick.id));
+                player.score += victims.length * 14 * player.level;
             }
         }
         player.balls.forEach((ball) => this.integrateDemolitionBall(player, ball, deltaSeconds, now));
@@ -503,7 +532,8 @@ export class DemolitionArenaEngine {
             ball.vy = Math.abs(ball.vy);
             nextY = radius;
         }
-        const paddle = { x: player.paddleX - .105, y: .91, width: .21, height: .025 };
+        const paddleWidth = player.wideUntil > now ? .38 : .21;
+        const paddle = { x: player.paddleX - paddleWidth / 2, y: .91, width: paddleWidth, height: .025 };
         if (ball.vy > 0 && circleIntersectsRect(nextX, nextY, radius, paddle)) {
             const relative = (nextX - player.paddleX) / (paddle.width / 2);
             const speed = Math.min(.92, Math.hypot(ball.vx, ball.vy) * 1.015);
@@ -523,7 +553,7 @@ export class DemolitionArenaEngine {
             if (hit.hp <= 0) {
                 player.bricks = player.bricks.filter((brick) => brick.id !== hit.id);
                 if (Math.random() < .24) {
-                    const types = ["MULTIBALL", "LASER", "SPEED"];
+                    const types = ["MULTIBALL_2", "LASER", "SPEED"];
                     player.drops.push({
                         id: `drop-${this.tickNumber}-${hit.id}`,
                         x: hit.x + hit.width / 2,
@@ -548,11 +578,24 @@ export class DemolitionArenaEngine {
             }];
     }
     applyDemolitionDrop(player, type, now) {
-        if (type === "MULTIBALL") {
-            const source = player.balls[0];
-            if (source) {
-                player.balls.push({ ...source, id: `multi-a-${this.tickNumber}`, vx: -Math.abs(source.vx || .32) }, { ...source, id: `multi-b-${this.tickNumber}`, vx: Math.abs(source.vx || .32) });
+        if (type.startsWith("MULTIBALL")) {
+            const multiplier = Number(type.split("_")[1] ?? 2);
+            const sources = [...player.balls];
+            if (sources.length > 0) {
+                const targetCount = Math.min(20, Math.max(player.balls.length, sources.length * multiplier));
+                for (let index = player.balls.length; index < targetCount; index += 1) {
+                    const source = sources[index % sources.length];
+                    const angle = ((index * 47) % 120 - 60) * Math.PI / 180;
+                    const speed = Math.max(.42, Math.hypot(source.vx, source.vy));
+                    player.balls.push({ ...source, id: `multi-${this.tickNumber}-${index}`, vx: Math.sin(angle) * speed, vy: -Math.abs(Math.cos(angle) * speed) });
+                }
             }
+        }
+        else if (type === "PADDLE_WIDE")
+            player.wideUntil = now + 12_000;
+        else if (type === "MISSILE") {
+            player.missileX = player.paddleX;
+            player.missileUntil = now + 1_100;
         }
         else if (type === "LASER")
             player.laserUntil = now + 5_000;

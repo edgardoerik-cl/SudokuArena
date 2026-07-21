@@ -73,9 +73,18 @@ function merge2048(random, difficulty) {
 }
 function ticTacToe(difficulty) {
     return {
-        board: matrix(3, 3, () => cell(null, false)),
-        answers: matrix(3, 3, () => null),
-        meta: { turnBased: true, marks: ["X", "O"], difficulty },
+        board: matrix(9, 9, (row, col) => cell(null, false, {
+            miniRow: Math.floor(row / 3), miniCol: Math.floor(col / 3),
+            localRow: row % 3, localCol: col % 3,
+        })),
+        answers: matrix(9, 9, () => null),
+        meta: {
+            turnBased: true, marks: ["X", "O"], variant: "ULTIMATE_INFINITE",
+            forcedMini: null, miniWinners: {}, maxActiveMarks: 3,
+            powers: ["PUSH", "SHIELD", "BOMB"],
+            instructions: "Gato Ultimate: la casilla elegida envía al rival al mini-tablero equivalente. Solo conservas 3 fichas activas; la más antigua se desintegra al poner la cuarta.",
+            difficulty,
+        },
     };
 }
 function checkers(difficulty) {
@@ -145,7 +154,7 @@ function chessTactics(difficulty) {
             turnBased: true,
             blueMoves: "movimiento",
             redMoves: "ataque",
-            instructions: "Elige movimiento clásico O habilidad. Peón: Falange; Caballo: Salto Sísmico; Alfil: Rayo; Torre: Muro; Reina: Intimidación; Rey: Revivir.",
+            instructions: "Elige movimiento clásico O habilidad. Peón: Carga del Peón; Caballo: Salto Sísmico; Alfil: Rayo; Torre: Muro; Reina: Intimidación; Rey: Revivir.",
             difficulty,
         },
     };
@@ -479,13 +488,16 @@ function hangman(random, difficulty) {
     };
 }
 function arrowsEscape(random, difficulty) {
-    const count = sizeFor(difficulty, 12, 16, 20, 24);
+    // Un lienzo grande y denso: las cabezas dibujan colectivamente un corazon.
+    const count = sizeFor(difficulty, 24, 32, 40, 48);
     const board = matrix(1, count, () => cell(null, true));
     const answers = matrix(1, count, () => null);
     const shapes = [];
     const directions = [
         { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
         { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
+        { name: "ANGLE_60", x: .5, y: -.866 }, { name: "ANGLE_120", x: -.5, y: -.866 },
+        { name: "ANGLE_240", x: -.5, y: .866 }, { name: "ANGLE_300", x: .5, y: .866 },
     ];
     const pointToSegment = (point, start, end) => {
         const dx = end.x - start.x;
@@ -521,19 +533,29 @@ function arrowsEscape(random, difficulty) {
     for (let index = 0; index < count; index += 1) {
         let route = null;
         for (let attempt = 0; attempt < 350 && route === null; attempt += 1) {
-            const exit = random.pick(directions);
-            const grid = 20;
-            const head = { x: random.int(3, grid - 3) / grid, y: random.int(3, grid - 3) / grid };
+            const angle = Math.PI * 2 * index / count;
+            // Curva paramÃ©trica de corazÃ³n, normalizada y con una ligera variaciÃ³n
+            // procedural para que cada nivel conserve la silueta sin repetirse.
+            const head = {
+                x: .5 + .31 * Math.pow(Math.sin(angle), 3) + (random.next() - .5) * .025,
+                y: .49 - .24 * Math.cos(angle) + .095 * Math.cos(2 * angle) + .045 * Math.cos(3 * angle) + (random.next() - .5) * .02,
+            };
+            const outward = { x: head.x - .5, y: head.y - .48 };
+            const outwardLength = Math.hypot(outward.x, outward.y) || 1;
+            const exit = [...directions].sort((a, b) => (b.x * outward.x + b.y * outward.y) / outwardLength - (a.x * outward.x + a.y * outward.y) / outwardLength)[0];
             const points = [head];
             let cursor = head;
             let backwards = { x: -exit.x, y: -exit.y };
-            const bends = random.int(2, sizeFor(difficulty, 3, 4, 5, 6));
+            const bends = random.int(1, sizeFor(difficulty, 3, 4, 5, 7));
             for (let segment = 0; segment < bends; segment += 1) {
-                const length = random.int(2, 5) / grid;
+                const length = .035 + random.next() * (segment % 3 === 0 ? .19 : .105);
                 cursor = { x: cursor.x + backwards.x * length, y: cursor.y + backwards.y * length };
                 points.unshift(cursor);
-                const turn = random.next() < .5 ? -1 : 1;
-                backwards = { x: -backwards.y * turn, y: backwards.x * turn };
+                const turnAngle = (random.next() < .52 ? Math.PI / 2 : Math.PI / 3) * (random.next() < .5 ? -1 : 1);
+                backwards = {
+                    x: backwards.x * Math.cos(turnAngle) - backwards.y * Math.sin(turnAngle),
+                    y: backwards.x * Math.sin(turnAngle) + backwards.y * Math.cos(turnAngle),
+                };
             }
             if (points.some((point) => point.x < .055 || point.x > .945 || point.y < .055 || point.y > .945))
                 continue;
@@ -542,7 +564,7 @@ function arrowsEscape(random, difficulty) {
             if (shapes.some((existing) => pathsTouch(rayToBorder(points, exit), existing.points, .04)))
                 continue;
             route = {
-                id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .014,
+                id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .009,
                 blockType: index > 0 && index % 11 === 0 ? "BOMB" : index > 0 && index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL",
                 memberKeys: [`0:${index}`], removalOrder: index,
             };
@@ -581,6 +603,7 @@ function arrowsEscape(random, difficulty) {
         meta: {
             freeSpace: true,
             pathModel: "SERPENTINE_V2",
+            silhouette: "HEART",
             worldWidth: 1,
             worldHeight: 1,
             totalBlocks: count,
@@ -652,14 +675,14 @@ function secretCode(random, difficulty) {
     };
 }
 const CAPITAL_NAMES = [
-    "SALIDA", "Distrito Cian", "NEÓN", "Distrito Pixel", "Impuesto Red", "Estación Byte",
-    "Avenida Quantum", "SUERTE", "Bulevar Vector", "Plaza Kernel", "CÁRCEL",
-    "Barrio Nova", "Compañía Data", "Paseo Láser", "Jardín Holo", "Estación Cloud",
-    "Puerto Crypto", "DESTINO", "Mercado Bot", "Torre Lógica", "PARKING",
-    "Isla Matrix", "SUERTE", "Centro Arcade", "Ciudad Prisma", "Estación Socket",
-    "Paseo Android", "Avenida Compose", "Compañía Node", "Fortaleza Arena", "IR A CÁRCEL",
-    "Distrito Synth", "Distrito Lumen", "DESTINO", "Metrópolis IA", "Estación Orbit",
-    "Paseo Zenith", "Impuesto Cloud", "Capital Neón", "Palacio Arena",
+    "SALIDA", "Avenida Mediterráneo", "ARCA COMUNAL", "Avenida Báltica", "Impuesto sobre ingresos", "Ferrocarril Reading",
+    "Avenida Oriental", "SUERTE", "Avenida Vermont", "Avenida Connecticut", "CÁRCEL / VISITAS",
+    "Plaza San Carlos", "Compañía Eléctrica", "Avenida States", "Avenida Virginia", "Ferrocarril Pensilvania",
+    "Plaza St. James", "ARCA COMUNAL", "Avenida Tennessee", "Avenida Nueva York", "ESTACIONAMIENTO LIBRE",
+    "Avenida Kentucky", "SUERTE", "Avenida Indiana", "Avenida Illinois", "Ferrocarril B. & O.",
+    "Avenida Atlántico", "Avenida Ventnor", "Compañía de Agua", "Jardines Marvin", "IR A LA CÁRCEL",
+    "Avenida Pacífico", "Avenida Carolina del Norte", "ARCA COMUNAL", "Avenida Pensilvania", "Ferrocarril Short Line",
+    "Parque Place", "Impuesto de lujo", "Paseo Tablado", "Palacio Multi Arena",
 ];
 function capitalArena(random, difficulty) {
     const size = 11;

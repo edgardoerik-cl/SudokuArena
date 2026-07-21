@@ -119,6 +119,7 @@ data class PacmanArenaState(
     val players: List<PacmanActorState>,
     val ghosts: List<PacmanActorState>,
     val status: String = "WAITING",
+    val frightenedUntil: Long = 0,
 )
 
 data class DemolitionBrickState(
@@ -150,6 +151,9 @@ data class DemolitionPlayerState(
     val drops: List<DemolitionDropState> = emptyList(),
     val laserUntil: Long = 0,
     val speedUntil: Long = 0,
+    val wideUntil: Long = 0,
+    val missileUntil: Long = 0,
+    val missileX: Float = .5f,
 )
 
 data class DemolitionArenaState(

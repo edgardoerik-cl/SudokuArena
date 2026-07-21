@@ -2,6 +2,7 @@ package com.sudokuarena.presentation
 
 import android.content.res.Configuration
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -232,15 +233,34 @@ fun WelcomeScreen(
 
 @Composable
 private fun ArenaBrandHeader(modifier: Modifier = Modifier, compact: Boolean = false) {
+    val motion = rememberInfiniteTransition(label = "brandHeader")
+    val pulse by motion.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1_800, easing = androidx.compose.animation.core.FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "brandPulse",
+    )
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ArenaLogo(Modifier.size(if (compact) 108.dp else 132.dp))
+        Box(contentAlignment = Alignment.Center) {
+            Canvas(Modifier.size(if (compact) 118.dp else 146.dp)) {
+                drawCircle(ArenaColors.ElectricBlue.copy(alpha = .08f + pulse * .10f), radius = size.minDimension * (.39f + pulse * .08f))
+                drawCircle(ArenaColors.Violet.copy(alpha = .50f), radius = size.minDimension * (.40f + pulse * .04f), style = Stroke(2f + pulse * 2f))
+            }
+            ArenaLogo(
+                Modifier.size(if (compact) 108.dp else 132.dp).graphicsLayer {
+                    scaleX = .96f + pulse * .06f
+                    scaleY = scaleX
+                    rotationZ = sin(pulse * Math.PI.toFloat()) * 1.4f
+                },
+            )
+        }
         Text(
             "MULTI ARENA",
             style = (if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.headlineLarge).copy(
-                shadow = Shadow(Color(0x990057D9), blurRadius = 18f),
+                shadow = Shadow(Color(0xCC0057D9), blurRadius = 12f + pulse * 16f),
             ),
             fontWeight = FontWeight.Black,
             color = ArenaColors.Ink,

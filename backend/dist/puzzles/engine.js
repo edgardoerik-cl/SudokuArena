@@ -70,6 +70,7 @@ export class GenericPuzzleEngine {
     towerEnemies = [];
     towerProjectiles = [];
     towerLastTickAt = 0;
+    towerWaveStartedAt = 0;
     towerNextShotAt = new Map();
     towerWaveKills = new Map();
     mergeBotStep = 0;
@@ -183,6 +184,7 @@ export class GenericPuzzleEngine {
                     enemies: this.towerEnemies.map((enemy) => ({ ...enemy })),
                     projectiles: this.towerProjectiles.map((projectile) => ({ ...projectile })),
                     remainingEnemies: this.towerEnemies.filter((enemy) => enemy.status === "WAITING" || enemy.status === "MOVING").length,
+                    waveDeadline: this.towerWaveStartedAt > 0 ? this.towerWaveStartedAt + 75_000 : 0,
                 } : {})
             }
         };
@@ -379,13 +381,22 @@ export class GenericPuzzleEngine {
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && playerId && this.activePlayerId !== playerId)
             return null;
         if (this.gameType === "TIC_TAC_TOE") {
-            for (let row = 0; row < 3; row += 1)
-                for (let col = 0; col < 3; col += 1) {
+            const forced = this.meta.forcedMini;
+            const miniWinners = (this.meta.miniWinners ?? {});
+            const candidates = [];
+            for (let row = 0; row < 9; row += 1)
+                for (let col = 0; col < 9; col += 1) {
+                    if (forced && !miniWinners[`${forced.row}:${forced.col}`]
+                        && (Math.floor(row / 3) !== forced.row || Math.floor(col / 3) !== forced.col))
+                        continue;
+                    if (miniWinners[`${Math.floor(row / 3)}:${Math.floor(col / 3)}`])
+                        continue;
                     if (this.board[row][col].value === null) {
-                        return { requestId: `gato-bot-${randomUUID()}`, row, col, val: "MARK" };
+                        candidates.push({ row, col });
                     }
                 }
-            return null;
+            const candidate = candidates[Math.floor(Math.random() * candidates.length)];
+            return candidate ? { requestId: `gato-bot-${randomUUID()}`, ...candidate, val: "MARK" } : null;
         }
         if (this.gameType === "CHECKERS" && playerId) {
             const team = this.activeTeam(playerId);
@@ -624,12 +635,85 @@ export class GenericPuzzleEngine {
             return { correct: true, points: hits * 12, extraTurn: true };
         }
         if (this.gameType === "TIC_TAC_TOE") {
+            const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
+            const action = String(payload.action ?? move.val ?? "MARK").toUpperCase();
+            const playerIndex = Math.max(0, this.turnOrder.indexOf(playerId));
+            const mark = playerIndex % 2 === 0 ? "X" : "O";
+            const usedPowers = (this.meta.ticUsedPowers ?? {});
+            const mine = new Set(usedPowers[playerId] ?? []);
+            if (["PUSH", "SHIELD", "BOMB"].includes(action)) {
+                if (mine.has(action))
+                    return { correct: false, neutral: true, message: "Poder ya utilizado" };
+                if (action === "SHIELD") {
+                    if (cell.ownerId !== playerId || cell.value !== mark)
+                        return { correct: false };
+                    cell.meta.shielded = true;
+                }
+                else if (action === "BOMB") {
+                    if (cell.value === null || cell.meta.shielded === true)
+                        return { correct: false };
+                    cell.value = null;
+                    cell.ownerId = null;
+                    cell.isRevealed = false;
+                }
+                else {
+                    if (cell.value === null || cell.ownerId === playerId || cell.meta.shielded === true)
+                        return { correct: false };
+                    const destination = [[-1, 0], [0, 1], [1, 0], [0, -1]]
+                        .map(([dy, dx]) => this.board[move.row + dy]?.[move.col + dx])
+                        .find((candidate) => candidate && candidate.value === null && !candidate.isBlocked);
+                    if (!destination)
+                        return { correct: false, neutral: true, message: "No hay casilla adyacente libre" };
+                    destination.value = cell.value;
+                    destination.ownerId = cell.ownerId;
+                    destination.isRevealed = true;
+                    destination.meta.placedAt = cell.meta.placedAt ?? null;
+                    cell.value = null;
+                    cell.ownerId = null;
+                    cell.isRevealed = false;
+                }
+                mine.add(action);
+                usedPowers[playerId] = [...mine];
+                this.meta.ticUsedPowers = usedPowers;
+                return { correct: true, points: 5 };
+            }
             if (cell.value !== null)
                 return { correct: false };
-            const playerIndex = Math.max(0, this.turnOrder.indexOf(playerId));
-            cell.value = playerIndex % 2 === 0 ? "X" : "O";
+            const forced = this.meta.forcedMini;
+            const miniWinners = (this.meta.miniWinners ?? {});
+            if (forced && !miniWinners[`${forced.row}:${forced.col}`]
+                && (Math.floor(move.row / 3) !== forced.row || Math.floor(move.col / 3) !== forced.col)) {
+                return { correct: false, neutral: true, message: "Debes jugar en el mini-tablero resaltado" };
+            }
+            cell.value = mark;
             cell.ownerId = playerId;
             cell.isRevealed = true;
+            cell.meta.placedAt = Date.now();
+            // Gato infinito: al poner la cuarta marca desaparece la más antigua no protegida.
+            const regionStartRow = Math.floor(move.row / 3) * 3;
+            const regionStartCol = Math.floor(move.col / 3) * 3;
+            const owned = this.board.slice(regionStartRow, regionStartRow + 3)
+                .flatMap((row) => row.slice(regionStartCol, regionStartCol + 3))
+                .filter((candidate) => candidate.ownerId === playerId && candidate.value === mark)
+                .sort((a, b) => Number(a.meta.placedAt ?? 0) - Number(b.meta.placedAt ?? 0));
+            if (owned.length > 3) {
+                const oldest = owned.find((candidate) => candidate.meta.shielded !== true) ?? owned[0];
+                oldest.value = null;
+                oldest.ownerId = null;
+                oldest.isRevealed = false;
+                oldest.meta.placedAt = null;
+            }
+            const miniRow = Math.floor(move.row / 3);
+            const miniCol = Math.floor(move.col / 3);
+            const miniWinner = this.ticRegionWinner(miniRow * 3, miniCol * 3);
+            if (miniWinner)
+                miniWinners[`${miniRow}:${miniCol}`] = miniWinner;
+            this.meta.miniWinners = miniWinners;
+            const nextMini = { row: move.row % 3, col: move.col % 3 };
+            const nextKey = `${nextMini.row}:${nextMini.col}`;
+            const nextFull = this.board.slice(nextMini.row * 3, nextMini.row * 3 + 3)
+                .flatMap((row) => row.slice(nextMini.col * 3, nextMini.col * 3 + 3)).every((candidate) => candidate.value !== null);
+            this.meta.forcedMini = miniWinners[nextKey] || nextFull ? null : nextMini;
             const winner = this.ticTacToeWinner();
             if (winner) {
                 this.meta.winnerMark = winner;
@@ -846,6 +930,21 @@ export class GenericPuzzleEngine {
         return { correct: true };
     }
     ticTacToeWinner() {
+        if (this.board.length === 9) {
+            const miniWinners = (this.meta.miniWinners ?? {});
+            const virtual = Array.from({ length: 3 }, (_, row) => Array.from({ length: 3 }, (_, col) => miniWinners[`${row}:${col}`] ?? ""));
+            const lines = [
+                [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
+                [[0, 0], [1, 0], [2, 0]], [[0, 1], [1, 1], [2, 1]], [[0, 2], [1, 2], [2, 2]],
+                [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
+            ];
+            for (const line of lines) {
+                const values = line.map(([row, col]) => virtual[row][col]);
+                if (values[0] && values.every((value) => value === values[0]))
+                    return values[0];
+            }
+            return null;
+        }
         const lines = [
             [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
             [[0, 0], [1, 0], [2, 0]], [[0, 1], [1, 1], [2, 1]], [[0, 2], [1, 2], [2, 2]],
@@ -853,6 +952,20 @@ export class GenericPuzzleEngine {
         ];
         for (const line of lines) {
             const values = line.map(([row, col]) => String(this.board[row][col].value ?? ""));
+            if (values[0] && values.every((value) => value === values[0]))
+                return values[0];
+        }
+        return null;
+    }
+    ticRegionWinner(startRow, startCol) {
+        const region = Array.from({ length: 3 }, (_, row) => Array.from({ length: 3 }, (_, col) => String(this.board[startRow + row][startCol + col].value ?? "")));
+        const lines = [
+            [[0, 0], [0, 1], [0, 2]], [[1, 0], [1, 1], [1, 2]], [[2, 0], [2, 1], [2, 2]],
+            [[0, 0], [1, 0], [2, 0]], [[0, 1], [1, 1], [2, 1]], [[0, 2], [1, 2], [2, 2]],
+            [[0, 0], [1, 1], [2, 2]], [[0, 2], [1, 1], [2, 0]],
+        ];
+        for (const line of lines) {
+            const values = line.map(([row, col]) => region[row][col]);
             if (values[0] && values.every((value) => value === values[0]))
                 return values[0];
         }
@@ -930,12 +1043,17 @@ export class GenericPuzzleEngine {
         const previous = this.board.map((row) => row.map((cell) => cell.value == null ? null : Number.parseInt(String(cell.value), 10)));
         const next = matrixOf(size, size, null);
         let nexuses = 0;
+        const nexusMoves = Number(this.meta.nexusMoves ?? 0);
+        const maxNexusesThisGesture = nexusMoves === 0 ? 1 : 2;
         const processLine = (values) => {
             const compact = values.filter((value) => Number.isInteger(value));
             const output = [];
             for (const value of compact) {
                 const last = output.at(-1);
-                if (last !== undefined && last + value === 0) {
+                // Como máximo se resuelven dos nexos por gesto. Así un tablero lleno
+                // no desaparece casi por completo en el primer swipe y conserva la
+                // lectura táctica de las cargas restantes.
+                if (nexuses < maxNexusesThisGesture && last !== undefined && last + value === 0) {
                     output.pop();
                     nexuses += 1;
                 }
@@ -971,6 +1089,7 @@ export class GenericPuzzleEngine {
             target.meta = target.value === null ? {} : { charge: true };
         }));
         this.meta.lastNexus = nexuses > 0 ? { playerId, count: nexuses, at: Date.now() } : null;
+        this.meta.nexusMoves = nexusMoves + 1;
         this.meta.nexusesCreated = Number(this.meta.nexusesCreated ?? 0) + nexuses;
         const boardIsEmpty = this.board.flat().every((cell) => cell.value === null);
         const round = Number(this.meta.nexusRound ?? 1);
@@ -1030,6 +1149,14 @@ export class GenericPuzzleEngine {
         const path = this.meta.path ?? [];
         if (path.length < 2)
             return false;
+        // Watchdog autoritativo: incluso si una tropa queda sin objetivo o recibe
+        // un estado inconsistente, ninguna oleada puede bloquear la partida.
+        if (this.towerWaveStartedAt > 0 && now - this.towerWaveStartedAt >= 75_000) {
+            const stalled = this.towerEnemies.filter((enemy) => enemy.status === "WAITING" || enemy.status === "MOVING");
+            stalled.forEach((enemy) => { enemy.status = "LEAKED"; });
+            if (stalled.length)
+                this.towerBaseHealth = Math.max(0, this.towerBaseHealth - 1);
+        }
         for (const enemy of this.towerEnemies) {
             if (enemy.status === "WAITING" && now >= enemy.spawnAt)
                 enemy.status = "MOVING";
@@ -1055,7 +1182,9 @@ export class GenericPuzzleEngine {
                 return;
             const level = Number(tower.meta.level ?? 1);
             const range = towerType === "SNIPER" ? 6.4 : towerType === "BLAST" ? 3.2 : towerType === "FROST" ? 3.7 : 3.4;
-            const cooldown = Math.max(.18, (towerType === "RAPID" ? .42 : towerType === "SNIPER" ? 1.25 : .78) - level * .06);
+            const overclocked = Number(tower.meta.overclockUntil ?? 0) > now;
+            const cooldown = Math.max(.14, ((towerType === "RAPID" ? .42 : towerType === "SNIPER" ? 1.25 : .78) - level * .06)
+                * (overclocked ? .55 : 1));
             const key = `${towerRow}:${towerCol}`;
             if ((this.towerNextShotAt.get(key) ?? 0) > now)
                 return;
@@ -1067,7 +1196,8 @@ export class GenericPuzzleEngine {
             const target = candidates[0]?.enemy;
             if (!target)
                 return;
-            const damage = (towerType === "SNIPER" ? 22 : towerType === "BLAST" ? 13 : towerType === "FROST" ? 7 : 9) * level;
+            const damage = (towerType === "SNIPER" ? 22 : towerType === "BLAST" ? 13 : towerType === "FROST" ? 7 : 9)
+                * level * (overclocked ? 1.35 : 1);
             const hit = (enemy, multiplier = 1) => {
                 if (enemy.status !== "MOVING")
                     return;
@@ -1130,6 +1260,41 @@ export class GenericPuzzleEngine {
             ? move.val
             : { action: move.val };
         const action = String(payload.action ?? "BUILD").toUpperCase();
+        if (["EMP", "ORBITAL", "REPAIR", "OVERCLOCK"].includes(action)) {
+            const costs = { EMP: 180, ORBITAL: 280, REPAIR: 220, OVERCLOCK: 200 };
+            const cost = costs[action];
+            const credits = this.towerCredits.get(playerId) ?? 0;
+            if (credits < cost)
+                return { correct: false, neutral: true, message: "Créditos insuficientes para la habilidad" };
+            this.towerCredits.set(playerId, credits - cost);
+            const now = Date.now();
+            if (action === "EMP") {
+                this.towerEnemies.filter((enemy) => enemy.status === "MOVING").forEach((enemy) => {
+                    enemy.hp = Math.max(0, enemy.hp - 15);
+                    enemy.slowUntil = now + 4_500;
+                    if (enemy.hp <= 0)
+                        enemy.status = "DEFEATED";
+                });
+                return { correct: true, points: 20, message: "Pulso EMP: tropas ralentizadas" };
+            }
+            if (action === "ORBITAL") {
+                this.towerEnemies.filter((enemy) => enemy.status === "MOVING").forEach((enemy) => {
+                    enemy.hp = Math.max(0, enemy.hp - 80);
+                    if (enemy.hp <= 0)
+                        enemy.status = "DEFEATED";
+                });
+                return { correct: true, points: 35, message: "Bombardeo orbital desplegado" };
+            }
+            if (action === "REPAIR") {
+                this.towerBaseHealth = Math.min(20, this.towerBaseHealth + 5);
+                return { correct: true, points: 10, message: "Núcleo reparado +5" };
+            }
+            this.board.flat().forEach((tower) => {
+                if (tower.ownerId === playerId && tower.meta.towerType != null)
+                    tower.meta.overclockUntil = now + 12_000;
+            });
+            return { correct: true, points: 15, message: "Torres sobrecargadas durante 12 segundos" };
+        }
         if (action === "START_WAVE") {
             if (this.towerWaveActive) {
                 return { correct: false, neutral: true, message: "La oleada actual todavía está en combate" };
@@ -1149,12 +1314,13 @@ export class GenericPuzzleEngine {
                 return {
                     id: `w${this.towerWave}-e${index}-${randomUUID()}`,
                     kind, hp: maxHp, maxHp, progress: 0,
-                    speed: kind === "PHANTOM" ? 1.28 : kind === "GOLEM" ? .46 : kind === "BRUTE" ? .66 : .9,
-                    spawnAt: now + index * 620, slowUntil: 0, status: "WAITING",
+                    speed: kind === "PHANTOM" ? 1.65 : kind === "GOLEM" ? .82 : kind === "BRUTE" ? 1.02 : 1.32,
+                    spawnAt: now + index * 420, slowUntil: 0, status: "WAITING",
                 };
             });
             this.towerWaveActive = true;
             this.towerLastTickAt = now;
+            this.towerWaveStartedAt = now;
             this.towerProjectiles = [];
             this.towerWaveKills.clear();
             return {
@@ -1244,7 +1410,7 @@ export class GenericPuzzleEngine {
         const combo = Math.max(1, Math.floor(group.length / 4));
         this.meta.combo = combo;
         this.meta.removed = Number(this.meta.removed ?? 0) + group.length;
-        this.meta.lastChain = { playerId, size: group.length, color, at: Date.now() };
+        this.meta.lastChain = { playerId, size: group.length, color, cells: group, at: Date.now() };
         return { correct: true, points: group.length * group.length * combo, message: `Cadena ×${combo} de ${group.length}` };
     }
     reactorGroupSize(row, col) {
@@ -1641,11 +1807,21 @@ export class GenericPuzzleEngine {
             const route = routes.find((candidate) => candidate.id === shapeId);
             if (!route || route.points.length < 2)
                 return false;
-            const vector = directionOverride
-                ? directionOverride === "UP" ? { x: 0, y: -1 }
-                    : directionOverride === "RIGHT" ? { x: 1, y: 0 }
-                        : directionOverride === "DOWN" ? { x: 0, y: 1 } : { x: -1, y: 0 }
-                : route.exitVector;
+            const activeRoutes = routes.filter((candidate) => !candidate.memberKeys.every((key) => removed.has(key)));
+            const guaranteed = [...activeRoutes].sort((a, b) => Number(a.removalOrder ?? 0)
+                - Number(b.removalOrder ?? 0))[0];
+            // Salvaguarda de generaciÃ³n: siempre existe al menos una ruta liberable.
+            // La colisiÃ³n geomÃ©trica sigue rigiendo para todas las demÃ¡s.
+            if (guaranteed?.id === route.id)
+                return true;
+            const namedVectors = {
+                UP: { x: 0, y: -1 }, RIGHT: { x: 1, y: 0 }, DOWN: { x: 0, y: 1 }, LEFT: { x: -1, y: 0 },
+                ANGLE_60: { x: .5, y: -.866 }, ANGLE_120: { x: -.5, y: -.866 },
+                ANGLE_240: { x: -.5, y: .866 }, ANGLE_300: { x: .5, y: .866 },
+            };
+            // Direcciones anguladas conservan el vector de la ruta; nunca deben caer
+            // accidentalmente al caso LEFT por no pertenecer a los cuatro cardinales.
+            const vector = directionOverride ? (namedVectors[directionOverride] ?? route.exitVector) : route.exitVector;
             const head = route.points[route.points.length - 1];
             const candidates = [
                 vector.x > 0 ? (1.08 - head.x) / vector.x : Number.POSITIVE_INFINITY,
@@ -1838,7 +2014,7 @@ export class GenericPuzzleEngine {
             return true;
         }
         if (this.gameType === "TIC_TAC_TOE")
-            return this.ticTacToeWinner() !== null || this.board.flat().every((cell) => cell.value !== null);
+            return this.ticTacToeWinner() !== null;
         if (this.gameType === "CHECKERS") {
             const teams = new Set(this.board.flat().map((cell) => cell.meta.team).filter(Boolean));
             return teams.size <= 1;
@@ -2310,7 +2486,15 @@ export class GenericPuzzleEngine {
                 target.ownerId = playerId;
                 target.isRevealed = true;
             }
+            else
+                target.ownerId = playerId; // Word Conquest: reutilizar una letra reconquista la casilla.
         }
+        const entry = SPANISH_DICTIONARY.find((candidate) => normalizeSpanishWord(candidate.word) === word);
+        const played = (this.meta.playedWords ?? []);
+        this.meta.playedWords = [...played.slice(-11), {
+                word, definition: entry?.clue ?? "Palabra vÃ¡lida del diccionario espaÃ±ol", playerId, points: points * wordMultiplier, at: Date.now(),
+            }];
+        this.meta.lastWord = { word, playerId, points: points * wordMultiplier, at: Date.now() };
         this.racks.set(playerId, rack);
         this.refillRack(playerId);
         return { correct: true, points: points * wordMultiplier + (newTiles.length === 7 ? 50 : 0) };
