@@ -178,6 +178,7 @@ class ArenaViewModel(
     private var soloPuzzle: SudokuPuzzle? = null
     private var soloStartedAt = 0L
     private var roomRequestSent = false
+    private var tetrisInputSeq = 0L
     private var reconnectRoomCode = requestedRoomCode
     private var soloChallengeToken: String? = null
     private var explosionUntil = 0L
@@ -346,7 +347,18 @@ class ArenaViewModel(
         if (isSoloMode) {
             localTetrisEngine?.input(action)
             publishLocalTetris()
-        } else gateway?.sendTetrisInput(action)
+        } else {
+            tetrisInputSeq += 1
+            val sequence = tetrisInputSeq
+            // LEFT/RIGHT/ROTATE/DOWN se dibujan en el mismo frame. El servidor
+            // sigue siendo autoritativo y su ACK corrige paredes o colisiones.
+            mutableState.update { current ->
+                current.copy(tetrisState = current.tetrisState?.let {
+                    predictTetrisInput(it, current.playerId, action, sequence)
+                })
+            }
+            gateway?.sendTetrisInput(action, sequence)
+        }
     }
 
     fun sendPacmanInput(direction: String) {
@@ -877,8 +889,10 @@ class ArenaViewModel(
             is RealtimeEvent.RpsResult -> mutableState.update {
                 it.copy(rpsChoices = event.choices, rpsWinnerId = event.winnerId, rpsTie = event.tie)
             }
-            is RealtimeEvent.TetrisStateUpdated -> mutableState.update {
-                it.copy(tetrisState = event.state, serverNowMs = event.state.serverTime)
+            is RealtimeEvent.TetrisStateUpdated -> mutableState.update { current ->
+                val acknowledged = event.state.players.firstOrNull { it.id == current.playerId }?.lastInputSeq ?: 0L
+                if (!isSoloMode && acknowledged < tetrisInputSeq) current
+                else current.copy(tetrisState = event.state, serverNowMs = event.state.serverTime)
             }
             is RealtimeEvent.PacmanStateUpdated -> mutableState.update {
                 it.copy(pacmanState = event.state, serverNowMs = event.state.serverTime)
@@ -1003,6 +1017,56 @@ class ArenaViewModel(
             ) as T
         }
     }
+}
+
+private val predictiveTetrominoes: Map<String, List<List<Pair<Int, Int>>>> = mapOf(
+    "I" to listOf(listOf(0 to 0, 0 to 1, 0 to 2, 0 to 3), listOf(0 to 2, 1 to 2, 2 to 2, 3 to 2)),
+    "J" to listOf(listOf(0 to 0, 1 to 0, 1 to 1, 1 to 2), listOf(0 to 1, 0 to 2, 1 to 1, 2 to 1), listOf(1 to 0, 1 to 1, 1 to 2, 2 to 2), listOf(0 to 1, 1 to 1, 2 to 0, 2 to 1)),
+    "L" to listOf(listOf(0 to 2, 1 to 0, 1 to 1, 1 to 2), listOf(0 to 1, 1 to 1, 2 to 1, 2 to 2), listOf(1 to 0, 1 to 1, 1 to 2, 2 to 0), listOf(0 to 0, 0 to 1, 1 to 1, 2 to 1)),
+    "O" to listOf(listOf(0 to 1, 0 to 2, 1 to 1, 1 to 2)),
+    "S" to listOf(listOf(0 to 1, 0 to 2, 1 to 0, 1 to 1), listOf(0 to 1, 1 to 1, 1 to 2, 2 to 2)),
+    "T" to listOf(listOf(0 to 1, 1 to 0, 1 to 1, 1 to 2), listOf(0 to 1, 1 to 1, 1 to 2, 2 to 1), listOf(1 to 0, 1 to 1, 1 to 2, 2 to 1), listOf(0 to 1, 1 to 0, 1 to 1, 2 to 1)),
+    "Z" to listOf(listOf(0 to 0, 0 to 1, 1 to 1, 1 to 2), listOf(0 to 2, 1 to 1, 1 to 2, 2 to 1)),
+)
+
+private fun predictTetrisInput(
+    arena: com.sudokuarena.domain.TetrisArenaState,
+    playerId: String?,
+    action: String,
+    sequence: Long,
+): com.sudokuarena.domain.TetrisArenaState {
+    if (playerId == null || action !in setOf("LEFT", "RIGHT", "ROTATE", "SOFT_DROP")) return arena
+    return arena.copy(players = arena.players.map { player ->
+        if (player.id != playerId || player.settledBoard.size != 20) return@map player
+        val rotations = predictiveTetrominoes[player.current] ?: return@map player
+        var row = player.pieceRow
+        var col = player.pieceCol
+        var rotation = player.pieceRotation.mod(rotations.size)
+        when (action) {
+            "LEFT" -> col -= 1
+            "RIGHT" -> col += 1
+            "SOFT_DROP" -> row += 1
+            "ROTATE" -> rotation = (rotation + 1) % rotations.size
+        }
+        fun collides(testRow: Int, testCol: Int, testRotation: Int): Boolean = rotations[testRotation].any { (dy, dx) ->
+            val y = testRow + dy; val x = testCol + dx
+            x !in 0..9 || y >= 20 || (y >= 0 && player.settledBoard[y][x] != 0)
+        }
+        if (collides(row, col, rotation)) {
+            if (action == "ROTATE") {
+                val kick = listOf(-1, 1, 0).firstOrNull { !collides(player.pieceRow, player.pieceCol + it, rotation) }
+                if (kick != null) { row = player.pieceRow; col = player.pieceCol + kick }
+                else { row = player.pieceRow; col = player.pieceCol; rotation = player.pieceRotation.mod(rotations.size) }
+            } else { row = player.pieceRow; col = player.pieceCol }
+        }
+        val rendered = player.settledBoard.map { it.toMutableList() }
+        val color = listOf("I", "J", "L", "O", "S", "T", "Z").indexOf(player.current) + 1
+        rotations[rotation].forEach { (dy, dx) ->
+            val y = row + dy; val x = col + dx
+            if (y in 0..19 && x in 0..9) rendered[y][x] = color
+        }
+        player.copy(board = rendered, pieceRow = row, pieceCol = col, pieceRotation = rotation, lastInputSeq = sequence)
+    })
 }
 
 private fun soloPlayer(score: Int): Player = Player(

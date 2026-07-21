@@ -23,6 +23,16 @@ describe("Tetris Arena", () => {
     assert.equal(engine.input("p1", "HOLD"), false, "Hold debe ganarse completando una línea");
     assert.equal(engine.input("p1", "CLEAN_BOMB"), false, "La bomba requiere cuatro líneas de energía");
   });
+
+  it("confirma la secuencia de entrada y separa tablero fijo para predicción local", () => {
+    const engine = new TetrisArenaEngine();
+    engine.syncPlayers(players);
+    engine.input("p1", "LEFT", 41);
+    const player = engine.snapshot().players.find((candidate: { id: string }) => candidate.id === "p1");
+    assert.equal(player.lastInputSeq, 41);
+    assert.equal(player.settledBoard.length, 20);
+    assert.equal(player.piece.col, 2);
+  });
 });
 
 describe("Pac-Man Arena", () => {

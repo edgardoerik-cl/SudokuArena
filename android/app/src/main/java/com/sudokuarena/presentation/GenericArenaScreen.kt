@@ -467,6 +467,7 @@ private data class SerpentineRoute(
     val exitVector: Offset,
     val thickness: Float,
     val blockType: String,
+    val arrowType: String,
     val memberKeys: List<String>,
 )
 
@@ -493,6 +494,7 @@ private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRout
             ),
             thickness = (route["thickness"] as? Number)?.toFloat() ?: .014f,
             blockType = route["blockType"]?.toString() ?: "NORMAL",
+            arrowType = route["arrowType"]?.toString() ?: "STRAIGHT",
             memberKeys = (route["memberKeys"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty(),
         )
     }.orEmpty()
@@ -642,12 +644,21 @@ private fun SerpentineArrowsBoard(
                     }
                     lineTo(points.last().x, points.last().y)
                 }
-                val color = palette[index % palette.size]
+                val color = when (route.arrowType) {
+                    "STRAIGHT" -> Color(0xFF00E5FF)
+                    "ELBOW_90" -> Color(0xFFB388FF)
+                    "ELBOW_60" -> Color(0xFF00E676)
+                    "LONG_SPEAR" -> Color(0xFFFFAB00)
+                    else -> Color(0xFFFF4081)
+                }
                 val alpha = if (isExiting) 1f - flight.value * .75f else 1f
                 val stroke = maxOf(7f, route.thickness * size.minDimension)
                 drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
                 drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))
                 drawPath(path, Color.White.copy(alpha = .58f * alpha), style = Stroke(maxOf(1.5f, stroke * .18f)))
+                if (route.arrowType == "LONG_SPEAR") {
+                    drawPath(path, Color(0xFFFFF59D).copy(alpha = .8f * alpha), style = Stroke(maxOf(1f, stroke * .22f)))
+                }
                 val head = points.last(); val before = points[points.lastIndex - 1]
                 val tangent = (head - before).let { delta -> delta / delta.getDistance().coerceAtLeast(.001f) }
                 val side = Offset(-tangent.y, tangent.x)
@@ -659,6 +670,15 @@ private fun SerpentineArrowsBoard(
                     close()
                 }
                 drawPath(arrowHead, color.copy(alpha = alpha))
+                when (route.arrowType) {
+                    "ELBOW_90" -> drawRect(Color.White.copy(alpha = .8f), points.first() - Offset(stroke * .55f, stroke * .55f), Size(stroke * 1.1f, stroke * 1.1f))
+                    "ELBOW_60" -> drawCircle(Color.White.copy(alpha = .8f), stroke * .58f, points.first())
+                    "LONG_SPEAR" -> drawCircle(color.copy(alpha = .24f), stroke * 1.5f, head)
+                    "SHORT_BOLT" -> {
+                        drawLine(Color.White, points.first() - Offset(stroke, 0f), points.first() + Offset(stroke, 0f), stroke * .3f)
+                        drawLine(Color.White, points.first() - Offset(0f, stroke), points.first() + Offset(0f, stroke), stroke * .3f)
+                    }
+                }
                 if (route.blockType == "BOMB") drawCircle(Color(0xFFFFD600), stroke * .8f, points.first())
             }
         }
@@ -1181,6 +1201,7 @@ private fun findReactorHint(state: GenericBoardState): Set<CellPosition> {
 private fun ReactorChainBoard(
     state: GenericBoardState,
     enabled: Boolean,
+    localPlayerId: String?,
     onDirectMove: (Int, Int, Any?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1193,6 +1214,7 @@ private fun ReactorChainBoard(
     var lastTouchAt by remember(state.gameId) { mutableStateOf(System.currentTimeMillis()) }
     var hintCells by remember(state.gameId) { mutableStateOf(emptySet<CellPosition>()) }
     var sparkleSeed by remember(state.gameId) { mutableStateOf(0) }
+    var selectedPower by remember(state.gameId) { mutableStateOf<String?>(null) }
     val shimmer by rememberInfiniteTransition(label = "reactorGlass").animateFloat(
         0f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "reactorShimmer",
     )
@@ -1232,7 +1254,9 @@ private fun ReactorChainBoard(
         Color(0xFF00C2FF), Color(0xFFFF2D95), Color(0xFF7C3AED),
         Color(0xFF00C853), Color(0xFFFFB300), Color(0xFFFF5A36),
     )
+    val energy = ((state.meta["powerEnergy"] as? Map<*, *>)?.get(localPlayerId) as? Number)?.toInt() ?: 0
     GameFxHost(fx, modifier.fillMaxSize()) {
+      Box(Modifier.fillMaxSize()) {
         Canvas(
             Modifier.fillMaxSize().background(Color(0xFF07152F), RoundedCornerShape(18.dp))
                 .pointerInput(state.revision, enabled) {
@@ -1241,7 +1265,9 @@ private fun ReactorChainBoard(
                         val col = (tap.x / size.width * state.columns).toInt().coerceIn(0, state.columns - 1)
                         val row = (tap.y / size.height * state.rows).toInt().coerceIn(0, state.rows - 1)
                         lastTouchAt = System.currentTimeMillis(); hintCells = emptySet()
-                        onDirectMove(row, col, "CHAIN")
+                        val power = selectedPower
+                        onDirectMove(row, col, if (power == null) "CHAIN" else mapOf("action" to power))
+                        selectedPower = null
                     }
                 },
         ) {
@@ -1287,6 +1313,39 @@ private fun ReactorChainBoard(
                 }
             }
         }
+        Row(
+            Modifier.align(Alignment.BottomCenter).padding(7.dp).zIndex(4f),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            listOf(
+                Triple("HAMMER", "âœ¦ 3Ã—3", 3), Triple("ROW_BLAST", "â†” Fila", 4),
+                Triple("COLOR_WIPE", "â—‰ Color", 5), Triple("SHUFFLE", "âŸ³ Mezcla", 3),
+            ).forEach { (power, label, cost) ->
+                // Compatibilidad temporal con el separador mal codificado heredado.
+                val `labelÂ` = "$label · "
+                FilledTonalButton(
+                    onClick = {
+                        if (power == "SHUFFLE") onDirectMove(0, 0, mapOf("action" to power))
+                        else selectedPower = if (selectedPower == power) null else power
+                    },
+                    enabled = enabled && energy >= cost,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = if (selectedPower == power) Color(0xFFFFD54F) else Color(0xDD172554),
+                        contentColor = if (selectedPower == power) Color(0xFF271100) else Color.White,
+                    ),
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 3.dp),
+                ) { Text("$labelÂ·$cost", fontSize = 8.sp, fontWeight = FontWeight.Black) }
+            }
+        }
+        Text(
+            "ENERGÃA $energy/12" + (selectedPower?.let { " Â· toca un objetivo" } ?: ""),
+            color = Color.White,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier.align(Alignment.TopStart).padding(9.dp).zIndex(4f)
+                .background(Color(0xAA07152F), RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 3.dp),
+        )
+      }
     }
 }
 
@@ -1299,6 +1358,7 @@ private fun TowerDefenseGrid(
     onCellSelected: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val textMeasurer = rememberTextMeasurer()
     val pulse by rememberInfiniteTransition(label = "towerArena").animateFloat(
         0f, 1f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "towerPulse",
     )
@@ -1346,6 +1406,8 @@ private fun TowerDefenseGrid(
     val previousTowers = remember(state.gameId) { mutableSetOf<String>() }
     var previousWaveActive by remember(state.gameId) { mutableStateOf(false) }
     var previousBaseHealth by remember(state.gameId) { mutableStateOf((state.meta["baseHealth"] as? Number)?.toInt() ?: 20) }
+    var cameraScale by remember(state.gameId) { mutableFloatStateOf(1.35f) }
+    var cameraOffset by remember(state.gameId) { mutableStateOf(Offset.Zero) }
     val haptics = LocalHapticFeedback.current
     LaunchedEffect(state.revision) {
         fun normalized(progress: Float): Pair<Float, Float> {
@@ -1408,19 +1470,31 @@ private fun TowerDefenseGrid(
         Modifier
             .fillMaxSize()
             .background(Color(0xFF071426), RoundedCornerShape(18.dp))
-            .pointerInput(state.revision, enabled) {
-                detectTapGestures { tap ->
+            .pointerInput(state.revision, enabled, cameraScale, cameraOffset) {
+                detectTapGestures(
+                  onDoubleTap = { cameraScale = 1.35f; cameraOffset = Offset.Zero },
+                  onTap = { tap ->
                     if (!enabled || state.rows <= 0 || state.columns <= 0) return@detectTapGestures
                     val tileWidth = size.width * 1.72f / (state.columns + state.rows)
                     val tileHeight = tileWidth * .54f
                     val originX = size.width / 2f + (state.rows - state.columns) * tileWidth * .04f
                     val originY = size.height * .13f
-                    val deltaColumnMinusRow = (tap.x - originX) / (tileWidth / 2f)
-                    val deltaColumnPlusRow = (tap.y - originY) / (tileHeight / 2f)
+                    val worldTap = (tap - Offset(size.width / 2f, size.height / 2f) - cameraOffset) / cameraScale + Offset(size.width / 2f, size.height / 2f)
+                    val deltaColumnMinusRow = (worldTap.x - originX) / (tileWidth / 2f)
+                    val deltaColumnPlusRow = (worldTap.y - originY) / (tileHeight / 2f)
                     val col = ((deltaColumnMinusRow + deltaColumnPlusRow) / 2f).roundToInt()
                     val row = ((deltaColumnPlusRow - deltaColumnMinusRow) / 2f).roundToInt()
                     if (row !in 0 until state.rows || col !in 0 until state.columns) return@detectTapGestures
                     if (state.board[row][col].meta["path"] != true) onCellSelected(row, col)
+                  },
+                )
+            }
+            .pointerInput(state.gameId) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    cameraScale = (cameraScale * zoom).coerceIn(.85f, 2.8f)
+                    cameraOffset += pan
+                    val limitX = size.width * .75f; val limitY = size.height * .75f
+                    cameraOffset = Offset(cameraOffset.x.coerceIn(-limitX, limitX), cameraOffset.y.coerceIn(-limitY, limitY))
                 }
             },
     ) {
@@ -1429,10 +1503,14 @@ private fun TowerDefenseGrid(
         val ch = cw * .54f
         val now = state.serverTime + (System.currentTimeMillis() - receivedAt)
         val isoOrigin = Offset(size.width / 2f + (state.rows - state.columns) * cw * .04f, size.height * .13f)
-        fun point(row: Float, col: Float) = Offset(
+        val screenCenter = Offset(size.width / 2f, size.height / 2f)
+        fun point(row: Float, col: Float): Offset {
+          val world = Offset(
             isoOrigin.x + (col - row) * cw / 2f,
             isoOrigin.y + (col + row) * ch / 2f,
-        )
+          )
+          return (world - screenCenter) * cameraScale + screenCenter + cameraOffset
+        }
         fun position(progress: Float): Offset {
             if (path.isEmpty()) return Offset.Zero
             val start = progress.toInt().coerceIn(0, path.lastIndex)
@@ -1448,6 +1526,12 @@ private fun TowerDefenseGrid(
                 radius = size.maxDimension * .72f,
             ),
         )
+        drawRoundRect(
+            Color(0xCC071426), Offset(8f, 8f), Size(size.width * .34f, 28f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f),
+        )
+        val cameraLabel = textMeasurer.measure("Pellizca para zoom Â· arrastra para recorrer Â· doble toque reinicia", TextStyle(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold))
+        drawText(cameraLabel, topLeft = Offset(14f, 14f))
         repeat(24) { index ->
             val x = ((index * 47 % 101) / 100f * size.width + pulse * (6f + index % 5)).mod(size.width)
             val y = (index * 71 % 97) / 96f * size.height
@@ -1641,7 +1725,7 @@ fun GenericPuzzleGrid(
     modifier: Modifier = Modifier,
 ) {
     if (state.gameType == GameType.REACTOR_CHAIN) {
-        ReactorChainBoard(state, enabled, onDirectMove, modifier)
+        ReactorChainBoard(state, enabled, localPlayerId, onDirectMove, modifier)
         return
     }
     if (state.gameType == GameType.TOWER_DEFENSE) {
@@ -1934,6 +2018,14 @@ fun GenericPuzzleGrid(
                 )
                 drawRect(Color(0xFFB0BEC5), origin, Size(cellWidth, cellHeight), style = Stroke(1.2f))
                 if (ownerColor != null) drawRect(ownerColor, origin, Size(cellWidth, cellHeight), style = Stroke(2.4f))
+            }
+        }
+        if (state.gameType == GameType.TIC_TAC_TOE && state.rows == 9 && state.columns == 9) {
+            for (index in 0..3) {
+                val x = index * 3f * cellWidth
+                val y = index * 3f * cellHeight
+                drawLine(Color(0xFF172033), Offset(x, 0f), Offset(x, size.height), maxOf(3f, cellWidth * .10f))
+                drawLine(Color(0xFF172033), Offset(0f, y), Offset(size.width, y), maxOf(3f, cellWidth * .10f))
             }
         }
         if (state.gameType == GameType.CHESS_TACTICS && chessAction != null) {
@@ -2247,7 +2339,7 @@ private fun composeTacticalRanges(
         if (forward?.value == null) {
             moves += CellPosition(source.row + direction, source.column)
             val double = state.board.getOrNull(source.row + direction * 2)?.getOrNull(source.column)
-            if (cell.meta["hasMoved"] != true && double?.value == null && double?.isBlocked == false) {
+            if (double?.value == null && double?.isBlocked == false) {
                 moves += CellPosition(source.row + direction * 2, source.column)
             }
         }
@@ -2352,10 +2444,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.renderGenericCell(
                 drawCircle(Color(0xFFFFC107).copy(alpha = .24f), min(width, height) * .43f, center)
                 drawCircle(Color(0xFFFFA000), min(width, height) * .41f, center, style = Stroke(maxOf(2f, width * .055f)))
             }
-            val row = (meta["_row"] as? Number)?.toInt() ?: 0
-            val col = (meta["_col"] as? Number)?.toInt() ?: 0
-            if (row % 3 == 0) drawLine(Color(0xFF7C3AED), origin, origin + Offset(width, 0f), maxOf(2f, width * .07f))
-            if (col % 3 == 0) drawLine(Color(0xFF7C3AED), origin, origin + Offset(0f, height), maxOf(2f, width * .07f))
         }
         GameType.DOTS_AND_BOXES -> {
             drawCircle(Color(0xFF102A56), min(width, height) * .08f, Offset(origin.x, origin.y))
@@ -2850,14 +2938,26 @@ private fun GenericMoveControls(
         GameType.CROSS_LETTERS -> {
             var vertical by remember { mutableStateOf(false) }
             var chosen by remember(state.letterRack) { mutableStateOf(emptyList<Int>()) }
-            val normalized = chosen.mapNotNull(state.letterRack::getOrNull).joinToString("")
+            val rackLetters = chosen.mapNotNull(state.letterRack::getOrNull)
             val selectedCell = state.selected
             val board = state.genericBoard?.board.orEmpty()
-            val coordinates = remember(normalized, vertical, selectedCell, board) {
-                normalized.mapIndexed { index, letter ->
-                    Triple((selectedCell?.row ?: -1) + if (vertical) index else 0, (selectedCell?.column ?: -1) + if (vertical) 0 else index, letter)
+            // Reutiliza automáticamente las letras existentes al cruzarlas:
+            // el jugador sólo gasta las fichas nuevas de su atril.
+            val coordinates = remember(rackLetters, vertical, selectedCell, board) {
+                if (selectedCell == null) emptyList() else buildList {
+                    var row = selectedCell.row
+                    var col = selectedCell.column
+                    rackLetters.forEach { rackLetter ->
+                        while (board.getOrNull(row)?.getOrNull(col)?.value != null) {
+                            add(Triple(row, col, board[row][col].value.toString().first()))
+                            if (vertical) row++ else col++
+                        }
+                        add(Triple(row, col, rackLetter.first()))
+                        if (vertical) row++ else col++
+                    }
                 }
             }
+            val normalized = coordinates.joinToString("") { it.third.toString() }
             val inBounds = coordinates.all { (row, col, _) -> board.getOrNull(row)?.getOrNull(col) != null }
             val compatible = inBounds && coordinates.all { (row, col, letter) ->
                 board[row][col].value == null || board[row][col].value.toString() == letter.toString()
@@ -2866,6 +2966,7 @@ private fun GenericMoveControls(
             val previewValid = normalized.length >= 2 && selectedCell != null && inBounds && compatible && connected
             val letterScores = mapOf('A' to 1, 'B' to 3, 'C' to 3, 'D' to 2, 'E' to 1, 'F' to 4, 'G' to 2, 'H' to 4, 'I' to 1, 'J' to 8, 'L' to 1, 'M' to 3, 'N' to 1, 'Ñ' to 8, 'O' to 1, 'P' to 3, 'Q' to 5, 'R' to 1, 'S' to 1, 'T' to 1, 'U' to 1, 'V' to 4, 'X' to 8, 'Y' to 4, 'Z' to 10)
             val estimatedPoints = if (!inBounds) 0 else coordinates.sumOf { (row, col, letter) ->
+                if (board[row][col].value != null) return@sumOf 0
                 val bonus = board[row][col].meta["bonus"]?.toString()
                 (letterScores[letter] ?: 1) * when (bonus) { "DL" -> 2; "TL" -> 3; else -> 1 }
             } * coordinates.fold(1) { multiplier, (row, col, _) ->

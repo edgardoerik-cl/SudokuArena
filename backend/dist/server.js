@@ -258,7 +258,10 @@ io.on("connection", (socket) => {
         const room = roomFor(socket);
         if (!room || room.phase !== "PLAYING" || room.config.gameType !== "TETRIS_ARENA" || !room.tetrisEngine || !payload?.action)
             return;
-        room.tetrisEngine.input(playerId, payload.action);
+        room.tetrisEngine.input(playerId, payload.action, Number(payload.inputSeq ?? 0));
+        // Respuesta inmediata al emisor: evita esperar el siguiente broadcast de
+        // gravedad y tambiÃ©n reconcilia los movimientos rechazados junto a su ACK.
+        socket.emit("tetris:state", room.tetrisEngine.snapshot());
     });
     socket.on("pacman:input", (payload) => {
         const room = roomFor(socket);
@@ -1156,7 +1159,7 @@ function startTetrisLoop(room) {
         io.to(room.code).volatile.emit("tetris:state", snapshot);
         if (snapshot.completed)
             finishMatch(room, true);
-    }, 100);
+    }, 50);
 }
 function startGenericLoop(room) {
     if (!room.genericEngine || room.genericTick || room.config.gameType !== "TOWER_DEFENSE")

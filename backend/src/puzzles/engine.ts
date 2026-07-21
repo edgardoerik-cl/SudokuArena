@@ -123,6 +123,7 @@ export class GenericPuzzleEngine {
   private towerWaveStartedAt = 0;
   private readonly towerNextShotAt = new Map<string, number>();
   private readonly towerWaveKills = new Map<string, number>();
+  private readonly reactorPowerEnergy = new Map<string, number>();
   private mergeBotStep = 0;
 
   constructor(readonly gameType: GameType, readonly gameId: string, options: PuzzleGenerationOptions = {}) {
@@ -233,6 +234,10 @@ export class GenericPuzzleEngine {
             enemy.status === "WAITING" || enemy.status === "MOVING"
           ).length,
           waveDeadline: this.towerWaveStartedAt > 0 ? this.towerWaveStartedAt + 75_000 : 0,
+        } : {}),
+        ...(this.gameType === "REACTOR_CHAIN" ? {
+          powerEnergy: Object.fromEntries(this.reactorPowerEnergy),
+          powerCosts: { HAMMER: 3, ROW_BLAST: 4, COLOR_WIPE: 5, SHUFFLE: 3 },
         } : {})
       }
     };
@@ -384,8 +389,9 @@ export class GenericPuzzleEngine {
       };
     }
     if (this.gameType === "NEXUS_ZERO") {
-      const directions = ["LEFT", "DOWN", "RIGHT", "UP"];
-      return { requestId: `nexus-bot-${randomUUID()}`, row: 0, col: 0, val: directions[this.mergeBotStep++ % 4]! };
+      // El generador garantiza parejas resolubles por línea. Mantener el eje
+      // horizontal evita separar una pareja verticalmente entre intentos.
+      return { requestId: `nexus-bot-${randomUUID()}`, row: 0, col: 0, val: "LEFT" };
     }
     if (this.gameType === "TOWER_DEFENSE") {
       const buildable = this.board.flatMap((row, rowIndex) =>
@@ -1102,20 +1108,25 @@ export class GenericPuzzleEngine {
   }
 
   private spawnNexusWave(pairCount: number): void {
-    const positions = this.board.flatMap((row, rowIndex) =>
-      row.map((_, colIndex) => ({ row: rowIndex, col: colIndex }))
-    );
-    for (let index = positions.length - 1; index > 0; index -= 1) {
-      const target = Math.floor(Math.random() * (index + 1));
-      [positions[index], positions[target]] = [positions[target]!, positions[index]!];
-    }
     this.board.forEach((row) => row.forEach((cell) => {
       cell.value = null; cell.isRevealed = false; cell.ownerId = null; cell.meta = {};
     }));
-    for (let pair = 0; pair < Math.min(pairCount, Math.floor(positions.length / 2)); pair += 1) {
+    // Cada onda mantiene una solución garantizada: cada pareja nace en una
+    // misma línea con huecos libres, aunque su orden/signo siga variando.
+    const used = new Set<string>();
+    for (let pair = 0; pair < Math.min(pairCount, Math.floor(this.board.length * this.board.length / 2)); pair += 1) {
       const value = 1 + Math.floor(Math.random() * 9);
-      const first = positions[pair * 2]!;
-      const second = positions[pair * 2 + 1]!;
+      const row = pair % this.board.length;
+      const columns = Array.from({ length: this.board.length }, (_, col) => col)
+        .filter((col) => !used.has(`${row}:${col}`));
+      for (let index = columns.length - 1; index > 0; index -= 1) {
+        const target = Math.floor(Math.random() * (index + 1));
+        [columns[index], columns[target]] = [columns[target]!, columns[index]!];
+      }
+      if (columns.length < 2) continue;
+      const first = { row, col: columns[0]! };
+      const second = { row, col: columns[1]! };
+      used.add(`${row}:${first.col}`); used.add(`${row}:${second.col}`);
       const sign = Math.random() < .5 ? 1 : -1;
       for (const [position, charge] of [[first, value * sign], [second, -value * sign]] as const) {
         const cell = this.board[position.row]![position.col]!;
@@ -1349,6 +1360,40 @@ export class GenericPuzzleEngine {
     playerId: string,
     move: GenericMove,
   ): { correct: boolean; points?: number; neutral?: boolean; message?: string } {
+    const payload = typeof move.val === "object" && move.val !== null ? move.val as Record<string, unknown> : {};
+    const action = String(payload.action ?? move.val ?? "CHAIN").toUpperCase();
+    const currentEnergy = this.reactorPowerEnergy.get(playerId) ?? 0;
+    const costs: Record<string, number> = { HAMMER: 3, ROW_BLAST: 4, COLOR_WIPE: 5, SHUFFLE: 3 };
+    if (action in costs) {
+      const cost = costs[action]!;
+      if (currentEnergy < cost) return { correct: false, neutral: true, message: "EnergÃ­a de reactor insuficiente" };
+      this.reactorPowerEnergy.set(playerId, currentEnergy - cost);
+      if (action === "SHUFFLE") {
+        const values = this.board.flat().map((cell) => cell.value);
+        for (let index = values.length - 1; index > 0; index -= 1) {
+          const targetIndex = Math.floor(Math.random() * (index + 1));
+          [values[index], values[targetIndex]] = [values[targetIndex]!, values[index]!];
+        }
+        this.board.flat().forEach((cell, index) => { cell.value = values[index]!; cell.meta = { reactorOrb: true }; });
+        this.ensureReactorMove();
+        this.meta.lastPower = { playerId, action, at: Date.now() };
+        return { correct: true, points: 10, message: "Mezcla prismÃ¡tica" };
+      }
+      const selected = this.board[move.row]?.[move.col];
+      if (!selected) return { correct: false, neutral: true, message: "Objetivo invÃ¡lido" };
+      const removed = action === "ROW_BLAST"
+        ? this.board[move.row]!.map((_cell, col) => ({ row: move.row, col }))
+        : action === "COLOR_WIPE"
+          ? this.board.flatMap((row, rowIndex) => row.map((_cell, colIndex) => ({ row: rowIndex, col: colIndex })))
+            .filter(({ row, col }) => this.board[row]![col]!.value === selected.value)
+          : this.board.flatMap((row, rowIndex) => row.map((_cell, colIndex) => ({ row: rowIndex, col: colIndex })))
+            .filter(({ row, col }) => Math.abs(row - move.row) <= 1 && Math.abs(col - move.col) <= 1);
+      this.removeAndCollapseReactors(removed, playerId);
+      this.meta.removed = Number(this.meta.removed ?? 0) + removed.length;
+      this.meta.lastPower = { playerId, action, cells: removed, at: Date.now() };
+      this.meta.lastChain = { playerId, size: removed.length, color: 0, cells: removed, power: action, at: Date.now() };
+      return { correct: true, points: removed.length * 8, message: `${action}: ${removed.length} nÃºcleos` };
+    }
     const target = this.board[move.row]?.[move.col];
     const color = Number(target?.value ?? 0);
     if (!target || color <= 0) return { correct: false, neutral: true, message: "Núcleo vacío" };
@@ -1366,9 +1411,19 @@ export class GenericPuzzleEngine {
       );
     }
     if (group.length < 3) return { correct: false, neutral: true, message: "Necesitas al menos 3 núcleos conectados" };
-    group.forEach(({ row, col }) => {
-      const cell = this.board[row]![col]!;
-      cell.value = null; cell.ownerId = playerId; cell.isRevealed = false;
+    this.removeAndCollapseReactors(group, playerId);
+    const combo = Math.max(1, Math.floor(group.length / 4));
+    this.meta.combo = combo;
+    this.meta.removed = Number(this.meta.removed ?? 0) + group.length;
+    this.reactorPowerEnergy.set(playerId, Math.min(12, currentEnergy + Math.max(1, Math.floor(group.length / 3))));
+    this.meta.lastChain = { playerId, size: group.length, color, cells: group, at: Date.now() };
+    return { correct: true, points: group.length * group.length * combo, message: `Cadena ×${combo} de ${group.length}` };
+  }
+
+  private removeAndCollapseReactors(cells: Array<{ row: number; col: number }>, playerId: string): void {
+    cells.forEach(({ row, col }) => {
+      const cell = this.board[row]?.[col];
+      if (cell) { cell.value = null; cell.ownerId = playerId; cell.isRevealed = false; }
     });
     const colors = Number(this.meta.colors ?? 5);
     for (let col = 0; col < this.board[0]!.length; col += 1) {
@@ -1379,20 +1434,15 @@ export class GenericPuzzleEngine {
         cell.value = value; cell.isRevealed = true; cell.ownerId = null; cell.meta = { reactorOrb: true };
       });
     }
-    const hasPlayableChain = this.board.some((row, rowIndex) =>
-      row.some((_cell, colIndex) => this.reactorGroupSize(rowIndex, colIndex) >= 3)
-    );
-    if (!hasPlayableChain) {
-      const guaranteedColor = 1 + Math.floor(Math.random() * colors);
-      for (const [row, col] of [[0, 0], [0, 1], [1, 0]] as const) {
-        this.board[row]![col]!.value = guaranteedColor;
-      }
+    this.ensureReactorMove();
+  }
+
+  private ensureReactorMove(): void {
+    const playable = this.board.some((row, rowIndex) => row.some((_cell, colIndex) => this.reactorGroupSize(rowIndex, colIndex) >= 3));
+    if (!playable) {
+      const color = 1 + Math.floor(Math.random() * Number(this.meta.colors ?? 5));
+      for (const [row, col] of [[0, 0], [0, 1], [1, 0]] as const) this.board[row]![col]!.value = color;
     }
-    const combo = Math.max(1, Math.floor(group.length / 4));
-    this.meta.combo = combo;
-    this.meta.removed = Number(this.meta.removed ?? 0) + group.length;
-    this.meta.lastChain = { playerId, size: group.length, color, cells: group, at: Date.now() };
-    return { correct: true, points: group.length * group.length * combo, message: `Cadena ×${combo} de ${group.length}` };
   }
 
   private reactorGroupSize(row: number, col: number): number {
@@ -1549,7 +1599,7 @@ export class GenericPuzzleEngine {
         const direction = piece.team === "BLUE" ? 1 : -1;
         const distance = targetRow - move.row;
         if (targetCol !== move.col || distance !== direction && distance !== direction * 2) return { correct: false };
-        if (Math.abs(distance) === 2 && (piece.hasMoved || this.board[move.row + direction]![move.col]!.value !== null)) {
+        if (Math.abs(distance) === 2 && this.board[move.row + direction]![move.col]!.value !== null) {
           return { correct: false };
         }
       }
@@ -1565,6 +1615,9 @@ export class GenericPuzzleEngine {
         piece.statusEffects = piece.statusEffects.filter((effect) => effect !== intimidation);
       }
       piece.hasMoved = true;
+      // Se consume el punto de acción antes de serializar la pieza destino.
+      // Antes se escribía primero y el cliente recibía AP/estado obsoleto.
+      piece.ap -= 1;
       if (enemy) {
         if (enemy.isShielded) {
           enemy.isShielded = false;
@@ -1584,7 +1637,6 @@ export class GenericPuzzleEngine {
         writePiece(target, piece, playerId);
         clearPiece(source);
       }
-      piece.ap -= 1;
       this.meta.lastChessAction = {
         action: enemy ? "ATTACK" : "MOVE",
         sourceRow: move.row,

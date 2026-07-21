@@ -92,6 +92,9 @@ class LocalPuzzleEngine(
     private val towerNextShotAt = mutableMapOf<String, Long>()
     private var reactorRemoved = 0
     private var reactorLastChain: Map<String, Any?>? = null
+    private var reactorLastPower: Map<String, Any?>? = null
+    private var reactorPowerEnergy = 0
+    private var ticForcedMini: Pair<Int, Int>? = null
 
     fun snapshot() = GenericBoardState(
         gameId = "local-${gameType.name.lowercase()}-${blueprint.seed}", gameType = gameType,
@@ -153,6 +156,14 @@ class LocalPuzzleEngine(
                 "removed" to reactorRemoved,
                 "targetRemoved" to (blueprint.meta["targetRemoved"] ?: 100),
                 "lastChain" to reactorLastChain,
+                "lastPower" to reactorLastPower,
+                "powerEnergy" to mapOf(OWNER to reactorPowerEnergy),
+                "powerCosts" to mapOf("HAMMER" to 3, "ROW_BLAST" to 4, "COLOR_WIPE" to 5, "SHUFFLE" to 3),
+            ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.TIC_TAC_TOE) mapOf(
+                "variant" to "ULTIMATE_INFINITE",
+                "forcedMini" to ticForcedMini?.let { mapOf("row" to it.first, "col" to it.second) },
+                "instructions" to "Gato Ultimate: tu casilla local decide el mini-tablero del rival.",
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.CAPITAL_ARENA) mapOf(
             "currentPlayerTurn" to OWNER, "stage" to capitalStage, "pendingProperty" to capitalPending,
@@ -170,7 +181,7 @@ class LocalPuzzleEngine(
         if (gameType == GameType.CAPITAL_ARENA) return capitalMove(value)
         if (gameType == GameType.MERGE_2048) return merge2048Move(value)
         if (gameType == GameType.TOWER_DEFENSE) return towerDefenseMove(row, col, value)
-        if (gameType == GameType.REACTOR_CHAIN) return reactorChainMove(row, col)
+        if (gameType == GameType.REACTOR_CHAIN) return reactorChainMove(row, col, value)
         if (gameType == GameType.MEMORY_NEON) {
             board.forEachIndexed { y, cells -> cells.forEachIndexed { x, candidate ->
                 if (candidate.meta["mismatch"] == true) {
@@ -344,13 +355,21 @@ class LocalPuzzleEngine(
         }
         if (gameType == GameType.TIC_TAC_TOE) {
             if (cell.value != null) return reject("Casilla ocupada")
+            val requestedMini = row / 3 to col / 3
+            if (ticForcedMini != null && requestedMini != ticForcedMini && miniHasSpace(ticForcedMini!!)) {
+                return reject("Debes jugar en el mini-tablero resaltado")
+            }
             replace(row, col, cell.copy(value = "X", isRevealed = true, ownerId = OWNER))
             if (!ticWinner("X")) {
-                val empty = board.flatMapIndexed { y, cells -> cells.mapIndexedNotNull { x, target -> if (target.value == null) y to x else null } }
+                val botMini = row % 3 to col % 3
+                val allEmpty = board.flatMapIndexed { y, cells -> cells.mapIndexedNotNull { x, target -> if (target.value == null) y to x else null } }
+                val forcedEmpty = allEmpty.filter { (y, x) -> y / 3 == botMini.first && x / 3 == botMini.second }
+                val empty = forcedEmpty.ifEmpty { allEmpty }
                 val bot = empty.randomOrNull(random)
                 if (bot != null) {
                     val target = board[bot.first][bot.second]
                     replace(bot.first, bot.second, target.copy(value = "O", isRevealed = true, ownerId = "LOCAL_BOT"))
+                    ticForcedMini = (bot.first % 3 to bot.second % 3).takeIf(::miniHasSpace)
                 }
             }
             return accept(if (ticWinner("X")) 100 else 10)
@@ -442,9 +461,12 @@ class LocalPuzzleEngine(
     }
 
     private fun ticTacToe(): Blueprint = result(
-        matrix(3, 3) { _, _ -> GenericCell() },
-        matrix(3, 3) { _, _ -> null },
-        mapOf("turnBased" to true),
+        matrix(9, 9) { row, col -> GenericCell(meta = mapOf(
+            "miniRow" to row / 3, "miniCol" to col / 3,
+            "localRow" to row % 3, "localCol" to col % 3,
+        )) },
+        matrix(9, 9) { _, _ -> null },
+        mapOf("turnBased" to true, "variant" to "ULTIMATE_INFINITE"),
     )
 
     private fun memoryNeon(): Blueprint {
@@ -552,13 +574,27 @@ class LocalPuzzleEngine(
     }
 
     private fun ticWinner(mark: String): Boolean {
-        val lines = listOf(
-            listOf(0 to 0, 0 to 1, 0 to 2), listOf(1 to 0, 1 to 1, 1 to 2), listOf(2 to 0, 2 to 1, 2 to 2),
-            listOf(0 to 0, 1 to 0, 2 to 0), listOf(0 to 1, 1 to 1, 2 to 1), listOf(0 to 2, 1 to 2, 2 to 2),
-            listOf(0 to 0, 1 to 1, 2 to 2), listOf(0 to 2, 1 to 1, 2 to 0),
-        )
-        return lines.any { line -> line.all { (row, col) -> board[row][col].value == mark } }
+        if (board.size == 9) {
+            val wonMini = Array(3) { BooleanArray(3) }
+            for (miniRow in 0..2) for (miniCol in 0..2) {
+                wonMini[miniRow][miniCol] = ticLines().any { line -> line.all { (row, col) ->
+                    board[miniRow * 3 + row][miniCol * 3 + col].value == mark
+                } }
+            }
+            return ticLines().any { line -> line.all { (row, col) -> wonMini[row][col] } }
+        }
+        return ticLines().any { line -> line.all { (row, col) -> board[row][col].value == mark } }
     }
+
+    private fun ticLines() = listOf(
+        listOf(0 to 0, 0 to 1, 0 to 2), listOf(1 to 0, 1 to 1, 1 to 2), listOf(2 to 0, 2 to 1, 2 to 2),
+        listOf(0 to 0, 1 to 0, 2 to 0), listOf(0 to 1, 1 to 1, 2 to 1), listOf(0 to 2, 1 to 2, 2 to 2),
+        listOf(0 to 0, 1 to 1, 2 to 2), listOf(0 to 2, 1 to 1, 2 to 0),
+    )
+
+    private fun miniHasSpace(mini: Pair<Int, Int>): Boolean = (0..2).any { row -> (0..2).any { col ->
+        board.getOrNull(mini.first * 3 + row)?.getOrNull(mini.second * 3 + col)?.value == null
+    } }
 
     private fun checkers(): Blueprint = result(
         matrix(8, 8) { row, col ->
@@ -644,7 +680,12 @@ class LocalPuzzleEngine(
         val dy = targetRow - row
         val dx = targetCol - col
         val valid = when (source.value) {
-            "PAWN" -> abs(dx) <= 1 && dy == if (localTurnTeam == "BLUE") 1 else -1
+            "PAWN" -> {
+                val direction = if (localTurnTeam == "BLUE") 1 else -1
+                if (target.value == null) {
+                    dx == 0 && (dy == direction || dy == direction * 2 && board[row + direction][col].value == null)
+                } else abs(dx) == 1 && dy == direction
+            }
             "KNIGHT" -> setOf(abs(dy), abs(dx)) == setOf(1, 2)
             "BISHOP" -> abs(dy) == abs(dx)
             "ROOK" -> dy == 0 || dx == 0
@@ -736,22 +777,21 @@ class LocalPuzzleEngine(
             val centerX = (column + .5f) / columns
             val baseY = if (fromTop) .12f + layer * .135f else .88f - layer * .135f
             val direction = if (fromTop) "UP" else "DOWN"
-            val points = if (fromTop) listOf(
-                mapOf("x" to centerX - .055f, "y" to baseY + .09f),
-                mapOf("x" to centerX + .045f, "y" to baseY + .09f),
-                mapOf("x" to centerX + .045f, "y" to baseY + .035f),
-                mapOf("x" to centerX, "y" to baseY),
-            ) else listOf(
-                mapOf("x" to centerX + .055f, "y" to baseY - .09f),
-                mapOf("x" to centerX - .045f, "y" to baseY - .09f),
-                mapOf("x" to centerX - .045f, "y" to baseY - .035f),
-                mapOf("x" to centerX, "y" to baseY),
-            )
+            val arrowType = listOf("STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT")[index % 5]
+            val tailSign = if (fromTop) 1f else -1f
+            fun point(dx: Float, dy: Float) = mapOf("x" to centerX + dx, "y" to baseY + dy * tailSign)
+            val points = when (arrowType) {
+                "STRAIGHT" -> listOf(point(0f, .12f), point(0f, 0f))
+                "ELBOW_90" -> listOf(point(-.065f, .11f), point(.05f, .11f), point(.05f, .04f), point(0f, 0f))
+                "ELBOW_60" -> listOf(point(-.07f, .12f), point(-.025f, .075f), point(.045f, .035f), point(0f, 0f))
+                "LONG_SPEAR" -> listOf(point(.055f, .18f), point(-.045f, .13f), point(.045f, .07f), point(0f, 0f))
+                else -> listOf(point(-.035f, .07f), point(.035f, .045f), point(0f, 0f))
+            }
             mapOf(
                 "id" to "route-$index", "points" to points, "direction" to direction,
                 "exitVector" to mapOf("x" to 0, "y" to if (fromTop) -1 else 1),
                 "thickness" to .014f, "blockType" to if (index > 0 && index % 7 == 0) "BOMB" else "NORMAL",
-                "memberKeys" to listOf("0:$index"), "removalOrder" to index,
+                "arrowType" to arrowType, "memberKeys" to listOf("0:$index"), "removalOrder" to index,
             )
         }
         return result(
@@ -759,7 +799,7 @@ class LocalPuzzleEngine(
                 val direction = shape["direction"]
                 GenericCell(direction, true, meta = mapOf(
                     "arrow" to direction, "shapeId" to "route-$index", "shapeAnchor" to true,
-                    "pathType" to "SERPENTINE", "blockType" to shape["blockType"],
+                    "pathType" to "SERPENTINE", "blockType" to shape["blockType"], "arrowType" to shape["arrowType"],
                 ))
             }),
             listOf(shapes.map { it["direction"] }),
@@ -1132,7 +1172,34 @@ class LocalPuzzleEngine(
         return true
     }
 
-    private fun reactorChainMove(row: Int, col: Int): LocalPuzzleMoveResult {
+    private fun reactorChainMove(row: Int, col: Int, raw: Any?): LocalPuzzleMoveResult {
+        val action = (raw as? Map<*, *>)?.get("action")?.toString()?.uppercase() ?: "CHAIN"
+        val costs = mapOf("HAMMER" to 3, "ROW_BLAST" to 4, "COLOR_WIPE" to 5, "SHUFFLE" to 3)
+        if (action != "CHAIN") {
+            val cost = costs[action] ?: return reject("Poder desconocido")
+            if (reactorPowerEnergy < cost) return reject("Energía insuficiente")
+            if (action == "SHUFFLE") {
+                val values = board.flatten().mapNotNull { (it.value as? Number)?.toInt() }.shuffled(random)
+                var index = 0
+                board = board.map { cells -> cells.map { GenericCell(values[index++], true, meta = mapOf("reactorOrb" to true)) } }
+                reactorPowerEnergy -= cost
+                reactorLastPower = mapOf("type" to action, "at" to System.currentTimeMillis())
+                return accept(15)
+            }
+            val selectedColor = (board.getOrNull(row)?.getOrNull(col)?.value as? Number)?.toInt()
+                ?: return reject("Selecciona un núcleo")
+            val removed = when (action) {
+                "HAMMER" -> buildSet { for (y in row - 1..row + 1) for (x in col - 1..col + 1) if (board.getOrNull(y)?.getOrNull(x)?.value != null) add(y to x) }
+                "ROW_BLAST" -> board[row].indices.filter { board[row][it].value != null }.mapTo(linkedSetOf()) { row to it }
+                else -> buildSet { board.forEachIndexed { y, cells -> cells.forEachIndexed { x, cell -> if ((cell.value as? Number)?.toInt() == selectedColor) add(y to x) } } }
+            }
+            if (removed.isEmpty()) return reject("No hay objetivos")
+            reactorPowerEnergy -= cost
+            collapseReactor(removed)
+            reactorRemoved += removed.size
+            reactorLastPower = mapOf("type" to action, "cells" to removed.map { mapOf("row" to it.first, "col" to it.second) }, "at" to System.currentTimeMillis())
+            return accept(removed.size * 4)
+        }
         val color = (board.getOrNull(row)?.getOrNull(col)?.value as? Number)?.toInt() ?: return reject("Núcleo vacío")
         val queue = ArrayDeque<Pair<Int, Int>>()
         val group = linkedSetOf<Pair<Int, Int>>()
@@ -1147,22 +1214,27 @@ class LocalPuzzleEngine(
             queue.add(point.first to point.second + 1)
         }
         if (group.size < 3) return reject("Necesitas 3 núcleos conectados")
-        val colors = (blueprint.meta["colors"] as? Number)?.toInt() ?: 5
-        val next = board.map { it.toMutableList() }.toMutableList()
-        group.forEach { (y, x) -> next[y][x] = GenericCell() }
-        for (x in next[0].indices) {
-            val values = next.mapNotNull { (it[x].value as? Number)?.toInt() }.toMutableList()
-            while (values.size < next.size) values.add(0, random.nextInt(1, colors + 1))
-            values.forEachIndexed { y, value -> next[y][x] = GenericCell(value, true, meta = mapOf("reactorOrb" to true)) }
-        }
-        board = next
+        collapseReactor(group)
         reactorRemoved += group.size
+        reactorPowerEnergy = (reactorPowerEnergy + (group.size / 3).coerceAtLeast(1)).coerceAtMost(12)
         reactorLastChain = mapOf(
             "playerId" to OWNER, "size" to group.size, "color" to color,
             "cells" to group.map { (y, x) -> mapOf("row" to y, "col" to x) },
             "at" to System.currentTimeMillis(),
         )
         return accept(group.size * group.size)
+    }
+
+    private fun collapseReactor(removed: Set<Pair<Int, Int>>) {
+        val colors = (blueprint.meta["colors"] as? Number)?.toInt() ?: 5
+        val next = board.map { it.toMutableList() }.toMutableList()
+        removed.forEach { (row, col) -> next[row][col] = GenericCell() }
+        for (col in next[0].indices) {
+            val values = next.mapNotNull { (it[col].value as? Number)?.toInt() }.toMutableList()
+            while (values.size < next.size) values.add(0, random.nextInt(1, colors + 1))
+            values.forEachIndexed { row, value -> next[row][col] = GenericCell(value, true, meta = mapOf("reactorOrb" to true)) }
+        }
+        board = next
     }
 
     private fun secretCode(): Blueprint {

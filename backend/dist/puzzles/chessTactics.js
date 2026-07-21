@@ -6,8 +6,9 @@ export function movementRange(piece, origin) {
         return [];
     const direction = piece.team === "BLUE" ? 1 : -1;
     if (piece.type === "PAWN") {
-        const distance = piece.hasMoved ? 1 : 2;
-        return inside(Array.from({ length: distance }, (_, index) => ({
+        // Chess Tactics es una variante arcade: el peón conserva el avance de
+        // una o dos filas. La Carga del Peón sigue siendo distinta porque empuja.
+        return inside(Array.from({ length: 2 }, (_, index) => ({
             row: origin.row + direction * (index + 1),
             col: origin.col,
         })));

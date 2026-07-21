@@ -334,6 +334,20 @@ describe("motor genérico de puzzles", () => {
     assert.ok(Number(engine.snapshot(players).meta.removed) >= before + 3);
   });
 
+  it("Reactor Chain consume energía al activar poderes tipo Match-3", () => {
+    const players = new ArenaGame("reactor-powers");
+    players.addPlayer("p1", "Catalizador");
+    players.startMatch({ gameType: "REACTOR_CHAIN", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "EASY" }, "p1");
+    const engine = new GenericPuzzleEngine("REACTOR_CHAIN", "reactor-powers", { seed: "power-board", difficulty: "EASY" });
+    (engine as any).reactorPowerEnergy.set("p1", 12);
+    const result = engine.makeMove("p1", {
+      requestId: "reactor-hammer", row: 2, col: 2, val: { action: "HAMMER" },
+    }, players);
+    assert.equal(result.accepted, true);
+    assert.equal((engine.snapshot(players).meta.powerEnergy as Record<string, number>).p1, 9);
+    assert.equal((engine.snapshot(players).meta.lastPower as { type: string }).type, "HAMMER");
+  });
+
   it("Chess Tactics configura las seis clases, cooldowns y rangos clásicos", () => {
     const knight: Piece = {
       id: "n", team: "BLUE", owner: "BLUE", type: "KNIGHT",
@@ -347,7 +361,7 @@ describe("motor genérico de puzzles", () => {
     const pawn = { ...knight, type: "PAWN" as const, hasMoved: false };
     assert.equal(movementRange(pawn, { row: 1, col: 3 }).length, 2);
     pawn.hasMoved = true;
-    assert.equal(movementRange(pawn, { row: 3, col: 3 }).length, 1);
+    assert.equal(movementRange(pawn, { row: 3, col: 3 }).length, 2, "la variante permite avance doble; la habilidad añade empuje");
     assert.ok(calculateDamage(40, 20) < calculateDamage(40, 0));
     const blueprint = createPuzzleBlueprint("CHESS_TACTICS", { seed: "six-classes" });
     assert.deepEqual(

@@ -499,7 +499,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
   type Point = { x: number; y: number };
   type Route = {
     id: string; points: Point[]; direction: string; exitVector: Point;
-    thickness: number; blockType: string; memberKeys: string[]; removalOrder: number;
+    thickness: number; blockType: string; arrowType: string; memberKeys: string[]; removalOrder: number;
   };
   const shapes: Route[] = [];
   const directions = [
@@ -570,6 +570,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       if (shapes.some((existing) => pathsTouch(rayToBorder(points, exit), existing.points, .04))) continue;
       route = {
         id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .009,
+        arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5]!,
         blockType: index > 0 && index % 11 === 0 ? "BOMB" : index > 0 && index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL",
         memberKeys: [`0:${index}`], removalOrder: index,
       };
@@ -588,7 +589,8 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
             : { points: [{ x: .075, y: axis - .035 }, { x: .075, y: axis }, { x: .025, y: axis }], direction: "LEFT", exitVector: { x: -1, y: 0 } };
       route = {
         id: `route-${index}`, ...fallback, thickness: .012,
-        blockType: "NORMAL", memberKeys: [`0:${index}`], removalOrder: index,
+        blockType: "NORMAL", arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5]!,
+        memberKeys: [`0:${index}`], removalOrder: index,
       };
     }
     shapes.push(route);
@@ -598,6 +600,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       shapeAnchor: true,
       pathType: "SERPENTINE",
       blockType: route.blockType,
+      arrowType: route.arrowType,
     });
     answers[0]![index] = route.direction;
   }

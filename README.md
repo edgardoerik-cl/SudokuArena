@@ -87,7 +87,7 @@ cd android
 ```
 
 El script genera un APK de prueba versionado en `android/releases/`, por ejemplo
-`MultiArena-v8.9.0.apk`. No se debe subir ese archivo a Git:
+`MultiArena-v8.9.1.apk`. No se debe subir ese archivo a Git:
 es un artefacto generado para instalar en el teléfono.
 
 ## Persistencia del Cuadro de Honor

@@ -565,6 +565,7 @@ function arrowsEscape(random, difficulty) {
                 continue;
             route = {
                 id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .009,
+                arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5],
                 blockType: index > 0 && index % 11 === 0 ? "BOMB" : index > 0 && index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL",
                 memberKeys: [`0:${index}`], removalOrder: index,
             };
@@ -584,7 +585,8 @@ function arrowsEscape(random, difficulty) {
                         : { points: [{ x: .075, y: axis - .035 }, { x: .075, y: axis }, { x: .025, y: axis }], direction: "LEFT", exitVector: { x: -1, y: 0 } };
             route = {
                 id: `route-${index}`, ...fallback, thickness: .012,
-                blockType: "NORMAL", memberKeys: [`0:${index}`], removalOrder: index,
+                blockType: "NORMAL", arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5],
+                memberKeys: [`0:${index}`], removalOrder: index,
             };
         }
         shapes.push(route);
@@ -594,6 +596,7 @@ function arrowsEscape(random, difficulty) {
             shapeAnchor: true,
             pathType: "SERPENTINE",
             blockType: route.blockType,
+            arrowType: route.arrowType,
         });
         answers[0][index] = route.direction;
     }

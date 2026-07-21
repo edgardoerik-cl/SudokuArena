@@ -355,8 +355,8 @@ class SocketGameClient(
     }
 
 
-    override fun sendTetrisInput(action: String) {
-        socket.emit("tetris:input", JSONObject().put("action", action))
+    override fun sendTetrisInput(action: String, inputSeq: Long) {
+        socket.emit("tetris:input", JSONObject().put("action", action).put("inputSeq", inputSeq))
     }
 
     override fun sendPacmanInput(direction: String) {
@@ -534,6 +534,16 @@ private fun parseTetrisState(json: JSONObject): TetrisArenaState {
                 abilityEnergy = player.optInt("abilityEnergy"),
                 bombsUsed = player.optInt("bombsUsed"),
                 garbageSent = player.optInt("garbageSent"),
+                settledBoard = player.optJSONArray("settledBoard")?.let { settled ->
+                    List(settled.length()) { rowIndex ->
+                        val row = settled.getJSONArray(rowIndex)
+                        List(row.length()) { col -> row.optInt(col) }
+                    }
+                }.orEmpty(),
+                pieceRow = player.optJSONObject("piece")?.optInt("row", -1) ?: -1,
+                pieceCol = player.optJSONObject("piece")?.optInt("col", 3) ?: 3,
+                pieceRotation = player.optJSONObject("piece")?.optInt("rotation", 0) ?: 0,
+                lastInputSeq = player.optLong("lastInputSeq"),
             )
         },
     )

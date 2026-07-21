@@ -100,6 +100,14 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
                 val cell = RectF(left + col * tile, top + row * tile, left + (col + 1) * tile, top + (row + 1) * tile)
                 if (value == 0) {
                     canvas.drawRoundRect(cell, tile * .12f, tile * .12f, paint)
+                } else if (value == 3) {
+                    paint.style = Paint.Style.FILL
+                    paint.color = Color.rgb(18, 8, 46)
+                    canvas.drawRect(cell, paint)
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = maxOf(1.5f, tile * .045f)
+                    paint.color = Color.rgb(112, 52, 190)
+                    canvas.drawLine(cell.left, cell.bottom, cell.right, cell.top, paint)
                 } else {
                     val key = "$col:$row"
                     paint.style = Paint.Style.FILL
@@ -124,7 +132,7 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
 
         // Casa central cerrada: los fantasmas comidos esperan aquí y solo los
         // ojos permanecen visibles durante su regeneración.
-        val ghostHouse = RectF(left + tile * 5.55f, top + tile * 6.15f, left + tile * 9.45f, top + tile * 8.85f)
+        val ghostHouse = RectF(left + tile * 6f, top + tile * 7f, left + tile * 9f, top + tile * 8f)
         paint.style = Paint.Style.FILL
         paint.color = Color.argb(115, 20, 8, 48)
         canvas.drawRoundRect(ghostHouse, tile * .28f, tile * .28f, paint)
@@ -133,7 +141,7 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         paint.color = Color.rgb(255, 45, 141)
         canvas.drawRoundRect(ghostHouse, tile * .28f, tile * .28f, paint)
         paint.color = Color.rgb(0, 229, 255)
-        canvas.drawLine(left + tile * 6.45f, top + tile * 6.15f, left + tile * 8.55f, top + tile * 6.15f, paint)
+        canvas.drawLine(left + tile * 7.08f, top + tile * 7f, left + tile * 7.92f, top + tile * 7f, paint)
 
         val smoothing = 1f - exp(-deltaSeconds * 13f)
         state.players.forEach { drawActor(canvas, it, true, left, top, tile, smoothing, timeSeconds, false) }

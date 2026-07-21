@@ -30,6 +30,7 @@ interface TetrisPlayer {
   bag: TetrominoName[]; next: TetrominoName; score: number; lines: number; gameOver: boolean;
   lockDeadline: number; impact: number; hold: TetrominoName | null; canHold: boolean; cleanBombUsed: boolean;
   abilityEnergy: number; bombsUsed: number; garbageSent: number;
+  lastInputSeq: number;
 }
 
 export class TetrisArenaEngine {
@@ -49,13 +50,17 @@ export class TetrisArenaEngine {
         bag, next, score: 0, lines: 0, gameOver: false, lockDeadline: 0, impact: 0,
         hold: null, canHold: true, cleanBombUsed: false,
         abilityEnergy: 0, bombsUsed: 0, garbageSent: 0,
+        lastInputSeq: 0,
       });
     }
   }
 
-  input(playerId: string, action: TetrisAction): boolean {
+  input(playerId: string, action: TetrisAction, inputSeq = 0): boolean {
     const player = this.players.get(playerId);
     if (!player || player.gameOver || this.completed) return false;
+    // Acusa incluso comandos geomÃ©tricamente invÃ¡lidos para que la predicciÃ³n
+    // del cliente pueda reconciliarse sin quedar esperando un ACK inexistente.
+    player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq);
     if (action === "HOLD") {
       if (!player.canHold || player.abilityEnergy < 1) return false;
       const current = player.piece.type;
@@ -71,7 +76,7 @@ export class TetrisArenaEngine {
       player.abilityEnergy -= 1;
       player.lockDeadline = 0;
       if (this.collides(player)) player.gameOver = true;
-      return true;
+      player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq); return true;
     }
     if (action === "CLEAN_BOMB") {
       if (player.abilityEnergy < 4) return false;
@@ -81,21 +86,24 @@ export class TetrisArenaEngine {
       player.bombsUsed += 1;
       player.abilityEnergy -= 4;
       player.score += 150;
-      return true;
+      player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq); return true;
     }
-    if (action === "LEFT") return this.tryMove(player, 0, -1);
-    if (action === "RIGHT") return this.tryMove(player, 0, 1);
+    if (action === "LEFT" || action === "RIGHT") {
+      const moved = this.tryMove(player, 0, action === "LEFT" ? -1 : 1);
+      if (moved) player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq);
+      return moved;
+    }
     if (action === "SOFT_DROP") {
-      if (this.tryMove(player, 1, 0)) return true;
+      if (this.tryMove(player, 1, 0)) { player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq); return true; }
       if (!player.lockDeadline) player.lockDeadline = Date.now() + 600;
-      return true;
+      player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq); return true;
     }
     if (action === "ROTATE") {
       const previous = player.piece.rotation;
       player.piece.rotation = (previous + 1) % TETROMINOES[player.piece.type].length;
       for (const [dy, dx] of [[0, 0], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
         player.piece.row += dy!; player.piece.col += dx!;
-        if (!this.collides(player)) { player.lockDeadline = 0; return true; }
+        if (!this.collides(player)) { player.lockDeadline = 0; player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq); return true; }
         player.piece.row -= dy!; player.piece.col -= dx!;
       }
       player.piece.rotation = previous;
@@ -104,6 +112,7 @@ export class TetrisArenaEngine {
     while (this.tryMove(player, 1, 0)) player.score += 2;
     player.impact += 1;
     this.lock(player, true);
+    player.lastInputSeq = Math.max(player.lastInputSeq, inputSeq);
     return true;
   }
 
@@ -128,6 +137,7 @@ export class TetrisArenaEngine {
       players: [...this.players.values()].map((player) => ({
         ...player,
         board: this.boardWithPiece(player),
+        settledBoard: player.board,
         bag: undefined,
       })),
     };
@@ -204,8 +214,8 @@ const PACMAN_MAP = [
   "011111111111110",
   "010101000101010",
   "011101111101110",
-  "000101000101000",
-  "111111111111111",
+  "000101030101000",
+  "111110333011111",
   "000101000101000",
   "011101111101110",
   "010101000101010",
@@ -241,7 +251,7 @@ export class PacmanArenaEngine {
     { id: "blinky", x: 7, y: 7, direction: "LEFT", mode: "CHASE", homeX: 13, homeY: 1 },
     { id: "pinky", x: 6, y: 7, direction: "RIGHT", mode: "CHASE", homeX: 1, homeY: 1 },
     { id: "inky", x: 8, y: 7, direction: "UP", mode: "CHASE", homeX: 13, homeY: 13 },
-    { id: "clyde", x: 7, y: 8, direction: "DOWN", mode: "CHASE", homeX: 1, homeY: 13 },
+    { id: "clyde", x: 7, y: 7, direction: "DOWN", mode: "CHASE", homeX: 1, homeY: 13 },
   ];
   private frightenedUntil = 0;
   private tickNumber = 0;
@@ -338,14 +348,16 @@ export class PacmanArenaEngine {
     // Túnel horizontal clásico en la fila central.
     if (actor.y === 7 && x < 0) x = PACMAN_MAP[0]!.length - 1;
     if (actor.y === 7 && x >= PACMAN_MAP[0]!.length) x = 0;
-    if (PACMAN_MAP[y]?.[x] && PACMAN_MAP[y]![x] !== 0) { actor.x = x; actor.y = y; }
+    const tile = PACMAN_MAP[y]?.[x] ?? 0;
+    if (tile !== 0 && (tile !== 3 || "mode" in actor)) { actor.x = x; actor.y = y; }
   }
   private canMove(actor: PacActor, direction: PacmanDirection): boolean {
     const [dy, dx] = direction === "UP" ? [-1, 0] : direction === "RIGHT" ? [0, 1]
       : direction === "DOWN" ? [1, 0] : direction === "LEFT" ? [0, -1] : [0, 0];
     let x = actor.x + dx; const y = actor.y + dy;
     if (actor.y === 7 && (x < 0 || x >= PACMAN_MAP[0]!.length)) return true;
-    return Boolean(PACMAN_MAP[y]?.[x] && PACMAN_MAP[y]![x] !== 0);
+    const tile = PACMAN_MAP[y]?.[x] ?? 0;
+    return tile !== 0 && (tile !== 3 || "mode" in actor);
   }
   private closestPlayer(actor: PacActor): PacActor | null {
     return [...this.players.values()].filter((player) => (player.lives ?? 0) > 0)
@@ -441,7 +453,9 @@ export class DemolitionArenaEngine {
         wideUntil: 0,
         missileUntil: 0,
         missileX: .5,
-        nextSkyDropAt: Date.now() + 30_000,
+        // La primera cápsula aparece pronto para que la mecánica sea visible;
+        // después mantiene un ritmo arcade sin saturar la pantalla.
+        nextSkyDropAt: Date.now() + 8_000,
       });
     });
   }
@@ -490,7 +504,7 @@ export class DemolitionArenaEngine {
         y: -.04,
         type: skyTypes[Math.floor(Math.random() * skyTypes.length)]!,
       });
-      player.nextSkyDropAt = now + 30_000;
+      player.nextSkyDropAt = now + 20_000;
     }
     player.drops.forEach((drop) => { drop.y += deltaSeconds * .22; });
     const paddleWidth = player.wideUntil > now ? .38 : .21;

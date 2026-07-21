@@ -2,6 +2,8 @@ package com.sudokuarena.data.local
 
 import com.sudokuarena.domain.DemolitionArenaState
 import com.sudokuarena.domain.DemolitionBrickState
+import com.sudokuarena.domain.DemolitionBallState
+import com.sudokuarena.domain.DemolitionDropState
 import com.sudokuarena.domain.DemolitionPlayerState
 import com.sudokuarena.domain.PacmanActorState
 import com.sudokuarena.domain.PacmanArenaState
@@ -249,7 +251,10 @@ class LocalPacmanEngine(private val playerName: String) : LocalRealtimeGameEngin
     }
 }
 
-class LocalDemolitionEngine(private val playerName: String) : LocalRealtimeGameEngine<Float, DemolitionArenaState> {
+class LocalDemolitionEngine(private val playerName: String, seed: Int = 73) : LocalRealtimeGameEngine<Float, DemolitionArenaState> {
+    private val random = Random(seed)
+    private data class Ball(val id: String, var x: Float, var y: Float, var vx: Float, var vy: Float)
+    private data class Drop(val id: String, var x: Float, var y: Float, val type: String)
     private var paddleX = .5f
     private var ballX = .5f
     private var ballY = .78f
@@ -260,6 +265,12 @@ class LocalDemolitionEngine(private val playerName: String) : LocalRealtimeGameE
     private var level = 1
     private var tick = 0L
     private var bricks = generateLevel(level).toMutableList()
+    private val balls = mutableListOf(Ball("main", ballX, ballY, vx, vy))
+    private val drops = mutableListOf<Drop>()
+    private var nextSkyDropTick = 480L
+    private var wideUntilTick = 0L
+    private var missileUntilTick = 0L
+    private var missileX = .5f
 
     override fun input(value: Float) { paddleX = value.coerceIn(.11f, .89f) }
 
@@ -267,29 +278,36 @@ class LocalDemolitionEngine(private val playerName: String) : LocalRealtimeGameE
 
     fun tick(dt: Float) {
         if (lives <= 0) return
+        if (tick >= nextSkyDropTick) {
+            val types = listOf("PADDLE_WIDE", "MULTIBALL_2", "MULTIBALL_5", "MULTIBALL_10", "MISSILE")
+            drops += Drop("sky-$tick", random.nextFloat() * .84f + .08f, -.04f, types.random(random))
+            nextSkyDropTick = tick + 1_200L
+        }
+        drops.forEach { it.y += dt * .22f }
+        val paddleWidth = if (tick < wideUntilTick) .38f else .21f
+        val caught = drops.filter { it.y in .88f..1f && abs(it.x - paddleX) <= paddleWidth / 2f + .025f }
+        caught.forEach(::applyDrop)
+        drops.removeAll { it.y > 1f || it in caught }
+        if (tick < missileUntilTick) {
+            val victims = bricks.filter { abs(it.x + it.width / 2f - missileX) <= .05f }
+            if (victims.isNotEmpty()) { bricks.removeAll(victims.toSet()); score += victims.size * 14 * level }
+        }
         val radius = .014f
-        var nx = ballX + vx * dt
-        var ny = ballY + vy * dt
-        if (nx - radius <= 0f || nx + radius >= 1f) { vx *= -1; nx = nx.coerceIn(radius, 1f - radius) }
-        if (ny - radius <= 0f) { vy = abs(vy); ny = radius }
-        if (vy > 0 && ny + radius >= .91f && ny - radius <= .935f && abs(nx - paddleX) <= .115f) {
-            val relative = ((nx - paddleX) / .105f).coerceIn(-1f, 1f)
-            val speed = hypot(vx, vy).coerceAtMost(.78f)
-            vx = relative * speed * .78f
-            vy = -sqrt((speed * speed - vx * vx).coerceAtLeast(.08f))
-            ny = .895f
+        balls.toList().forEach { ball ->
+            var nx = ball.x + ball.vx * dt; var ny = ball.y + ball.vy * dt
+            if (nx - radius <= 0f || nx + radius >= 1f) { ball.vx *= -1; nx = nx.coerceIn(radius, 1f - radius) }
+            if (ny - radius <= 0f) { ball.vy = abs(ball.vy); ny = radius }
+            if (ball.vy > 0 && ny + radius >= .91f && ny - radius <= .935f && abs(nx - paddleX) <= paddleWidth / 2f + .01f) {
+                val relative = ((nx - paddleX) / (paddleWidth / 2f)).coerceIn(-1f, 1f)
+                val speed = hypot(ball.vx, ball.vy).coerceAtMost(.85f)
+                ball.vx = relative * speed * .78f; ball.vy = -sqrt((speed * speed - ball.vx * ball.vx).coerceAtLeast(.08f)); ny = .895f
+            }
+            val hit = bricks.firstOrNull { nx + radius >= it.x && nx - radius <= it.x + it.width && ny + radius >= it.y && ny - radius <= it.y + it.height }
+            if (hit != null) { ball.vy *= -1; bricks.remove(hit); score += 10 * level }
+            ball.x = nx; ball.y = ny
         }
-        val hit = bricks.firstOrNull { brick ->
-            nx + radius >= brick.x && nx - radius <= brick.x + brick.width &&
-                ny + radius >= brick.y && ny - radius <= brick.y + brick.height
-        }
-        if (hit != null) {
-            vy *= -1
-            bricks.remove(hit)
-            score += 10 * level
-        }
-        ballX = nx; ballY = ny
-        if (ballY - radius > 1f) {
+        balls.removeAll { it.y - radius > 1f }
+        if (balls.isEmpty()) {
             lives--
             resetBall()
         } else if (bricks.isEmpty()) {
@@ -298,6 +316,7 @@ class LocalDemolitionEngine(private val playerName: String) : LocalRealtimeGameE
             bricks = generateLevel(level).toMutableList()
             resetBall()
         }
+        balls.firstOrNull()?.let { ballX = it.x; ballY = it.y; vx = it.vx; vy = it.vy }
         tick++
     }
 
@@ -309,12 +328,35 @@ class LocalDemolitionEngine(private val playerName: String) : LocalRealtimeGameE
             DemolitionPlayerState(
                 "solo", playerName, "#00E5FF", paddleX, ballX, ballY, vx, vy,
                 lives, score, level, bricks.toList(),
+                balls = balls.map { DemolitionBallState(it.id, it.x, it.y, it.vx, it.vy) },
+                drops = drops.map { DemolitionDropState(it.id, it.x, it.y, it.type) },
+                wideUntil = if (tick < wideUntilTick) System.currentTimeMillis() + (wideUntilTick - tick) * 16 else 0,
+                missileUntil = if (tick < missileUntilTick) System.currentTimeMillis() + (missileUntilTick - tick) * 16 else 0,
+                missileX = missileX,
             ),
         ),
     )
 
     private fun resetBall() {
         ballX = paddleX; ballY = .82f; vx = if (level % 2 == 0) -.34f else .34f; vy = -.5f
+        balls.clear(); balls += Ball("ball-$tick", ballX, ballY, vx, vy)
+    }
+
+    private fun applyDrop(drop: Drop) {
+        when (drop.type) {
+            "PADDLE_WIDE" -> wideUntilTick = tick + 720
+            "MISSILE" -> { missileX = paddleX; missileUntilTick = tick + 75 }
+            else -> if (drop.type.startsWith("MULTIBALL")) {
+                val multiplier = drop.type.substringAfterLast('_').toIntOrNull() ?: 2
+                val source = balls.toList().ifEmpty { listOf(Ball("seed", paddleX, .82f, .34f, -.48f)) }
+                val target = (source.size * multiplier).coerceAtMost(20)
+                while (balls.size < target) {
+                    val base = source[balls.size % source.size]
+                    val direction = if (balls.size % 2 == 0) 1f else -1f
+                    balls += Ball("multi-$tick-${balls.size}", base.x, base.y, abs(base.vx).coerceAtLeast(.22f) * direction, -abs(base.vy))
+                }
+            }
+        }
     }
 
     private fun generateLevel(level: Int): List<DemolitionBrickState> {

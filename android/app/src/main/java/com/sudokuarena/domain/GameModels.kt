@@ -91,6 +91,11 @@ data class TetrisPlayerState(
     val abilityEnergy: Int = 0,
     val bombsUsed: Int = 0,
     val garbageSent: Int = 0,
+    val settledBoard: List<List<Int>> = emptyList(),
+    val pieceRow: Int = -1,
+    val pieceCol: Int = 3,
+    val pieceRotation: Int = 0,
+    val lastInputSeq: Long = 0,
 )
 data class TetrisArenaState(
     val serverTime: Long,
@@ -308,7 +313,7 @@ interface GameRealtimeGateway {
     fun sendSecretChat(message: String)
     fun sendGlobalChat(message: String)
     fun chooseRps(choice: String)
-    fun sendTetrisInput(action: String)
+    fun sendTetrisInput(action: String, inputSeq: Long)
     fun sendPacmanInput(direction: String)
     fun sendDemolitionInput(paddleX: Float)
     fun requestPause()
