@@ -719,7 +719,8 @@ function resolveRps(room: RoomRuntime): void {
   if (winnerId) {
     setTimeout(() => {
       if (rooms.get(room.code) === room && room.phase === "RPS") {
-        startMatch(room, room.rpsIsRematch, winnerId);
+        const ordered = [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+        startMatch(room, room.rpsIsRematch, winnerId, ordered);
       }
     }, 1_800);
   } else {
@@ -729,7 +730,7 @@ function resolveRps(room: RoomRuntime): void {
   }
 }
 
-function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: string): void {
+function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: string, orderedPlayerIds?: string[]): void {
   room.phase = "PLAYING";
   room.suddenDeath = false;
   room.rematchVotes.clear();
@@ -755,7 +756,8 @@ function startMatch(room: RoomRuntime, rematch = false, startingPlayerId?: strin
   room.tetrisEngine?.syncPlayers(room.game.snapshot().players);
   room.pacmanEngine?.syncPlayers(room.game.snapshot().players);
   room.demolitionEngine?.syncPlayers(room.game.snapshot().players);
-  if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
+  if (orderedPlayerIds?.length) room.genericEngine?.setTurnOrder(orderedPlayerIds);
+  else if (startingPlayerId) room.genericEngine?.setFirstPlayer(startingPlayerId);
   emitRoomState(room);
   emitState(room);
   emitGenericState(room);
@@ -1194,7 +1196,7 @@ function startTetrisLoop(room: RoomRuntime): void {
     snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
     io.to(room.code).volatile.emit("tetris:state", snapshot);
     if (snapshot.completed) finishMatch(room, true);
-  }, 50);
+  }, 60);
 }
 
 function startGenericLoop(room: RoomRuntime): void {
@@ -1216,7 +1218,7 @@ function startPacmanLoop(room: RoomRuntime): void {
     // Publicamos a 20 FPS, pero la cuadrícula autoritativa avanza a 6,67 pasos/s.
     // Así el input responde inmediatamente sin acelerar el juego.
     networkFrame += 1;
-    if (networkFrame % 3 === 0) room.pacmanEngine.tick();
+    if (networkFrame % 2 === 0) room.pacmanEngine.tick();
     const snapshot = room.pacmanEngine.snapshot();
     snapshot.players.forEach((player: { id: string; score: number }) => room.game.setGenericScore(player.id, player.score));
     io.to(room.code).volatile.emit("pacman:state", snapshot);

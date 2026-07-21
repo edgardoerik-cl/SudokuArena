@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import kotlin.math.sin
@@ -50,6 +51,21 @@ fun AboutScreen(onBack: () -> Unit) {
             pixel(bx, by, 44f, 62f, Color(0xFFFF78B5)); pixel(bx + 7, by - 28, 30f, 30f, Color(0xFFF1C6A8))
             pixel(bx - 4, by - 32, 12f, 12f, Color(0xFF3A241F)); pixel(bx + 36, by - 32, 12f, 12f, Color(0xFF3A241F))
             pixel(bx - 20, by + 8 - beat * 10f, 22f, 8f, Color(0xFFF1C6A8)); pixel(bx + 42, by + 8 + beat * 10f, 22f, 8f, Color(0xFFF1C6A8))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            Canvas(Modifier.size(42.dp)) {
+                val scale = .82f + beat * .16f
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(size.width / 2f, size.height * .84f)
+                    cubicTo(size.width * .08f, size.height * .58f, size.width * .05f, size.height * .18f, size.width * .29f, size.height * .18f)
+                    cubicTo(size.width * .43f, size.height * .18f, size.width / 2f, size.height * .32f, size.width / 2f, size.height * .32f)
+                    cubicTo(size.width / 2f, size.height * .32f, size.width * .57f, size.height * .18f, size.width * .71f, size.height * .18f)
+                    cubicTo(size.width * .95f, size.height * .18f, size.width * .92f, size.height * .58f, size.width / 2f, size.height * .84f)
+                }
+                scale(scale, scale, pivot = center) { drawPath(path, Color(0xFFFF2D55)) }
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("Hecho con amor para mi esposa Lía", color = Color(0xFFFFB3C7), fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 10.dp))
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(

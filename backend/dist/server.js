@@ -671,7 +671,8 @@ function resolveRps(room) {
     if (winnerId) {
         setTimeout(() => {
             if (rooms.get(room.code) === room && room.phase === "RPS") {
-                startMatch(room, room.rpsIsRematch, winnerId);
+                const ordered = [...scores.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+                startMatch(room, room.rpsIsRematch, winnerId, ordered);
             }
         }, 1_800);
     }
@@ -682,7 +683,7 @@ function resolveRps(room) {
         }, 1_500);
     }
 }
-function startMatch(room, rematch = false, startingPlayerId) {
+function startMatch(room, rematch = false, startingPlayerId, orderedPlayerIds) {
     room.phase = "PLAYING";
     room.suddenDeath = false;
     room.rematchVotes.clear();
@@ -710,7 +711,9 @@ function startMatch(room, rematch = false, startingPlayerId) {
     room.tetrisEngine?.syncPlayers(room.game.snapshot().players);
     room.pacmanEngine?.syncPlayers(room.game.snapshot().players);
     room.demolitionEngine?.syncPlayers(room.game.snapshot().players);
-    if (startingPlayerId)
+    if (orderedPlayerIds?.length)
+        room.genericEngine?.setTurnOrder(orderedPlayerIds);
+    else if (startingPlayerId)
         room.genericEngine?.setFirstPlayer(startingPlayerId);
     emitRoomState(room);
     emitState(room);
@@ -1175,7 +1178,7 @@ function startTetrisLoop(room) {
         io.to(room.code).volatile.emit("tetris:state", snapshot);
         if (snapshot.completed)
             finishMatch(room, true);
-    }, 50);
+    }, 60);
 }
 function startGenericLoop(room) {
     if (!room.genericEngine || room.genericTick || room.config.gameType !== "TOWER_DEFENSE")
@@ -1201,7 +1204,7 @@ function startPacmanLoop(room) {
         // Publicamos a 20 FPS, pero la cuadrícula autoritativa avanza a 6,67 pasos/s.
         // Así el input responde inmediatamente sin acelerar el juego.
         networkFrame += 1;
-        if (networkFrame % 3 === 0)
+        if (networkFrame % 2 === 0)
             room.pacmanEngine.tick();
         const snapshot = room.pacmanEngine.snapshot();
         snapshot.players.forEach((player) => room.game.setGenericScore(player.id, player.score));

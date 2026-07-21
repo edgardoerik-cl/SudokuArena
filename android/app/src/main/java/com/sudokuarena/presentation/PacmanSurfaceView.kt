@@ -170,15 +170,10 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         timeSeconds: Float,
         frightenedWarning: Boolean,
     ) {
-        val age = ((System.currentTimeMillis() - stateReceivedAt).coerceIn(0L, 145L) / 150f)
-        val prediction = if (actor.direction != "STOP" && actor.mode != "EATEN") age * .82f else 0f
-        val (px, py) = when (actor.direction) {
-            "RIGHT" -> prediction to 0f; "LEFT" -> -prediction to 0f
-            "DOWN" -> 0f to prediction; "UP" -> 0f to -prediction
-            else -> 0f to 0f
-        }
-        val targetX = left + (actor.x + .5f + px) * tile
-        val targetY = top + (actor.y + .5f + py) * tile
+        // Interpolación hacia el último estado autoritativo. No extrapolamos:
+        // hacerlo frente a un muro provocaba avance, retroceso y vibración.
+        val targetX = left + (actor.x + .5f) * tile
+        val targetY = top + (actor.y + .5f) * tile
         val display = displayPositions.getOrPut(actor.id) { PointF(targetX, targetY) }
         // El túnel debe teletransportar, no cruzar visualmente todo el mapa.
         if (abs(display.x - targetX) > tile * 5f) display.x = targetX

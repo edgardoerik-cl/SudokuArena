@@ -494,12 +494,6 @@ function hangman(random, difficulty) {
     };
 }
 function arrowsEscape(random, difficulty) {
-    // Un lienzo grande y denso: las cabezas dibujan colectivamente un corazon.
-    // Modelo lógico 100×100, serializado de forma dispersa para no enviar diez
-    // mil celdas vacías por WebSocket. Las rutas sí usan coordenadas de esa malla.
-    const count = sizeFor(difficulty, 625, 750, 875, 1000);
-    const board = matrix(1, count, () => cell(null, true));
-    const answers = matrix(1, count, () => null);
     const shapes = [];
     const directions = [
         { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
@@ -513,6 +507,11 @@ function arrowsEscape(random, difficulty) {
             if (Math.pow(x * x + y * y - 1, 3) - x * x * y * y * y <= 0)
                 heartCells.push({ x: gx / 100, y: gy / 100 });
         }
+    const densityStep = sizeFor(difficulty, 4, 3, 2, 1);
+    const selectedCells = heartCells.filter((_cell, index) => index % densityStep === 0);
+    const count = selectedCells.length;
+    const board = matrix(1, count, () => cell(null, true));
+    const answers = matrix(1, count, () => null);
     const pointToSegment = (point, start, end) => {
         const dx = end.x - start.x;
         const dy = end.y - start.y;
@@ -545,6 +544,26 @@ function arrowsEscape(random, difficulty) {
         return [head, { x: head.x + vector.x * distance, y: head.y + vector.y * distance }];
     };
     for (let index = 0; index < count; index += 1) {
+        const grid = selectedCells[index];
+        const distances = [
+            { name: "UP", x: 0, y: -1, distance: grid.y },
+            { name: "RIGHT", x: 1, y: 0, distance: 1 - grid.x },
+            { name: "DOWN", x: 0, y: 1, distance: 1 - grid.y },
+            { name: "LEFT", x: -1, y: 0, distance: grid.x },
+        ].sort((a, b) => a.distance - b.distance);
+        const exit = distances[0];
+        const tail = { x: grid.x - exit.x * .006, y: grid.y - exit.y * .006 };
+        const direct = {
+            id: `route-${index}`, points: [tail, grid], direction: exit.name,
+            exitVector: { x: exit.x, y: exit.y }, thickness: .0032,
+            blockType: index > 0 && index % 97 === 0 ? "BOMB" : "NORMAL",
+            arrowType: "GRID_ARROW", memberKeys: [`0:${index}`],
+            removalOrder: Math.round(exit.distance * 100) * 10000 + index,
+        };
+        shapes.push(direct);
+        board[0][index] = cell(direct.direction, true, { arrow: direct.direction, shapeId: direct.id, shapeAnchor: true, pathType: "GRID", blockType: direct.blockType, arrowType: direct.arrowType });
+        answers[0][index] = direct.direction;
+        continue;
         let route = null;
         for (let attempt = 0; attempt < 350 && route === null; attempt += 1) {
             // Distribución densa por todo el interior del corazón, no sólo su borde.
@@ -598,16 +617,17 @@ function arrowsEscape(random, difficulty) {
                 memberKeys: [`0:${index}`], removalOrder: index,
             };
         }
-        shapes.push(route);
-        board[0][index] = cell(route.direction, true, {
-            arrow: route.direction,
-            shapeId: route.id,
+        const resolvedRoute = route;
+        shapes.push(resolvedRoute);
+        board[0][index] = cell(resolvedRoute.direction, true, {
+            arrow: resolvedRoute.direction,
+            shapeId: resolvedRoute.id,
             shapeAnchor: true,
             pathType: "SERPENTINE",
-            blockType: route.blockType,
-            arrowType: route.arrowType,
+            blockType: resolvedRoute.blockType,
+            arrowType: resolvedRoute.arrowType,
         });
-        answers[0][index] = route.direction;
+        answers[0][index] = resolvedRoute.direction;
     }
     return {
         board,

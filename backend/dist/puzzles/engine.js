@@ -88,6 +88,11 @@ export class GenericPuzzleEngine {
         this.activePlayerId = playerId;
         this.turnEndsAt = now + Number(this.meta.turnSeconds ?? 60) * 1_000;
     }
+    setTurnOrder(playerIds, now = Date.now()) {
+        this.turnOrder = [...playerIds];
+        this.activePlayerId = this.turnOrder[0] ?? null;
+        this.turnEndsAt = now + Number(this.meta.turnSeconds ?? 60) * 1_000;
+    }
     snapshot(game, now = Date.now()) {
         if (this.gameType === "CROSS_LETTERS")
             this.syncLetterPlayers(game, now);
@@ -2235,7 +2240,8 @@ export class GenericPuzzleEngine {
     syncTurnPlayers(game) {
         const ids = game.snapshot().players.map((player) => player.id)
             .filter((id) => this.gameType !== "HANGMAN" || (this.hangmanErrors.get(id) ?? 0) < 6);
-        this.turnOrder = ids;
+        const preserved = this.turnOrder.filter((id) => ids.includes(id));
+        this.turnOrder = [...preserved, ...ids.filter((id) => !preserved.includes(id))];
         if (!this.activePlayerId || !ids.includes(this.activePlayerId))
             this.activePlayerId = ids[0] ?? null;
     }
