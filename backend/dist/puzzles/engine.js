@@ -188,8 +188,8 @@ export class GenericPuzzleEngine {
                     waveDeadline: this.towerWaveStartedAt > 0 ? this.towerWaveStartedAt + 75_000 : 0,
                 } : {}),
                 ...(this.gameType === "REACTOR_CHAIN" ? {
-                    powerEnergy: Object.fromEntries(this.reactorPowerEnergy),
-                    powerCosts: { HAMMER: 3, ROW_BLAST: 4, COLOR_WIPE: 5, SHUFFLE: 3 },
+                    level: Math.min(100, 1 + Math.floor(Number(this.meta.reactorScore ?? 0) / 600)),
+                    levelProgress: Number(this.meta.reactorScore ?? 0) % 600,
                 } : {})
             }
         };
@@ -358,7 +358,7 @@ export class GenericPuzzleEngine {
         if (this.gameType === "REACTOR_CHAIN") {
             for (let row = 0; row < this.board.length; row += 1)
                 for (let col = 0; col < this.board[row].length; col += 1) {
-                    if (this.reactorGroupSize(row, col) >= 3) {
+                    if (this.board[row][col].meta.special || this.reactorGroupSize(row, col) >= 3) {
                         return { requestId: `reactor-bot-${randomUUID()}`, row, col, val: "CHAIN" };
                     }
                 }
@@ -387,8 +387,17 @@ export class GenericPuzzleEngine {
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && playerId && this.activePlayerId !== playerId)
             return null;
         if (this.gameType === "TIC_TAC_TOE") {
-            const forced = this.meta.forcedMini;
+            let forced = this.meta.forcedMini;
             const miniWinners = (this.meta.miniWinners ?? {});
+            if (forced) {
+                const forcedKey = `${forced.row}:${forced.col}`;
+                const hasFreeCell = this.board.slice(forced.row * 3, forced.row * 3 + 3)
+                    .some((row) => row.slice(forced.col * 3, forced.col * 3 + 3).some((candidate) => candidate.value === null));
+                if (miniWinners[forcedKey] || !hasFreeCell) {
+                    forced = null;
+                    this.meta.forcedMini = null;
+                }
+            }
             const candidates = [];
             for (let row = 0; row < 9; row += 1)
                 for (let col = 0; col < 9; col += 1) {
@@ -685,8 +694,17 @@ export class GenericPuzzleEngine {
             }
             if (cell.value !== null)
                 return { correct: false };
-            const forced = this.meta.forcedMini;
+            let forced = this.meta.forcedMini;
             const miniWinners = (this.meta.miniWinners ?? {});
+            if (forced) {
+                valLoop: {
+                    const region = this.board.slice(forced.row * 3, forced.row * 3 + 3).flatMap((row) => row.slice(forced.col * 3, forced.col * 3 + 3));
+                    if (!miniWinners[`${forced.row}:${forced.col}`] && region.some((candidate) => candidate.value === null))
+                        break valLoop;
+                    forced = null;
+                    this.meta.forcedMini = null;
+                }
+            }
             if (forced && !miniWinners[`${forced.row}:${forced.col}`]
                 && (Math.floor(move.row / 3) !== forced.row || Math.floor(move.col / 3) !== forced.col)) {
                 return { correct: false, neutral: true, message: "Debes jugar en el mini-tablero resaltado" };
@@ -1378,6 +1396,37 @@ export class GenericPuzzleEngine {
         return { correct: true, points: 10, message: `${towerType} construida` };
     }
     applyReactorChainMove(playerId, move) {
+        const specialTarget = this.board[move.row]?.[move.col];
+        const embeddedPower = String(specialTarget?.meta.special ?? "");
+        if (specialTarget && embeddedPower) {
+            const all = this.board.flatMap((row, r) => row.map((_cell, c) => ({ row: r, col: c })));
+            if (embeddedPower === "RAINBOW") {
+                const sourceColor = Number(specialTarget.meta.sourceColor ?? specialTarget.value);
+                this.board.flat().forEach((cell) => {
+                    if (Number(cell.value) === sourceColor) {
+                        cell.value = 0;
+                        cell.meta = { reactorOrb: true, special: "WILD" };
+                    }
+                });
+                this.meta.lastChain = { playerId, size: 0, color: sourceColor, cells: [], power: embeddedPower, at: Date.now() };
+                return { correct: true, points: 40, message: "Esferas multicolor creadas" };
+            }
+            const cells = embeddedPower === "ROW" ? all.filter((point) => point.row === move.row)
+                : embeddedPower === "COLUMN" ? all.filter((point) => point.col === move.col)
+                    : embeddedPower === "WILD" ? all.filter((point) => Math.abs(point.row - move.row) + Math.abs(point.col - move.col) <= 2)
+                        : all.filter((point) => Math.abs(point.row - move.row) <= 1 && Math.abs(point.col - move.col) <= 1);
+            this.removeAndCollapseReactors(cells, playerId);
+            const points = cells.length * 12;
+            this.meta.removed = Number(this.meta.removed ?? 0) + cells.length;
+            this.meta.reactorScore = Number(this.meta.reactorScore ?? 0) + points;
+            this.meta.level = Math.min(100, 1 + Math.floor(Number(this.meta.reactorScore) / 600));
+            this.meta.lastChain = { playerId, size: cells.length, color: specialTarget.value, cells, power: embeddedPower, at: Date.now() };
+            if (!this.hasReactorMove()) {
+                this.meta.noMoves = true;
+                this.completed = true;
+            }
+            return { correct: true, points, message: `${embeddedPower}: ${cells.length} esferas` };
+        }
         const payload = typeof move.val === "object" && move.val !== null ? move.val : {};
         const action = String(payload.action ?? move.val ?? "CHAIN").toUpperCase();
         const currentEnergy = this.reactorPowerEnergy.get(playerId) ?? 0;
@@ -1432,13 +1481,28 @@ export class GenericPuzzleEngine {
         }
         if (group.length < 3)
             return { correct: false, neutral: true, message: "Necesitas al menos 3 núcleos conectados" };
-        this.removeAndCollapseReactors(group, playerId);
+        const createdSpecial = group.length >= 7 ? "RAINBOW" : group.length >= 6 ? "BOMB" : group.length >= 5 ? (move.row % 2 === 0 ? "ROW" : "COLUMN") : null;
+        const removedGroup = createdSpecial ? group.filter(({ row, col }) => row !== move.row || col !== move.col) : group;
+        this.removeAndCollapseReactors(removedGroup, playerId);
+        if (createdSpecial) {
+            const survivor = this.board[move.row]?.[move.col];
+            if (survivor) {
+                survivor.value = color;
+                survivor.meta = { reactorOrb: true, special: createdSpecial, sourceColor: color };
+            }
+        }
         const combo = Math.max(1, Math.floor(group.length / 4));
         this.meta.combo = combo;
         this.meta.removed = Number(this.meta.removed ?? 0) + group.length;
-        this.reactorPowerEnergy.set(playerId, Math.min(12, currentEnergy + Math.max(1, Math.floor(group.length / 3))));
+        const earnedPoints = group.length * group.length * combo;
+        this.meta.reactorScore = Number(this.meta.reactorScore ?? 0) + earnedPoints;
+        this.meta.level = Math.min(100, 1 + Math.floor(Number(this.meta.reactorScore) / 600));
         this.meta.lastChain = { playerId, size: group.length, color, cells: group, at: Date.now() };
-        return { correct: true, points: group.length * group.length * combo, message: `Cadena ×${combo} de ${group.length}` };
+        if (!this.hasReactorMove()) {
+            this.meta.noMoves = true;
+            this.completed = true;
+        }
+        return { correct: true, points: earnedPoints, message: createdSpecial ? `Creaste esfera ${createdSpecial}` : `Cadena ×${combo} de ${group.length}` };
     }
     removeAndCollapseReactors(cells, playerId) {
         cells.forEach(({ row, col }) => {
@@ -1462,7 +1526,10 @@ export class GenericPuzzleEngine {
                 cell.meta = { reactorOrb: true };
             });
         }
-        this.ensureReactorMove();
+        this.meta.noMoves = !this.hasReactorMove();
+    }
+    hasReactorMove() {
+        return this.board.some((row, rowIndex) => row.some((cell, colIndex) => Boolean(cell.meta.special) || this.reactorGroupSize(rowIndex, colIndex) >= 3));
     }
     ensureReactorMove() {
         const playable = this.board.some((row, rowIndex) => row.some((_cell, colIndex) => this.reactorGroupSize(rowIndex, colIndex) >= 3));
@@ -2099,7 +2166,7 @@ export class GenericPuzzleEngine {
         if (this.gameType === "TOWER_DEFENSE")
             return this.completed;
         if (this.gameType === "REACTOR_CHAIN") {
-            return Number(this.meta.removed ?? 0) >= Number(this.meta.targetRemoved ?? 100);
+            return this.meta.noMoves === true || Number(this.meta.level ?? 1) >= 100;
         }
         if (["HITORI", "BRIDGES"].includes(this.gameType)) {
             return this.board.every((row, y) => row.every((cell, x) => this.answers[y][x] !== true || cell.ownerId !== null));

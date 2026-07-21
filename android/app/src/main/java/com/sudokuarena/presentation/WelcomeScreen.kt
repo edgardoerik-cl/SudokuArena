@@ -155,7 +155,7 @@ fun WelcomeScreen(
                     .padding(
                         start = if (landscape) 285.dp else 18.dp,
                         end = 18.dp,
-                        top = if (landscape) 14.dp else 185.dp,
+                        top = if (landscape) 14.dp else 220.dp,
                         bottom = if (landscape) 68.dp else 88.dp,
                     )
                     .verticalScroll(rememberScrollState()),
@@ -257,14 +257,22 @@ private fun ArenaBrandHeader(modifier: Modifier = Modifier, compact: Boolean = f
                 },
             )
         }
-        Text(
-            "MULTI ARENA",
-            style = (if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.headlineLarge).copy(
-                shadow = Shadow(Color(0xCC0057D9), blurRadius = 12f + pulse * 16f),
-            ),
-            fontWeight = FontWeight.Black,
-            color = ArenaColors.Ink,
-        )
+        Row(horizontalArrangement = Arrangement.Center) {
+            "MULTI ARENA".forEachIndexed { index, letter ->
+                Text(
+                    letter.toString(),
+                    style = (if (compact) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineLarge).copy(
+                        shadow = Shadow(Color(0xCC0057D9), blurRadius = 12f + pulse * 16f),
+                    ),
+                    fontWeight = FontWeight.Black,
+                    color = if (index % 2 == 0) ArenaColors.Ink else ArenaColors.Violet,
+                    modifier = Modifier.graphicsLayer {
+                        translationY = sin(pulse * Math.PI.toFloat() * 2f + index * .48f) * 5f
+                        scaleX = .96f + pulse * .05f; scaleY = scaleX
+                    },
+                )
+            }
+        }
     }
 }
 

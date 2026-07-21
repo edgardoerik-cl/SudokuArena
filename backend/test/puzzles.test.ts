@@ -334,18 +334,17 @@ describe("motor genérico de puzzles", () => {
     assert.ok(Number(engine.snapshot(players).meta.removed) >= before + 3);
   });
 
-  it("Reactor Chain consume energía al activar poderes tipo Match-3", () => {
+  it("Reactor Chain crea ventajas dentro de esferas por cadenas grandes", () => {
     const players = new ArenaGame("reactor-powers");
     players.addPlayer("p1", "Catalizador");
     players.startMatch({ gameType: "REACTOR_CHAIN", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "EASY" }, "p1");
     const engine = new GenericPuzzleEngine("REACTOR_CHAIN", "reactor-powers", { seed: "power-board", difficulty: "EASY" });
-    (engine as any).reactorPowerEnergy.set("p1", 12);
-    const result = engine.makeMove("p1", {
-      requestId: "reactor-hammer", row: 2, col: 2, val: { action: "HAMMER" },
-    }, players);
+    const board = (engine as any).board;
+    for (let col = 0; col < 7; col += 1) board[0][col].value = 1;
+    const result = engine.makeMove("p1", { requestId: "reactor-special", row: 0, col: 0, val: "CHAIN" }, players);
     assert.equal(result.accepted, true);
-    assert.equal((engine.snapshot(players).meta.powerEnergy as Record<string, number>).p1, 9);
-    assert.equal((engine.snapshot(players).meta.lastPower as { type: string }).type, "HAMMER");
+    assert.equal((engine as any).board[0][0].meta.special, "RAINBOW");
+    assert.equal(engine.snapshot(players).meta.level, 1);
   });
 
   it("Chess Tactics configura las seis clases, cooldowns y rangos clásicos", () => {

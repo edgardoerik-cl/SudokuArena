@@ -489,7 +489,9 @@ function hangman(random, difficulty) {
 }
 function arrowsEscape(random, difficulty) {
     // Un lienzo grande y denso: las cabezas dibujan colectivamente un corazon.
-    const count = sizeFor(difficulty, 24, 32, 40, 48);
+    // Modelo lógico 100×100, serializado de forma dispersa para no enviar diez
+    // mil celdas vacías por WebSocket. Las rutas sí usan coordenadas de esa malla.
+    const count = sizeFor(difficulty, 72, 88, 104, 120);
     const board = matrix(1, count, () => cell(null, true));
     const answers = matrix(1, count, () => null);
     const shapes = [];
@@ -607,8 +609,10 @@ function arrowsEscape(random, difficulty) {
             freeSpace: true,
             pathModel: "SERPENTINE_V2",
             silhouette: "HEART",
-            worldWidth: 1,
-            worldHeight: 1,
+            worldWidth: 100,
+            worldHeight: 100,
+            logicalRows: 100,
+            logicalColumns: 100,
             totalBlocks: count,
             totalShapes: shapes.length,
             maxFailedTaps: sizeFor(difficulty, 8, 7, 6, 5),
@@ -781,6 +785,9 @@ function reactorChain(random, difficulty) {
             colors,
             targetRemoved: size * size * 2,
             removed: 0,
+            reactorScore: 0,
+            level: 1,
+            maxLevel: 100,
             combo: 1,
             instructions: "Toca grupos de 3 o más núcleos iguales. Las cadenas grandes multiplican la puntuación y recargan el reactor.",
             difficulty,

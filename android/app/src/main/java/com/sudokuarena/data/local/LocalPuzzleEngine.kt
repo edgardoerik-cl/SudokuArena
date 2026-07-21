@@ -94,6 +94,7 @@ class LocalPuzzleEngine(
     private var reactorLastChain: Map<String, Any?>? = null
     private var reactorLastPower: Map<String, Any?>? = null
     private var reactorPowerEnergy = 0
+    private var reactorScore = 0
     private var ticForcedMini: Pair<Int, Int>? = null
 
     fun snapshot() = GenericBoardState(
@@ -157,8 +158,8 @@ class LocalPuzzleEngine(
                 "targetRemoved" to (blueprint.meta["targetRemoved"] ?: 100),
                 "lastChain" to reactorLastChain,
                 "lastPower" to reactorLastPower,
-                "powerEnergy" to mapOf(OWNER to reactorPowerEnergy),
-                "powerCosts" to mapOf("HAMMER" to 3, "ROW_BLAST" to 4, "COLOR_WIPE" to 5, "SHUFFLE" to 3),
+                "level" to (reactorScore / 600 + 1).coerceAtMost(100),
+                "levelProgress" to reactorScore % 600,
             ) else emptyMap<String, Any?>() +
             if (gameType == GameType.TIC_TAC_TOE) mapOf(
                 "variant" to "ULTIMATE_INFINITE",
@@ -436,7 +437,7 @@ class LocalPuzzleEngine(
             board.flatten().any { ((it.value as? Number)?.toInt() ?: 0) >= target } || mergeHasNoMoves()
         }
         GameType.TOWER_DEFENSE -> towerBaseHealth <= 0 || (towerWave >= 20 && !towerWaveActive)
-        GameType.REACTOR_CHAIN -> reactorRemoved >= ((blueprint.meta["targetRemoved"] as? Number)?.toInt() ?: 100)
+        GameType.REACTOR_CHAIN -> reactorScore / 600 + 1 >= 100
         else -> board.indices.all { y -> board[y].indices.all { x -> blueprint.answers[y][x] == null || board[y][x].ownerId != null } }
     }
 
@@ -1173,6 +1174,26 @@ class LocalPuzzleEngine(
     }
 
     private fun reactorChainMove(row: Int, col: Int, raw: Any?): LocalPuzzleMoveResult {
+        val embedded = board.getOrNull(row)?.getOrNull(col)?.meta?.get("special")?.toString().orEmpty()
+        if (embedded.isNotEmpty()) {
+            if (embedded == "RAINBOW") {
+                val source = (board[row][col].meta["sourceColor"] as? Number)?.toInt()
+                board = board.map { cells -> cells.map { cell ->
+                    if ((cell.value as? Number)?.toInt() == source) cell.copy(value = 0, meta = mapOf("reactorOrb" to true, "special" to "WILD")) else cell
+                } }
+                reactorScore += 40; return accept(40)
+            }
+            val removed = buildSet {
+                board.forEachIndexed { y, cells -> cells.indices.forEach { x ->
+                    if ((embedded == "ROW" && y == row) || (embedded == "COLUMN" && x == col) ||
+                        ((embedded == "BOMB" || embedded == "WILD") && kotlin.math.abs(y - row) <= 1 && kotlin.math.abs(x - col) <= 1)) add(y to x)
+                } }
+            }
+            collapseReactor(removed); reactorRemoved += removed.size; reactorScore += removed.size * 12
+            reactorLastChain = mapOf("playerId" to OWNER, "size" to removed.size, "power" to embedded,
+                "cells" to removed.map { mapOf("row" to it.first, "col" to it.second) }, "at" to System.currentTimeMillis())
+            return accept(removed.size * 12)
+        }
         val action = (raw as? Map<*, *>)?.get("action")?.toString()?.uppercase() ?: "CHAIN"
         val costs = mapOf("HAMMER" to 3, "ROW_BLAST" to 4, "COLOR_WIPE" to 5, "SHUFFLE" to 3)
         if (action != "CHAIN") {
@@ -1214,9 +1235,17 @@ class LocalPuzzleEngine(
             queue.add(point.first to point.second + 1)
         }
         if (group.size < 3) return reject("Necesitas 3 núcleos conectados")
-        collapseReactor(group)
+        val special = if (group.size >= 7) "RAINBOW" else if (group.size >= 6) "BOMB" else if (group.size >= 5) if (row % 2 == 0) "ROW" else "COLUMN" else null
+        val removedGroup = if (special == null) group else group.filterNot { it == row to col }.toSet()
+        collapseReactor(removedGroup)
+        if (special != null) {
+            val next = board.map { it.toMutableList() }.toMutableList()
+            next[row][col] = GenericCell(color, true, meta = mapOf("reactorOrb" to true, "special" to special, "sourceColor" to color))
+            board = next
+        }
         reactorRemoved += group.size
         reactorPowerEnergy = (reactorPowerEnergy + (group.size / 3).coerceAtLeast(1)).coerceAtMost(12)
+        reactorScore += group.size * group.size
         reactorLastChain = mapOf(
             "playerId" to OWNER, "size" to group.size, "color" to color,
             "cells" to group.map { (y, x) -> mapOf("row" to y, "col" to x) },

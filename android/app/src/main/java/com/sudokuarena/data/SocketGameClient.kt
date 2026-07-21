@@ -586,6 +586,13 @@ private fun parsePacmanState(json: JSONObject): PacmanArenaState {
         ghosts = actors("ghosts"),
         status = json.optString("status", "WAITING"),
         frightenedUntil = json.optLong("frightenedUntil"),
+        level = json.optInt("level", 1),
+        fruit = json.optJSONObject("fruit")?.let { fruit ->
+            com.sudokuarena.domain.PacmanFruitState(
+                fruit.optDouble("x").toFloat(), fruit.optDouble("y").toFloat(),
+                fruit.optString("type", "CHERRY"), fruit.optInt("points", 100),
+            )
+        },
     )
 }
 

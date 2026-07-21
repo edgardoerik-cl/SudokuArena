@@ -125,7 +125,10 @@ data class PacmanArenaState(
     val ghosts: List<PacmanActorState>,
     val status: String = "WAITING",
     val frightenedUntil: Long = 0,
+    val level: Int = 1,
+    val fruit: PacmanFruitState? = null,
 )
+data class PacmanFruitState(val x: Float, val y: Float, val type: String, val points: Int)
 
 data class DemolitionBrickState(
     val id: String,

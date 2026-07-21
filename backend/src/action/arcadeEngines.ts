@@ -257,8 +257,15 @@ export class PacmanArenaEngine {
   private tickNumber = 0;
   private completed = false;
   private started = false;
+  private level = 1;
+  private fruit: { x: number; y: number; type: string; points: number } | null = null;
+  private fruitMilestones = new Set<number>();
 
   constructor() {
+    this.refillMaze();
+  }
+  private refillMaze(): void {
+    this.pills.clear(); this.powerPills.clear(); this.fruit = null; this.fruitMilestones.clear();
     PACMAN_MAP.forEach((row, y) => row.forEach((tile, x) => {
       if (tile === 1) this.pills.add(`${x}:${y}`);
       if (tile === 2) this.powerPills.add(`${x}:${y}`);
@@ -296,6 +303,19 @@ export class PacmanArenaEngine {
         player.score = (player.score ?? 0) + 50;
         this.frightenedUntil = now + 10_000;
       }
+      if (this.fruit && player.x === this.fruit.x && player.y === this.fruit.y) {
+        player.score = (player.score ?? 0) + this.fruit.points; this.fruit = null;
+      }
+    }
+    const remaining = this.pills.size + this.powerPills.size;
+    const total = PACMAN_MAP.flat().filter((tile) => tile === 1 || tile === 2).length;
+    const eatenPercent = 1 - remaining / Math.max(1, total);
+    const milestone = eatenPercent >= .7 ? 70 : eatenPercent >= .3 ? 30 : 0;
+    if (milestone && !this.fruitMilestones.has(milestone) && !this.fruit) {
+      this.fruitMilestones.add(milestone);
+      const fruitTypes = [{ type: "CHERRY", points: 100 }, { type: "STRAWBERRY", points: 300 }, { type: "GALAXY", points: 500 }];
+      const selected = fruitTypes[Math.min(fruitTypes.length - 1, Math.floor((this.level - 1) / 3))]!;
+      this.fruit = { x: 7, y: 9, ...selected };
     }
     this.ghosts.forEach((ghost, index) => {
       if ((ghost.eatenUntil ?? 0) > now) {
@@ -329,13 +349,19 @@ export class PacmanArenaEngine {
         player.x = 7; player.y = 11; player.direction = "STOP"; delete player.queuedDirection;
       }
     }
-    this.completed = this.pills.size === 0 || [...this.players.values()].every((player) => (player.lives ?? 0) <= 0);
+    if (this.pills.size === 0 && this.powerPills.size === 0) {
+      this.level = Math.min(100, this.level + 1); this.refillMaze();
+      for (const player of this.players.values()) { player.x = 7; player.y = 11; player.direction = "STOP"; }
+      this.started = false;
+    }
+    this.completed = [...this.players.values()].every((player) => (player.lives ?? 0) <= 0) || this.level >= 100;
   }
   snapshot(): any {
     return {
       serverTime: Date.now(), tick: this.tickNumber, completed: this.completed, tilemap: PACMAN_MAP,
       status: this.started ? "PLAYING" : "WAITING",
       frightenedUntil: this.frightenedUntil,
+      level: this.level, fruit: this.fruit,
       ghostHouse: { x: 7, y: 7, width: 3, height: 2 },
       pills: [...this.pills], powerPills: [...this.powerPills],
       players: [...this.players.values()], ghosts: this.ghosts,

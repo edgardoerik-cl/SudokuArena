@@ -268,6 +268,9 @@ io.on("connection", (socket) => {
         if (!room || room.phase !== "PLAYING" || room.config.gameType !== "PACMAN_ARENA" || !room.pacmanEngine || !payload?.direction)
             return;
         room.pacmanEngine.input(playerId, payload.direction);
+        // Eco autoritativo inmediato: el cliente confirma el giro sin esperar al
+        // siguiente frame de simulación/broadcast.
+        socket.emit("pacman:state", room.pacmanEngine.snapshot());
     });
     socket.on("demolition:input", (payload) => {
         const room = roomFor(socket);
@@ -1187,7 +1190,7 @@ function startPacmanLoop(room) {
         io.to(room.code).volatile.emit("pacman:state", snapshot);
         if (snapshot.completed)
             finishMatch(room, true);
-    }, 100);
+    }, 50);
 }
 function startDemolitionLoop(room) {
     if (!room.demolitionEngine || room.demolitionTick)

@@ -568,6 +568,7 @@ private fun SerpentineArrowsBoard(
     val bump = remember(state.gameId) { androidx.compose.animation.core.Animatable(0f) }
     var action by remember(state.gameId) { mutableStateOf("ESCAPE") }
     var zoom by remember(state.gameId) { mutableFloatStateOf(1f) }
+    var panOffset by remember(state.gameId) { mutableStateOf(Offset.Zero) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     LaunchedEffect(removed) {
@@ -587,18 +588,25 @@ private fun SerpentineArrowsBoard(
         }
     }
     fun screenPoint(point: Offset): Offset = Offset(
-        (point.x - .5f) * zoom + .5f,
-        (point.y - .5f) * zoom + .5f,
+        (point.x - .5f) * zoom + .5f + panOffset.x,
+        (point.y - .5f) * zoom + .5f + panOffset.y,
     )
     Box(modifier.fillMaxWidth().aspectRatio(1.34f)) {
         Canvas(
             Modifier.fillMaxSize()
                 .background(Color(0xFF07152F), RoundedCornerShape(18.dp))
+                .pointerInput(enabled) {
+                    detectTransformGestures { _, pan, zoomChange, _ ->
+                        if (!enabled) return@detectTransformGestures
+                        zoom = (zoom * zoomChange).coerceIn(1f, 5f)
+                        panOffset += Offset(pan.x / size.width, pan.y / size.height)
+                    }
+                }
                 .pointerInput(routes, removed, enabled, action) {
                     detectTapGestures { tap ->
                         if (!enabled) return@detectTapGestures
                         val screen = Offset(tap.x / size.width, tap.y / size.height)
-                        val normalized = Offset((screen.x - .5f) / zoom + .5f, (screen.y - .5f) / zoom + .5f)
+                        val normalized = Offset((screen.x - panOffset.x - .5f) / zoom + .5f, (screen.y - panOffset.y - .5f) / zoom + .5f)
                         val route = routes.filterNot { it.memberKeys.all(removed::contains) }
                             .minByOrNull { candidate -> minOf(pointToRouteDistance(normalized, candidate), (normalized - candidate.points.last()).getDistance() * .75f) }
                             ?.takeIf { candidate -> pointToRouteDistance(normalized, candidate) <= .055f || (normalized - candidate.points.last()).getDistance() <= .075f }
@@ -618,8 +626,8 @@ private fun SerpentineArrowsBoard(
                 },
         ) {
             val gridColor = Color(0xFF38BDF8).copy(alpha = .08f)
-            repeat(12) { index ->
-                val x = size.width * index / 12f; val y = size.height * index / 12f
+            repeat(21) { index ->
+                val x = size.width * index / 20f; val y = size.height * index / 20f
                 drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), 1f)
                 drawLine(gridColor, Offset(0f, y), Offset(size.width, y), 1f)
             }
@@ -697,7 +705,7 @@ private fun SerpentineArrowsBoard(
                 colors = ButtonDefaults.buttonColors(containerColor = if (action == "MISSILE") Color(0xFFFF6D00) else Color(0xFF075985)),
             ) { Text("➤ Misil ${1 - missileUsed}", fontWeight = FontWeight.Black, fontSize = 11.sp) }
         }
-        Column(
+        if (false) Column(
             Modifier.align(Alignment.TopEnd).padding(10.dp).zIndex(5f),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -1265,9 +1273,7 @@ private fun ReactorChainBoard(
                         val col = (tap.x / size.width * state.columns).toInt().coerceIn(0, state.columns - 1)
                         val row = (tap.y / size.height * state.rows).toInt().coerceIn(0, state.rows - 1)
                         lastTouchAt = System.currentTimeMillis(); hintCells = emptySet()
-                        val power = selectedPower
-                        onDirectMove(row, col, if (power == null) "CHAIN" else mapOf("action" to power))
-                        selectedPower = null
+                        onDirectMove(row, col, "CHAIN")
                     }
                 },
         ) {
@@ -1292,6 +1298,25 @@ private fun ReactorChainBoard(
                     ), radius, sphereCenter,
                 )
                 drawCircle(Color.White.copy(alpha = .28f), radius, sphereCenter, style = Stroke(maxOf(1.5f, radius * .07f)))
+                // Las ventajas ahora viven dentro del tablero como esferas especiales.
+                // El brillo gira suavemente sin desplazar la ficha de su casilla.
+                val special = cell.meta["special"]?.toString().orEmpty()
+                val orbit = shimmer * Math.PI.toFloat() * 2f + (row * 7 + col) * .31f
+                val orbitPoint = sphereCenter + Offset(kotlin.math.cos(orbit), kotlin.math.sin(orbit)) * radius * .48f
+                drawCircle(Color.White.copy(alpha = .32f), radius * .09f, orbitPoint)
+                when (special) {
+                    "BOMB" -> {
+                        drawCircle(Color(0xFF080A0F), radius * .72f, sphereCenter)
+                        drawLine(Color(0xFFFFB300), sphereCenter - Offset(0f, radius * .55f), sphereCenter + Offset(radius * .32f, -radius * .9f), radius * .12f)
+                        drawCircle(Color(0xFFFFF176), radius * (.10f + shimmer * .08f), sphereCenter + Offset(radius * .36f, -radius * .94f))
+                    }
+                    "ROW" -> repeat(3) { stripe -> drawLine(Color.White, sphereCenter + Offset(-radius * .62f, (stripe - 1) * radius * .25f), sphereCenter + Offset(radius * .62f, (stripe - 1) * radius * .25f), radius * .10f) }
+                    "COLUMN" -> repeat(3) { stripe -> drawLine(Color.White, sphereCenter + Offset((stripe - 1) * radius * .25f, -radius * .62f), sphereCenter + Offset((stripe - 1) * radius * .25f, radius * .62f), radius * .10f) }
+                    "RAINBOW", "WILD" -> {
+                        val rainbow = listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Blue, Color.Magenta)
+                        rainbow.forEachIndexed { index, tint -> drawArc(tint, index * 60f + shimmer * 40f, 55f, false, sphereCenter - Offset(radius * .65f, radius * .65f), Size(radius * 1.3f, radius * 1.3f), style = Stroke(radius * .22f)) }
+                    }
+                }
                 if ((row * 31 + col * 17 + sparkleSeed * 13).mod(maxOf(1, state.rows * state.columns)) % 7 == 0) {
                     val glint = sphereCenter - Offset(radius * .33f, radius * .36f)
                     drawLine(Color.White.copy(alpha = shimmer), glint - Offset(radius * .18f, 0f), glint + Offset(radius * .18f, 0f), 2f)
@@ -1313,7 +1338,14 @@ private fun ReactorChainBoard(
                 }
             }
         }
-        Row(
+        Text(
+            if (state.meta["noMoves"] == true) "SIN MOVIMIENTOS" else "NIVEL ${state.meta["level"] ?: 1}/100",
+            color = if (state.meta["noMoves"] == true) Color(0xFFFF5252) else Color.White,
+            fontSize = 11.sp, fontWeight = FontWeight.Black,
+            modifier = Modifier.align(Alignment.TopStart).padding(9.dp).zIndex(4f)
+                .background(Color(0xBB07152F), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+        if (false) Row(
             Modifier.align(Alignment.BottomCenter).padding(7.dp).zIndex(4f),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -1337,7 +1369,7 @@ private fun ReactorChainBoard(
                 ) { Text("$labelÂ·$cost", fontSize = 8.sp, fontWeight = FontWeight.Black) }
             }
         }
-        Text(
+        if (false) Text(
             "ENERGÃA $energy/12" + (selectedPower?.let { " Â· toca un objetivo" } ?: ""),
             color = Color.White,
             fontSize = 10.sp,
@@ -2949,9 +2981,11 @@ private fun GenericMoveControls(
                     var col = selectedCell.column
                     rackLetters.forEach { rackLetter ->
                         while (board.getOrNull(row)?.getOrNull(col)?.value != null) {
-                            add(Triple(row, col, board[row][col].value.toString().first()))
+                            val existing = board.getOrNull(row)?.getOrNull(col)?.value?.toString()?.firstOrNull() ?: return@buildList
+                            add(Triple(row, col, existing))
                             if (vertical) row++ else col++
                         }
+                        if (board.getOrNull(row)?.getOrNull(col) == null) return@buildList
                         add(Triple(row, col, rackLetter.first()))
                         if (vertical) row++ else col++
                     }
@@ -2962,7 +2996,9 @@ private fun GenericMoveControls(
             val compatible = inBounds && coordinates.all { (row, col, letter) ->
                 board[row][col].value == null || board[row][col].value.toString() == letter.toString()
             }
-            val connected = coordinates.any { (row, col, letter) -> board.getOrNull(row)?.getOrNull(col)?.value?.toString() == letter.toString() }
+            val boardIsEmpty = board.flatten().none { it.value != null }
+            val connected = (boardIsEmpty && coordinates.any { (row, col, _) -> row == 7 && col == 7 }) ||
+                coordinates.any { (row, col, letter) -> board.getOrNull(row)?.getOrNull(col)?.value?.toString() == letter.toString() }
             val previewValid = normalized.length >= 2 && selectedCell != null && inBounds && compatible && connected
             val letterScores = mapOf('A' to 1, 'B' to 3, 'C' to 3, 'D' to 2, 'E' to 1, 'F' to 4, 'G' to 2, 'H' to 4, 'I' to 1, 'J' to 8, 'L' to 1, 'M' to 3, 'N' to 1, 'Ñ' to 8, 'O' to 1, 'P' to 3, 'Q' to 5, 'R' to 1, 'S' to 1, 'T' to 1, 'U' to 1, 'V' to 4, 'X' to 8, 'Y' to 4, 'Z' to 10)
             val estimatedPoints = if (!inBounds) 0 else coordinates.sumOf { (row, col, letter) ->

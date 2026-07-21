@@ -143,6 +143,15 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         paint.color = Color.rgb(0, 229, 255)
         canvas.drawLine(left + tile * 7.08f, top + tile * 7f, left + tile * 7.92f, top + tile * 7f, paint)
 
+        state.fruit?.let { fruit ->
+            val fx = left + (fruit.x + .5f) * tile; val fy = top + (fruit.y + .5f) * tile
+            paint.style = Paint.Style.FILL; paint.color = Color.rgb(239, 35, 60)
+            canvas.drawCircle(fx - tile * .11f, fy, tile * .18f, paint)
+            canvas.drawCircle(fx + tile * .11f, fy, tile * .18f, paint)
+            paint.color = Color.rgb(42, 157, 70); paint.strokeWidth = tile * .06f; paint.style = Paint.Style.STROKE
+            canvas.drawLine(fx, fy - tile * .12f, fx + tile * .12f, fy - tile * .35f, paint)
+        }
+
         val smoothing = 1f - exp(-deltaSeconds * 13f)
         state.players.forEach { drawActor(canvas, it, true, left, top, tile, smoothing, timeSeconds, false) }
         val serverNow = state.serverTime + (System.currentTimeMillis() - stateReceivedAt).coerceAtLeast(0L)
