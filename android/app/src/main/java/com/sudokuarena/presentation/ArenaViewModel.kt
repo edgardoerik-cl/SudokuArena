@@ -604,8 +604,11 @@ class ArenaViewModel(
                 }
             }
             GameType.PACMAN_ARENA -> viewModelScope.launch {
+                val frameMs = 150L
+                var nextFrameAt = android.os.SystemClock.elapsedRealtime()
                 while (isActive && !mutableState.value.soloCompleted) {
-                    delay(170)
+                    nextFrameAt += frameMs
+                    delay((nextFrameAt - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(1L))
                     if (!mutableState.value.isLocallyPaused) {
                         localPacmanEngine?.tick()
                         val snapshot = localPacmanEngine?.snapshot() ?: continue

@@ -2,6 +2,7 @@ package com.sudokuarena.presentation
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
@@ -25,8 +26,12 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
     private val displayPositions = mutableMapOf<String, PointF>()
     @Volatile private var arenaState: PacmanArenaState? = null
     @Volatile private var stateReceivedAt: Long = 0
+    @Volatile private var pillCells: Set<Int> = emptySet()
+    @Volatile private var powerPillCells: Set<Int> = emptySet()
     @Volatile private var running = false
     private var renderThread: Thread? = null
+    private var mazeLayer: Bitmap? = null
+    private var mazeLayerKey: Int = 0
 
     init {
         holder.addCallback(this)
@@ -37,6 +42,9 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
     fun updateState(state: PacmanArenaState?) {
         arenaState = state
         stateReceivedAt = System.currentTimeMillis()
+        val columns = state?.tilemap?.firstOrNull()?.size ?: 15
+        pillCells = state?.pills.orEmpty().mapNotNull { decodeCell(it, columns) }.toSet()
+        powerPillCells = state?.powerPills.orEmpty().mapNotNull { decodeCell(it, columns) }.toSet()
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -60,6 +68,9 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         renderThread?.interrupt()
         runCatching { renderThread?.join(350) }
         renderThread = null
+        mazeLayer?.recycle()
+        mazeLayer = null
+        mazeLayerKey = 0
     }
 
     override fun run() {
@@ -83,7 +94,6 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
     }
 
     private fun render(canvas: Canvas, deltaSeconds: Float, timeSeconds: Float) {
-        canvas.drawColor(Color.rgb(2, 3, 15))
         val state = arenaState ?: return
         val map = state.tilemap
         val rows = map.size.coerceAtLeast(1)
@@ -92,42 +102,25 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         val left = (canvas.width - tile * columns) / 2f
         val top = (canvas.height - tile * rows) / 2f
 
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = maxOf(2f, tile * .11f)
-        paint.color = Color.rgb(20, 61, 255)
-        map.forEachIndexed { row, values ->
-            values.forEachIndexed { col, value ->
-                val cell = RectF(left + col * tile, top + row * tile, left + (col + 1) * tile, top + (row + 1) * tile)
-                if (value == 0) {
-                    canvas.drawRoundRect(cell, tile * .12f, tile * .12f, paint)
-                } else if (value == 3) {
-                    paint.style = Paint.Style.FILL
-                    paint.color = Color.rgb(18, 8, 46)
-                    canvas.drawRect(cell, paint)
-                    paint.style = Paint.Style.STROKE
-                    paint.strokeWidth = maxOf(1.5f, tile * .045f)
-                    paint.color = Color.rgb(112, 52, 190)
-                    canvas.drawLine(cell.left, cell.bottom, cell.right, cell.top, paint)
-                } else {
-                    val key = "$col:$row"
-                    paint.style = Paint.Style.FILL
-                    when {
-                        key in state.powerPills -> {
-                            val pulse = .15f + abs(sin(timeSeconds * 5f)) * .09f
-                            paint.color = Color.argb(90, 255, 255, 255)
-                            canvas.drawCircle(cell.centerX(), cell.centerY(), tile * pulse * 1.8f, paint)
-                            paint.color = Color.WHITE
-                            canvas.drawCircle(cell.centerX(), cell.centerY(), tile * pulse, paint)
-                        }
-                        key in state.pills -> {
-                            paint.color = Color.rgb(255, 224, 130)
-                            canvas.drawCircle(cell.centerX(), cell.centerY(), tile * .07f, paint)
-                        }
-                    }
-                    paint.style = Paint.Style.STROKE
-                    paint.color = Color.rgb(20, 61, 255)
-                }
-            }
+        ensureMazeLayer(canvas, map, tile, left, top)
+        mazeLayer?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+
+        // Sólo cambian pellets y actores. El laberinto queda cacheado para
+        // evitar cientos de RectF/String temporales por cada frame a 60 FPS.
+        paint.style = Paint.Style.FILL
+        pillCells.forEach { encoded ->
+            val col = encoded % columns; val row = encoded / columns
+            paint.color = Color.rgb(255, 224, 130)
+            canvas.drawCircle(left + (col + .5f) * tile, top + (row + .5f) * tile, tile * .07f, paint)
+        }
+        val pulse = .15f + abs(sin(timeSeconds * 5f)) * .09f
+        powerPillCells.forEach { encoded ->
+            val col = encoded % columns; val row = encoded / columns
+            val cx = left + (col + .5f) * tile; val cy = top + (row + .5f) * tile
+            paint.color = Color.argb(90, 255, 255, 255)
+            canvas.drawCircle(cx, cy, tile * pulse * 1.8f, paint)
+            paint.color = Color.WHITE
+            canvas.drawCircle(cx, cy, tile * pulse, paint)
         }
 
         // Casa central cerrada: los fantasmas comidos esperan aquí y solo los
@@ -231,12 +224,52 @@ class PacmanSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.
         }
         val lookX = when (actor.direction) { "LEFT" -> -radius * .10f; "RIGHT" -> radius * .10f; else -> 0f }
         val lookY = when (actor.direction) { "UP" -> -radius * .10f; "DOWN" -> radius * .10f; else -> 0f }
-        for (offset in listOf(-radius * .38f, radius * .38f)) {
+        var eye = 0
+        while (eye < 2) {
+            val offset = if (eye == 0) -radius * .38f else radius * .38f
             paint.color = Color.WHITE
             canvas.drawCircle(display.x + offset, display.y - radius * .18f, radius * .25f, paint)
             paint.color = Color.rgb(13, 71, 161)
             canvas.drawCircle(display.x + offset + lookX, display.y - radius * .18f + lookY, radius * .11f, paint)
+            eye++
         }
+    }
+
+    private fun ensureMazeLayer(canvas: Canvas, map: List<List<Int>>, tile: Float, left: Float, top: Float) {
+        val key = 31 * (31 * canvas.width + canvas.height) + map.hashCode()
+        if (mazeLayerKey == key && mazeLayer?.isRecycled == false) return
+        mazeLayer?.recycle()
+        val bitmap = Bitmap.createBitmap(canvas.width.coerceAtLeast(1), canvas.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val layer = Canvas(bitmap)
+        layer.drawColor(Color.rgb(2, 3, 15))
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = maxOf(2f, tile * .11f)
+        paint.color = Color.rgb(20, 61, 255)
+        map.forEachIndexed { row, values -> values.forEachIndexed { col, value ->
+            val l = left + col * tile; val t = top + row * tile
+            if (value == 0) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = maxOf(2f, tile * .11f)
+                paint.color = Color.rgb(20, 61, 255)
+                layer.drawRoundRect(l, t, l + tile, t + tile, tile * .12f, tile * .12f, paint)
+            } else if (value == 3) {
+                paint.style = Paint.Style.FILL; paint.color = Color.rgb(18, 8, 46)
+                layer.drawRect(l, t, l + tile, t + tile, paint)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = maxOf(1.5f, tile * .045f); paint.color = Color.rgb(112, 52, 190)
+                layer.drawLine(l, t + tile, l + tile, t, paint)
+            }
+        } }
+        mazeLayer = bitmap
+        mazeLayerKey = key
+    }
+
+    private fun decodeCell(value: String, columns: Int): Int? {
+        val separator = value.indexOf(':')
+        if (separator <= 0) return null
+        val x = value.substring(0, separator).toIntOrNull() ?: return null
+        val y = value.substring(separator + 1).toIntOrNull() ?: return null
+        return y * columns + x
     }
 
     private fun parseColor(value: String?, fallback: Int): Int =
