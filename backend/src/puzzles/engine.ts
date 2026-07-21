@@ -716,6 +716,8 @@ export class GenericPuzzleEngine {
       if (cell.value !== null) return { correct: false };
       let forced = this.meta.forcedMini as { row: number; col: number } | null;
       const miniWinners = (this.meta.miniWinners ?? {}) as Record<string, string>;
+      const selectedMiniKey = `${Math.floor(move.row / 3)}:${Math.floor(move.col / 3)}`;
+      if (miniWinners[selectedMiniKey]) return { correct: false, neutral: true, message: "Ese mini-tablero ya fue conquistado" };
       if (forced) {
         valLoop: {
           const region = this.board.slice(forced.row * 3, forced.row * 3 + 3).flatMap((row) => row.slice(forced!.col * 3, forced!.col * 3 + 3));
@@ -744,7 +746,12 @@ export class GenericPuzzleEngine {
       }
       const miniRow = Math.floor(move.row / 3); const miniCol = Math.floor(move.col / 3);
       const miniWinner = this.ticRegionWinner(miniRow * 3, miniCol * 3);
-      if (miniWinner) miniWinners[`${miniRow}:${miniCol}`] = miniWinner;
+      if (miniWinner) {
+        miniWinners[`${miniRow}:${miniCol}`] = miniWinner;
+        const miniOwners = (this.meta.miniOwners ?? {}) as Record<string, string>;
+        miniOwners[`${miniRow}:${miniCol}`] = playerId;
+        this.meta.miniOwners = miniOwners;
+      }
       else {
         const currentRegionFull = this.board.slice(miniRow * 3, miniRow * 3 + 3)
           .flatMap((row) => row.slice(miniCol * 3, miniCol * 3 + 3)).every((candidate) => candidate.value !== null);

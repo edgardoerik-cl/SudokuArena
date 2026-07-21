@@ -504,8 +504,6 @@ function arrowsEscape(random, difficulty) {
     const directions = [
         { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
         { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
-        { name: "ANGLE_60", x: .5, y: -.866 }, { name: "ANGLE_120", x: -.5, y: -.866 },
-        { name: "ANGLE_240", x: -.5, y: .866 }, { name: "ANGLE_300", x: .5, y: .866 },
     ];
     const pointToSegment = (point, start, end) => {
         const dx = end.x - start.x;
@@ -545,8 +543,8 @@ function arrowsEscape(random, difficulty) {
             // Curva paramÃ©trica de corazÃ³n, normalizada y con una ligera variaciÃ³n
             // procedural para que cada nivel conserve la silueta sin repetirse.
             const head = {
-                x: .5 + .31 * Math.pow(Math.sin(angle), 3) + (random.next() - .5) * .025,
-                y: .49 - .24 * Math.cos(angle) + .095 * Math.cos(2 * angle) + .045 * Math.cos(3 * angle) + (random.next() - .5) * .02,
+                x: Math.round((.5 + .31 * Math.pow(Math.sin(angle), 3) + (random.next() - .5) * .02) * 100) / 100,
+                y: Math.round((.49 - .24 * Math.cos(angle) + .095 * Math.cos(2 * angle) + .045 * Math.cos(3 * angle)) * 100) / 100,
             };
             const outward = { x: head.x - .5, y: head.y - .48 };
             const outwardLength = Math.hypot(outward.x, outward.y) || 1;
@@ -554,12 +552,13 @@ function arrowsEscape(random, difficulty) {
             const points = [head];
             let cursor = head;
             let backwards = { x: -exit.x, y: -exit.y };
-            const bends = random.int(1, sizeFor(difficulty, 3, 4, 5, 7));
+            const bends = random.int(1, sizeFor(difficulty, 3, 4, 5, 6));
             for (let segment = 0; segment < bends; segment += 1) {
-                const length = .035 + random.next() * (segment % 3 === 0 ? .19 : .105);
-                cursor = { x: cursor.x + backwards.x * length, y: cursor.y + backwards.y * length };
+                // Cada tramo ocupa un número entero de casillas de la malla 100×100.
+                const length = random.int(segment === 0 ? 5 : 2, segment === 0 ? 10 : 7) / 100;
+                cursor = { x: Math.round((cursor.x + backwards.x * length) * 100) / 100, y: Math.round((cursor.y + backwards.y * length) * 100) / 100 };
                 points.unshift(cursor);
-                const turnAngle = (random.next() < .52 ? Math.PI / 2 : Math.PI / 3) * (random.next() < .5 ? -1 : 1);
+                const turnAngle = Math.PI / 2 * (random.next() < .5 ? -1 : 1);
                 backwards = {
                     x: backwards.x * Math.cos(turnAngle) - backwards.y * Math.sin(turnAngle),
                     y: backwards.x * Math.sin(turnAngle) + backwards.y * Math.cos(turnAngle),
@@ -571,7 +570,7 @@ function arrowsEscape(random, difficulty) {
             // autoritativo garantiza una salida y permite llenar realmente el corazón.
             route = {
                 id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y }, thickness: .009,
-                arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5],
+                arrowType: ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"][index % 5],
                 blockType: index > 0 && index % 11 === 0 ? "BOMB" : index > 0 && index % 7 === 0 ? "BIDIRECTIONAL" : "NORMAL",
                 memberKeys: [`0:${index}`], removalOrder: index,
             };
@@ -591,7 +590,7 @@ function arrowsEscape(random, difficulty) {
                         : { points: [{ x: .075, y: axis - .035 }, { x: .075, y: axis }, { x: .025, y: axis }], direction: "LEFT", exitVector: { x: -1, y: 0 } };
             route = {
                 id: `route-${index}`, ...fallback, thickness: .012,
-                blockType: "NORMAL", arrowType: ["STRAIGHT", "ELBOW_90", "ELBOW_60", "LONG_SPEAR", "SHORT_BOLT"][index % 5],
+                blockType: "NORMAL", arrowType: ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"][index % 5],
                 memberKeys: [`0:${index}`], removalOrder: index,
             };
         }

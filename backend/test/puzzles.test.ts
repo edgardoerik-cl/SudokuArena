@@ -317,7 +317,11 @@ describe("motor genérico de puzzles", () => {
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
     assert.ok(shapes.some((shape) => shape.points.length >= 4));
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));
-    assert.ok(shapes.some((shape) => shape.direction.startsWith("ANGLE_")));
+    assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
+    assert.ok(shapes.every((shape) => shape.points.slice(1).every((point, index) => {
+      const previous = shape.points[index]!;
+      return point.x === previous.x || point.y === previous.y;
+    })), "todos los tramos deben ocupar filas o columnas, nunca diagonales");
     assert.ok(shapes.every((shape) => Math.abs(Math.hypot(shape.exitVector.x, shape.exitVector.y) - 1) < .01));
     assert.ok(shapes.every((shape) => shape.thickness > 0));
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));

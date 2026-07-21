@@ -282,6 +282,10 @@ export class PacmanArenaEngine {
         // Buffer de giro: conserva la dirección solicitada hasta alcanzar una
         // intersección donde sea válida, sin frenar el movimiento actual.
         player.queuedDirection = direction;
+        if (direction !== "STOP" && this.canMove(player, direction)) {
+            player.direction = direction;
+            delete player.queuedDirection;
+        }
         if (direction !== "STOP")
             this.started = true;
         return true;
@@ -330,7 +334,9 @@ export class PacmanArenaEngine {
                 ? "FRIGHTENED"
                 : Math.floor(now / 8_000) % 2 === 0 ? "CHASE" : "SCATTER";
             // Tres movimientos de fantasma por cada cuatro de Pac-Man: 75%.
-            if (this.tickNumber % 4 === 0)
+            // Cada fantasma conserva 75% de velocidad, pero en fases distintas para
+            // evitar que los cuatro den saltos simultáneos.
+            if ((this.tickNumber + index) % 4 === 0)
                 return;
             const target = ghost.mode === "SCATTER"
                 ? { x: ghost.homeX, y: ghost.homeY }

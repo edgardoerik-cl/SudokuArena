@@ -644,18 +644,13 @@ private fun SerpentineArrowsBoard(
                 if (points.size < 2) return@forEachIndexed
                 val path = Path().apply {
                     moveTo(points.first().x, points.first().y)
-                    for (pointIndex in 1 until points.lastIndex) {
-                        val bend = points[pointIndex]
-                        val next = points[pointIndex + 1]
-                        val midpoint = (bend + next) * .5f
-                        quadraticTo(bend.x, bend.y, midpoint.x, midpoint.y)
-                    }
-                    lineTo(points.last().x, points.last().y)
+                    for (pointIndex in 1..points.lastIndex) lineTo(points[pointIndex].x, points[pointIndex].y)
                 }
                 val color = when (route.arrowType) {
                     "STRAIGHT" -> Color(0xFF00E5FF)
                     "ELBOW_90" -> Color(0xFFB388FF)
-                    "ELBOW_60" -> Color(0xFF00E676)
+                    "L_SHAPE" -> Color(0xFF00E676)
+                    "S_SHAPE" -> Color(0xFFFF4081)
                     "LONG_SPEAR" -> Color(0xFFFFAB00)
                     else -> Color(0xFFFF4081)
                 }
@@ -680,7 +675,7 @@ private fun SerpentineArrowsBoard(
                 drawPath(arrowHead, color.copy(alpha = alpha))
                 when (route.arrowType) {
                     "ELBOW_90" -> drawRect(Color.White.copy(alpha = .8f), points.first() - Offset(stroke * .55f, stroke * .55f), Size(stroke * 1.1f, stroke * 1.1f))
-                    "ELBOW_60" -> drawCircle(Color.White.copy(alpha = .8f), stroke * .58f, points.first())
+                    "L_SHAPE", "S_SHAPE" -> drawCircle(Color.White.copy(alpha = .8f), stroke * .58f, points.first())
                     "LONG_SPEAR" -> drawCircle(color.copy(alpha = .24f), stroke * 1.5f, head)
                     "SHORT_BOLT" -> {
                         drawLine(Color.White, points.first() - Offset(stroke, 0f), points.first() + Offset(stroke, 0f), stroke * .3f)
@@ -2061,11 +2056,24 @@ fun GenericPuzzleGrid(
             }
         }
         if (state.gameType == GameType.TIC_TAC_TOE && state.rows == 9 && state.columns == 9) {
+            val forcedMini = state.meta["forcedMini"] as? Map<*, *>
+            val forcedRow = (forcedMini?.get("row") as? Number)?.toInt()
+            val forcedCol = (forcedMini?.get("col") as? Number)?.toInt()
+            if (forcedRow != null && forcedCol != null) {
+                drawRect(
+                    Color(0xFF34D399),
+                    Offset(forcedCol * 3f * cellWidth, forcedRow * 3f * cellHeight),
+                    Size(3f * cellWidth, 3f * cellHeight),
+                    style = Stroke(maxOf(5f, cellWidth * .14f)),
+                )
+            }
             val zones = (state.meta["miniWinners"] as? Map<*, *>).orEmpty()
+            val zoneOwners = (state.meta["miniOwners"] as? Map<*, *>).orEmpty()
             zones.forEach { (key, winner) ->
                 val parts = key.toString().split(":"); if (parts.size != 2 || winner == "DRAW") return@forEach
                 val miniRow = parts[0].toIntOrNull() ?: return@forEach; val miniCol = parts[1].toIntOrNull() ?: return@forEach
-                val zoneColor = if (winner == "X") Color(0xFF00B8D4) else Color(0xFFFF2D8D)
+                val zoneColor = zoneOwners[key]?.toString()?.let(identityColors::get)
+                    ?: if (winner == "X") Color(0xFF00B8D4) else Color(0xFFFF2D8D)
                 drawRect(zoneColor.copy(alpha = .22f), Offset(miniCol * 3f * cellWidth, miniRow * 3f * cellHeight), Size(3f * cellWidth, 3f * cellHeight))
             }
             for (index in 0..3) {
