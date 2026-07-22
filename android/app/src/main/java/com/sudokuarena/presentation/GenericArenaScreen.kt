@@ -490,9 +490,12 @@ private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRout
                 (point["y"] as? Number)?.toFloat() ?: return@mapNotNull null,
             )
         }.orEmpty()
-        val points = if (filled && gridCells.isNotEmpty()) gridCells.map { encoded ->
+        val bodyPoints = if (filled && gridCells.isNotEmpty()) gridCells.map { encoded ->
             Offset(((encoded % dimension) + .5f) / dimension, ((encoded / dimension) + .5f) / dimension)
         } else explicitPoints
+        // Las rutas unitarias creadas para romper un posible deadlock conservan
+        // dos puntos explícitos (tallo corto + cabeza) aunque ocupen una celda.
+        val points = if (bodyPoints.size >= 2) bodyPoints else explicitPoints
         if (points.size < 2) return@mapNotNull null
         val vector = route["exitVector"] as? Map<*, *>
         SerpentineRoute(
@@ -542,8 +545,8 @@ private fun canSerpentineEscape(route: SerpentineRoute, routes: List<SerpentineR
 }
 
 private fun canGridArrowEscape(route: SerpentineRoute, routes: List<SerpentineRoute>, removed: Set<String>, dimension: Int): Boolean {
-    val x = route.gridX ?: return false
-    val y = route.gridY ?: return false
+    val headX = route.gridX ?: return false
+    val headY = route.gridY ?: return false
     val stepX = route.exitVector.x.toInt()
     val stepY = route.exitVector.y.toInt()
     val occupied = routes.asSequence()
@@ -553,14 +556,23 @@ private fun canGridArrowEscape(route: SerpentineRoute, routes: List<SerpentineRo
             else sequenceOf(candidate.gridX?.let { gx -> candidate.gridY?.let { gy -> gx to gy } }).filterNotNull()
         }
         .toHashSet()
-    var cursorX = x + stepX
-    var cursorY = y + stepY
-    while (cursorX in 0 until dimension && cursorY in 0 until dimension) {
-        if ((cursorX to cursorY) in occupied) return false
-        cursorX += stepX
-        cursorY += stepY
+    val body = if (route.gridCells.isNotEmpty()) route.gridCells.map { it % dimension to it / dimension }
+        else listOf(headX to headY)
+    // La predicción local replica al servidor: se barre el cuerpo entero por
+    // la trayectoria. Esto evita animar como libre una flecha cuyo tallo corta
+    // otra ruta aunque la punta por sí sola tenga salida.
+    for (shift in 1..dimension * 2) {
+        var hasPartInside = false
+        body.forEach { (bodyX, bodyY) ->
+            val x = bodyX + stepX * shift
+            val y = bodyY + stepY * shift
+            if (x !in 0 until dimension || y !in 0 until dimension) return@forEach
+            hasPartInside = true
+            if ((x to y) in occupied) return false
+        }
+        if (!hasPartInside) return true
     }
-    return true
+    return false
 }
 
 private fun routeLength(points: List<Offset>): Float = points.zipWithNext().sumOf { (a, b) ->
@@ -702,29 +714,33 @@ private fun SerpentineArrowsBoard(
                 val stroke = if (gridBased) maxOf(1.35f, route.thickness * size.minDimension * zoom)
                     else maxOf(7f, route.thickness * size.minDimension)
                 if (cellComplete && !isExiting) {
-                    // Cada posición interior se convierte en una ficha visual
-                    // completa. El 2% de separación conserva la lectura de cada
-                    // flecha, pero ya no deja huecos oscuros dentro de la figura.
+                    // El cuerpo completo ocupa visualmente las mismas celdas que
+                    // usa el motor de colisiones. No se pinta sólo la cabeza.
                     val tileWidth = size.width / logicalDimension * zoom * .98f
                     val tileHeight = size.height / logicalDimension * zoom * .98f
-                    val tileTopLeft = points.last() - Offset(tileWidth / 2f, tileHeight / 2f)
-                    drawRoundRect(
-                        color.copy(alpha = .30f),
-                        topLeft = tileTopLeft,
-                        size = Size(tileWidth, tileHeight),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                            minOf(tileWidth, tileHeight) * .16f,
-                        ),
-                    )
-                    drawRoundRect(
-                        Color.White.copy(alpha = .20f),
-                        topLeft = tileTopLeft,
-                        size = Size(tileWidth, tileHeight),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
-                            minOf(tileWidth, tileHeight) * .16f,
-                        ),
-                        style = Stroke(maxOf(1f, minOf(tileWidth, tileHeight) * .035f)),
-                    )
+                    val occupiedTilePoints = if (route.gridCells.isNotEmpty()) route.gridCells.map { encoded ->
+                        val raw = Offset(
+                            ((encoded % logicalDimension) + .5f) / logicalDimension,
+                            ((encoded / logicalDimension) + .5f) / logicalDimension,
+                        )
+                        screenPoint(raw).let { Offset(it.x * size.width, it.y * size.height) }
+                    } else points
+                    occupiedTilePoints.forEach { occupiedPoint ->
+                        val tileTopLeft = occupiedPoint - Offset(tileWidth / 2f, tileHeight / 2f)
+                        drawRoundRect(
+                            color.copy(alpha = .24f),
+                            topLeft = tileTopLeft,
+                            size = Size(tileWidth, tileHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(minOf(tileWidth, tileHeight) * .16f),
+                        )
+                        drawRoundRect(
+                            Color.White.copy(alpha = .16f),
+                            topLeft = tileTopLeft,
+                            size = Size(tileWidth, tileHeight),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(minOf(tileWidth, tileHeight) * .16f),
+                            style = Stroke(maxOf(1f, minOf(tileWidth, tileHeight) * .035f)),
+                        )
+                    }
                 }
                 drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
                 drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))

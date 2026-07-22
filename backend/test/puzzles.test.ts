@@ -319,12 +319,16 @@ describe("motor genérico de puzzles", () => {
     const shapes = blueprint.meta.shapes as Array<{
       id: string; points: Array<{ x: number; y: number }>; direction: string;
       exitVector: { x: number; y: number }; thickness: number; removalOrder: number; arrowType: string;
+      gridCells: number[];
     }>;
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
-    assert.equal(blueprint.meta.logicalColumns, 24);
+    assert.equal(blueprint.meta.logicalColumns, 20);
     assert.equal(blueprint.meta.levelCount, 100);
-    assert.equal(blueprint.meta.filledSilhouette, false);
-    assert.ok(shapes.length >= 250, "la figura experta debe quedar completamente rellena");
+    assert.equal(blueprint.meta.filledSilhouette, true);
+    assert.ok(shapes.some((shape) => shape.gridCells.length > 1), "debe haber flechas cuyo cuerpo ocupe varias celdas");
+    const occupiedByBodies = shapes.flatMap((shape) => shape.gridCells);
+    assert.equal(new Set(occupiedByBodies).size, Number(blueprint.meta.occupiedCells));
+    assert.equal(occupiedByBodies.length, Number(blueprint.meta.occupiedCells), "los cuerpos no pueden compartir espacio inicial");
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
     assert.equal(new Set(shapes.map((shape) => shape.arrowType)).size, 5);
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));
@@ -339,11 +343,31 @@ describe("motor genérico de puzzles", () => {
     const dimensions = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
       Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `dimension-${difficulty}`, difficulty }).meta.logicalColumns)
     );
-    assert.deepEqual(dimensions, [12, 16, 20, 24]);
+    assert.deepEqual(dimensions, [5, 7, 8, 20]);
     const levelNames = new Set(Array.from({ length: 100 }, (_unused, index) =>
       String(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "catalog", difficulty: "EASY", level: index + 1 }).meta.figureName)
     ));
     assert.equal(levelNames.size, 100);
+  });
+
+  it("Flechas conserva una secuencia de salida en sus 100 etapas", () => {
+    for (let level = 1; level <= 100; level += 1) {
+      const players = new ArenaGame(`arrows-catalog-${level}`);
+      players.addPlayer("bot", "Bot_Flechas", true);
+      players.startMatch({ gameType: "ARROWS_ESCAPE", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "HARD" }, "bot");
+      const engine = new GenericPuzzleEngine("ARROWS_ESCAPE", `arrows-catalog-${level}`, {
+        seed: `solvable-${level}`, difficulty: "EXPERT", level,
+      });
+      const routeCount = engine.snapshot(players).columns;
+      for (let moveIndex = 0; moveIndex < routeCount && !engine.snapshot(players).completed
+        && Number(engine.snapshot(players).meta.level) === level; moveIndex += 1) {
+        const move = engine.createBotMove(1, "bot");
+        assert.ok(move, `la etapa ${level} no puede quedar en deadlock`);
+        engine.makeMove("bot", move!, players, Date.now() + moveIndex * 20);
+      }
+      const finalState = engine.snapshot(players);
+      assert.ok(finalState.completed || Number(finalState.meta.level) !== level, `la etapa ${level} debe poder vaciarse`);
+    }
   });
 
   it("Reactor Chain acepta el toque directo de un grupo conectado", () => {

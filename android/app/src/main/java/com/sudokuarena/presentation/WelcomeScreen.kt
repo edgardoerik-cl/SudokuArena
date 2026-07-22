@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -388,13 +389,22 @@ private fun GameCarouselSelector(
     onSelected: (GameType) -> Unit,
     onToggleFavorite: (GameType) -> Unit,
 ) {
-    var tab by remember { mutableIntStateOf(0) }
+    var viewTab by rememberSaveable { mutableIntStateOf(0) }
+    var filterTab by rememberSaveable { mutableIntStateOf(0) }
     val allGames = remember { GameType.entries.sortedBy(::gameMenuName) }
-    val games = if (tab == 0) allGames else allGames.filter(favorites::contains)
+    val games = if (filterTab == 0) allGames else allGames.filter(favorites::contains)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        PrimaryTabRow(selectedTabIndex = tab, containerColor = Color.Transparent) {
-            Tab(tab == 0, onClick = { tab = 0 }, text = { Text("Todos") })
-            Tab(tab == 1, onClick = { tab = 1 }, text = { Text("♥ Favoritos (${favorites.size})") })
+        PrimaryTabRow(selectedTabIndex = viewTab, containerColor = Color.Transparent) {
+            Tab(viewTab == 0, onClick = { viewTab = 0 }, text = { Text("Carrusel") })
+            Tab(viewTab == 1, onClick = { viewTab = 1 }, text = { Text("Lista completa") })
+        }
+        if (viewTab == 1) {
+            CompleteGameList(allGames, selected, favorites, onSelected, onToggleFavorite)
+            return@Column
+        }
+        PrimaryTabRow(selectedTabIndex = filterTab, containerColor = Color.Transparent) {
+            Tab(filterTab == 0, onClick = { filterTab = 0 }, text = { Text("Todos") })
+            Tab(filterTab == 1, onClick = { filterTab = 1 }, text = { Text("♥ Favoritos (${favorites.size})") })
         }
         if (games.isEmpty()) {
             Surface(
@@ -409,11 +419,11 @@ private fun GameCarouselSelector(
         }
         val initialPage = games.indexOf(selected).coerceAtLeast(0)
         val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { games.size })
-        LaunchedEffect(tab, selected, games.size) {
+        LaunchedEffect(filterTab, selected, games.size) {
             val page = games.indexOf(selected)
             if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
         }
-        LaunchedEffect(pagerState.currentPage, tab) { games.getOrNull(pagerState.currentPage)?.let(onSelected) }
+        LaunchedEffect(pagerState.currentPage, filterTab) { games.getOrNull(pagerState.currentPage)?.let(onSelected) }
         HorizontalPager(
             state = pagerState,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 42.dp),
@@ -456,6 +466,53 @@ private fun GameCarouselSelector(
                         modifier = Modifier.align(Alignment.TopEnd).clickable { onToggleFavorite(game) }.padding(4.dp),
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompleteGameList(
+    games: List<GameType>,
+    selected: GameType,
+    favorites: Set<GameType>,
+    onSelected: (GameType) -> Unit,
+    onToggleFavorite: (GameType) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        games.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                pair.forEach { game ->
+                    val active = game == selected
+                    Surface(
+                        color = if (active) ArenaColors.ElectricBlue.copy(alpha = .18f) else Color.White.copy(alpha = .94f),
+                        shape = RoundedCornerShape(15.dp),
+                        border = BorderStroke(if (active) 2.dp else 1.dp, if (active) ArenaColors.ElectricBlue else Color(0xFFCBD5E1)),
+                        modifier = Modifier.weight(1f).height(58.dp).clickable { onSelected(game) },
+                    ) {
+                        Row(
+                            Modifier.fillMaxSize().padding(start = 9.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(gameGlyph(game), fontSize = 18.sp)
+                            Text(
+                                gameMenuName(game),
+                                color = ArenaColors.Ink,
+                                fontWeight = if (active) FontWeight.Black else FontWeight.Bold,
+                                fontSize = 12.sp,
+                                maxLines = 2,
+                                modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+                            )
+                            Text(
+                                if (game in favorites) "♥" else "♡",
+                                color = if (game in favorites) Color(0xFFE91E63) else Color(0xFF64748B),
+                                fontSize = 21.sp,
+                                modifier = Modifier.clickable { onToggleFavorite(game) }.padding(5.dp),
+                            )
+                        }
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }

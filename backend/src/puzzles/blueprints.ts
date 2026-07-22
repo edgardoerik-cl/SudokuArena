@@ -19,7 +19,9 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "BRIDGES": return bridges(random, difficulty);
     case "TETRIS_ARENA": return { board: matrix(20, 10, () => cell(null, false)), answers: matrix<CellValue>(20, 10, () => null), meta: { actionMode: true, engine: "TETRIS_7_BAG", difficulty } };
     case "HANGMAN": return hangman(random, difficulty);
-    case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty, options.level);
+    // Cada ruta agrupa todas las celdas que ocupa su cuerpo. Así la cabeza y
+    // cada tramo de la flecha participan por igual en las colisiones.
+    case "ARROWS_ESCAPE": return arrowsEscapeFilled(random, difficulty, options.level);
     case "PACMAN_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "PACMAN_TILEMAP", difficulty } };
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
     case "SECRET_CODE": return secretCode(random, difficulty);
@@ -782,8 +784,7 @@ function arrowsEscapeFilled(random: SeededRandom, difficulty: PuzzleDifficulty, 
       { name: "DOWN", x: 0, y: 1, distance: dimension - 1 - headY }, { name: "LEFT", x: -1, y: 0, distance: headX },
     ].sort((a, b) => a.distance - b.distance);
     const exit = exits[0]!;
-    const renderCodes = path.length > 1 ? path.slice(-2) : path;
-    const points = renderCodes.map((encoded) => ({ x: ((encoded % dimension) + .5) / dimension, y: (Math.floor(encoded / dimension) + .5) / dimension }));
+    const points = path.map((encoded) => ({ x: ((encoded % dimension) + .5) / dimension, y: (Math.floor(encoded / dimension) + .5) / dimension }));
     if (points.length === 1) points.unshift({ x: points[0]!.x - exit.x * .55 / dimension, y: points[0]!.y - exit.y * .55 / dimension });
     const index = routes.length;
     routes.push({
@@ -793,6 +794,93 @@ function arrowsEscapeFilled(random: SeededRandom, difficulty: PuzzleDifficulty, 
       removalOrder: exit.distance * 100_000 + index, gridX: headX, gridY: headY, gridCells: path,
     });
   }
+
+  type CardinalExit = { name: string; x: number; y: number };
+  const exits: CardinalExit[] = [
+    { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
+    { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
+  ];
+  const pending = new Set<PackedRoute>(routes);
+  let removalOrder = 0;
+  const canSweepBody = (route: PackedRoute, exit: CardinalExit): boolean => {
+    const occupiedByOthers = new Set([...pending]
+      .filter((candidate) => candidate !== route)
+      .flatMap((candidate) => candidate.gridCells));
+    for (let shift = 1; shift <= dimension * 2; shift += 1) {
+      let hasPartInside = false;
+      for (const encoded of route.gridCells) {
+        const x = encoded % dimension + exit.x * shift;
+        const y = Math.floor(encoded / dimension) + exit.y * shift;
+        if (x < 0 || x >= dimension || y < 0 || y >= dimension) continue;
+        hasPartInside = true;
+        if (occupiedByOthers.has(y * dimension + x)) return false;
+      }
+      if (!hasPartInside) return true;
+    }
+    return false;
+  };
+  while (pending.size > 0) {
+    let selected: { route: PackedRoute; exit: CardinalExit } | null = null;
+    for (const route of pending) {
+      const available = exits.filter((exit) => canSweepBody(route, exit));
+      if (available.length) {
+        selected = { route, exit: available[random.int(0, available.length - 1)]! };
+        break;
+      }
+    }
+    if (!selected) {
+      // Una forma excesivamente entrelazada puede formar un ciclo. Dividimos
+      // sólo una de sus rutas; las celdas siguen totalmente ocupadas, pero el
+      // catálogo conserva una solución demostrable sin atravesar cuerpos.
+      const victim = [...pending].sort((a, b) => b.gridCells.length - a.gridCells.length)[0]!;
+      if (victim.gridCells.length <= 1) throw new Error("No se pudo construir una etapa resoluble de Flechas en Fuga");
+      pending.delete(victim);
+      routes.splice(routes.indexOf(victim), 1);
+      victim.gridCells.forEach((encoded) => {
+        const x = (encoded % dimension + .5) / dimension;
+        const y = (Math.floor(encoded / dimension) + .5) / dimension;
+        const child: PackedRoute = {
+          ...victim,
+          id: "pending",
+          points: [{ x, y: y + .45 / dimension }, { x, y }],
+          gridX: encoded % dimension,
+          gridY: Math.floor(encoded / dimension),
+          gridCells: [encoded],
+          blockType: "NORMAL",
+        };
+        routes.push(child);
+        pending.add(child);
+      });
+      continue;
+    }
+    const { route, exit } = selected;
+    const first = route.gridCells[0]!; const last = route.gridCells[route.gridCells.length - 1]!;
+    const projection = (encoded: number) => (encoded % dimension) * exit.x + Math.floor(encoded / dimension) * exit.y;
+    if (projection(first) > projection(last)) route.gridCells.reverse();
+    const head = route.gridCells[route.gridCells.length - 1]!;
+    route.direction = exit.name;
+    route.exitVector = { x: exit.x, y: exit.y };
+    route.gridX = head % dimension;
+    route.gridY = Math.floor(head / dimension);
+    route.points = route.gridCells.map((encoded) => ({
+      x: (encoded % dimension + .5) / dimension,
+      y: (Math.floor(encoded / dimension) + .5) / dimension,
+    }));
+    if (route.points.length === 1) {
+      route.points.unshift({
+        x: route.points[0]!.x - exit.x * .45 / dimension,
+        y: route.points[0]!.y - exit.y * .45 / dimension,
+      });
+    }
+    route.removalOrder = removalOrder++;
+    pending.delete(route);
+  }
+  routes.forEach((route, index) => {
+    route.id = `route-${index}`;
+    route.memberKeys = [`0:${index}`];
+    route.arrowType = arrowTypes[index % arrowTypes.length]!;
+    if (index > 0 && index % 41 === 0) route.blockType = "BOMB";
+  });
   const board = [routes.map((route) => cell(route.direction, true, {
     arrow: route.direction, shapeId: route.id, shapeAnchor: true, pathType: "GRID_FILLED",
     blockType: route.blockType, arrowType: route.arrowType,

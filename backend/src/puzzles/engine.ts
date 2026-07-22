@@ -1904,12 +1904,23 @@ export class GenericPuzzleEngine {
         const occupied = new Set(activeRoutes.filter((candidate) => candidate.id !== route.id)
           .flatMap((candidate) => candidate.gridCells?.map((encoded) => `${encoded % dimension}:${Math.floor(encoded / dimension)}`)
             ?? [`${candidate.gridX}:${candidate.gridY}`]));
-        let x = route.gridX + vector.x; let y = route.gridY + vector.y;
-        while (x >= 0 && x < dimension && y >= 0 && y < dimension) {
-          if (occupied.has(`${x}:${y}`)) return false;
-          x += vector.x; y += vector.y;
+        const body = route.gridCells?.length
+          ? route.gridCells.map((encoded) => ({ x: encoded % dimension, y: Math.floor(encoded / dimension) }))
+          : [{ x: route.gridX, y: route.gridY }];
+        // Colisión barrida: trasladamos virtualmente el cuerpo completo, no
+        // sólo la punta. Cualquier segmento que atraviese otra flecha bloquea
+        // la extracción hasta que ese obstáculo haya sido retirado.
+        for (let shift = 1; shift <= dimension * 2; shift += 1) {
+          let hasPartInside = false;
+          for (const part of body) {
+            const x = part.x + vector.x * shift; const y = part.y + vector.y * shift;
+            if (x < 0 || x >= dimension || y < 0 || y >= dimension) continue;
+            hasPartInside = true;
+            if (occupied.has(`${x}:${y}`)) return false;
+          }
+          if (!hasPartInside) return true;
         }
-        return true;
+        return false;
       }
       const guaranteed = [...activeRoutes].sort((a, b) =>
         Number((a as unknown as { removalOrder?: number }).removalOrder ?? 0)

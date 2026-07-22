@@ -156,6 +156,7 @@ fun AboutScreen(availableUpdate: AppUpdateInfo? = null, onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
+            "8.11.7 · Flechas con cuerpo físico y catálogo completo en el menú.",
             "8.11.6 · Actualización desde Acerca de y oleadas de Tower Defense reparadas.",
             "8.11.5 · Flechas ocupa visualmente cada celda interior de la figura.",
             "8.11.4 · Flechas rellena cada celda de la figura; Boo baila al centro.",

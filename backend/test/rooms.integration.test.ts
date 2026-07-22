@@ -56,8 +56,8 @@ describe("matchmaking por salas", () => {
       versionName: string;
       downloadUrl: string;
     };
-    assert.equal(update.versionCode, 55);
-    assert.equal(update.versionName, "8.11.6");
+    assert.equal(update.versionCode, 56);
+    assert.equal(update.versionName, "8.11.7");
     assert.match(update.downloadUrl, /^https:\/\/drive\.google\.com\/drive\/folders\//);
   });
 
