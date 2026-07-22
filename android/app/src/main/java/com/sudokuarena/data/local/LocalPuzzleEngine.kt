@@ -828,13 +828,28 @@ class LocalPuzzleEngine(
     }
 
     private fun arrowsEscape(): Blueprint {
-        val dimension = size(32, 64, 128, 256)
+        val dimension = size(5, 7, 8, 20)
         val level = random.nextInt(1, 101)
         val family = (level - 1) % 10
         val variant = (level - 1) / 10
         val names = listOf("Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato")
+        val pixelTemplates = listOf(
+            listOf(".###.", "#####", "#####", ".###.", "..#.."), listOf(".###.", "#####", "#####", "#####", ".###."),
+            listOf("..#..", "#####", ".###.", ".#.#.", "#...#"), listOf("..#..", ".###.", "#####", ".###.", "..#.."),
+            listOf("#####", "#.#.#", "#####", ".###.", "..#.."), listOf("..#..", ".###.", ".###.", "#####", "#.#.#"),
+            listOf("#...#", "##.##", ".###.", "##.##", "#...#"), listOf("#.#.#", "#####", ".###.", ".###.", "#####"),
+            listOf(".###.", "#####", "#####", "#####", "#.#.#"), listOf("#...#", "#####", "#####", "#.#.#", ".###."),
+        )
+        val templateFilled = pixelTemplates[family].flatMapIndexed { y, row -> row.mapIndexedNotNull { x, value -> if (value == '#') y * 5 + x else null } }
+        val removedTemplateCell = if (variant == 0) -1 else templateFilled[(variant - 1) % templateFilled.size]
         fun inside(gridX: Int, gridY: Int): Boolean {
-            val margin = maxOf(2, (dimension * .035).toInt())
+            if (dimension <= 8) {
+                val templateX = minOf(4, gridX * 5 / dimension)
+                val templateY = minOf(4, gridY * 5 / dimension)
+                val encoded = templateY * 5 + templateX
+                return pixelTemplates[family][templateY][templateX] == '#' && encoded != removedTemplateCell
+            }
+            val margin = if (dimension <= 8) 0 else 1
             if (gridX < margin || gridY < margin || gridX >= dimension - margin || gridY >= dimension - margin) return false
             val wobble = kotlin.math.sin((gridX * 3 + gridY * 5 + variant * 11) * .11) * (.003 + variant * .0007)
             val scale = .90 - variant * .009

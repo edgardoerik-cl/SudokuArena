@@ -314,7 +314,7 @@ describe("motor genérico de puzzles", () => {
       exitVector: { x: number; y: number }; thickness: number; removalOrder: number; gridCells: number[]; arrowType: string;
     }>;
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
-    assert.equal(blueprint.meta.logicalColumns, 256);
+    assert.equal(blueprint.meta.logicalColumns, 20);
     assert.equal(blueprint.meta.levelCount, 100);
     assert.equal(blueprint.meta.filledSilhouette, true);
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
@@ -334,7 +334,7 @@ describe("motor genérico de puzzles", () => {
     const dimensions = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
       Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `dimension-${difficulty}`, difficulty }).meta.logicalColumns)
     );
-    assert.deepEqual(dimensions, [32, 64, 128, 256]);
+    assert.deepEqual(dimensions, [5, 7, 8, 20]);
     const levelNames = new Set(Array.from({ length: 100 }, (_unused, index) =>
       String(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "catalog", difficulty: "EASY", level: index + 1 }).meta.figureName)
     ));

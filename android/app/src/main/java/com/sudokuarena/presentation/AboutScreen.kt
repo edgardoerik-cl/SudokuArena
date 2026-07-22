@@ -131,7 +131,7 @@ fun AboutScreen(onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
-            "8.11.0 · Flechas: lienzos 32–256, 100 figuras y relleno integral.",
+            "8.11.1 · Flechas: lienzos 5×5, 7×7, 8×8 y 20×20.",
             "8.11.0 · Personajes pixel art interactivos con salto y corazones.",
             "8.10.6 · Pac-Man solitario fluido y rostros pixel art renovados.",
             "8.10.3 · Gato Ultimate valida y conquista mini-tableros.",

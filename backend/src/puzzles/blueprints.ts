@@ -680,7 +680,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
 /**
  * Flechas en Fuga 3: la dificultad define la resolución del lienzo y todas las
  * celdas de la silueta pertenecen a una ruta. Las rutas agrupan celdas contiguas
- * para que un nivel 256x256 siga siendo viable por Socket.IO y en Canvas.
+ * para mantener una lectura clara incluso en pantallas pequeñas.
  * 10 familias x 10 variantes forman un catálogo procedural de 100 niveles.
  */
 function arrowsEscapeFilled(random: SeededRandom, difficulty: PuzzleDifficulty, requestedLevel?: number): PuzzleBlueprint {
@@ -690,14 +690,29 @@ function arrowsEscapeFilled(random: SeededRandom, difficulty: PuzzleDifficulty, 
     thickness: number; blockType: string; arrowType: string; memberKeys: string[];
     removalOrder: number; gridX: number; gridY: number; gridCells: number[];
   };
-  const dimension = sizeFor(difficulty, 32, 64, 128, 256);
+  const dimension = sizeFor(difficulty, 5, 7, 8, 20);
   const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? random.int(1, 100))));
   const family = (level - 1) % 10;
   const variant = Math.floor((level - 1) / 10);
   const names = ["Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato"];
+  const pixelTemplates = [
+    [".###.", "#####", "#####", ".###.", "..#.."], [".###.", "#####", "#####", "#####", ".###."],
+    ["..#..", "#####", ".###.", ".#.#.", "#...#"], ["..#..", ".###.", "#####", ".###.", "..#.."],
+    ["#####", "#.#.#", "#####", ".###.", "..#.."], ["..#..", ".###.", ".###.", "#####", "#.#.#"],
+    ["#...#", "##.##", ".###.", "##.##", "#...#"], ["#.#.#", "#####", ".###.", ".###.", "#####"],
+    [".###.", "#####", "#####", "#####", "#.#.#"], ["#...#", "#####", "#####", "#.#.#", ".###."],
+  ];
+  const templateFilled = pixelTemplates[family]!.flatMap((row, y) => [...row].map((value, x) => value === "#" ? y * 5 + x : -1)).filter((value) => value >= 0);
+  const removedTemplateCell = variant === 0 ? -1 : templateFilled[(variant - 1) % templateFilled.length]!;
   const occupied: number[] = [];
   const inside = (gx: number, gy: number): boolean => {
-    const margin = Math.max(2, Math.floor(dimension * .035));
+    if (dimension <= 8) {
+      const templateX = Math.min(4, Math.floor(gx * 5 / dimension));
+      const templateY = Math.min(4, Math.floor(gy * 5 / dimension));
+      const encoded = templateY * 5 + templateX;
+      return pixelTemplates[family]![templateY]![templateX] === "#" && encoded !== removedTemplateCell;
+    }
+    const margin = dimension <= 8 ? 0 : 1;
     if (gx < margin || gy < margin || gx >= dimension - margin || gy >= dimension - margin) return false;
     const wobble = Math.sin((gx * 3 + gy * 5 + variant * 11) * .11) * (.003 + variant * .0007);
     const scale = .90 - variant * .009;
