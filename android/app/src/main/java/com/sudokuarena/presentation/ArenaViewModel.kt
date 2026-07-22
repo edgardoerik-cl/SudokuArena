@@ -840,11 +840,21 @@ class ArenaViewModel(
             is RealtimeEvent.BoardEventEnded -> mutableState.update { it.copy(boardEvent = null, boardEventRemainingMs = 0) }
             is RealtimeEvent.ReactionReceived -> showReaction(event)
             is RealtimeEvent.GenericStateUpdated -> mutableState.update { current ->
-                requireValidBoard(event.state)
+                val incoming = event.state
+                val merged = if (incoming.meta["staticOmitted"] == true && current.genericBoard?.gameId == incoming.gameId) {
+                    val previous = current.genericBoard
+                    incoming.copy(
+                        rows = previous.rows,
+                        columns = previous.columns,
+                        board = previous.board,
+                        meta = previous.meta + incoming.meta - "staticOmitted",
+                    )
+                } else incoming
+                requireValidBoard(merged)
                 current.copy(
-                    genericBoard = event.state,
-                    revision = event.state.revision,
-                    pendingRequestId = if (event.state.revision > current.revision) null else current.pendingRequestId,
+                    genericBoard = merged,
+                    revision = merged.revision,
+                    pendingRequestId = if (merged.revision > current.revision) null else current.pendingRequestId,
                 )
             }
             is RealtimeEvent.GenericMoveAccepted -> mutableState.update {

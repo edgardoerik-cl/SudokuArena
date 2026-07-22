@@ -766,17 +766,22 @@ class LocalPuzzleEngine(
             val vector = route["exitVector"] as? Map<*, *> ?: return false
             val stepX = (vector["x"] as? Number)?.toInt() ?: 0
             val stepY = (vector["y"] as? Number)?.toInt() ?: 0
+            val dimension = (blueprint.meta["logicalColumns"] as? Number)?.toInt() ?: 100
             val occupied = shapes.indices.asSequence()
                 .filter { it != index && board.firstOrNull()?.getOrNull(it)?.ownerId != OWNER }
-                .mapNotNull { shapeIndex ->
-                    val candidate = shapes[shapeIndex] as? Map<*, *> ?: return@mapNotNull null
-                    val x = (candidate["gridX"] as? Number)?.toInt() ?: return@mapNotNull null
-                    val y = (candidate["gridY"] as? Number)?.toInt() ?: return@mapNotNull null
-                    x to y
+                .flatMap { shapeIndex ->
+                    val candidate = shapes[shapeIndex] as? Map<*, *> ?: return@flatMap emptySequence()
+                    val cells = (candidate["gridCells"] as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }
+                    (cells?.map { encoded -> encoded % dimension to encoded / dimension }
+                        ?: listOfNotNull(
+                            (candidate["gridX"] as? Number)?.toInt()?.let { x ->
+                                (candidate["gridY"] as? Number)?.toInt()?.let { y -> x to y }
+                            },
+                        )).asSequence()
                 }.toHashSet()
             var x = gridX + stepX
             var y = gridY + stepY
-            while (x in 0 until 100 && y in 0 until 100) {
+            while (x in 0 until dimension && y in 0 until dimension) {
                 if ((x to y) in occupied) return false
                 x += stepX; y += stepY
             }
@@ -823,6 +828,91 @@ class LocalPuzzleEngine(
     }
 
     private fun arrowsEscape(): Blueprint {
+        val dimension = size(32, 64, 128, 256)
+        val level = random.nextInt(1, 101)
+        val family = (level - 1) % 10
+        val variant = (level - 1) / 10
+        val names = listOf("Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato")
+        fun inside(gridX: Int, gridY: Int): Boolean {
+            val margin = maxOf(2, (dimension * .035).toInt())
+            if (gridX < margin || gridY < margin || gridX >= dimension - margin || gridY >= dimension - margin) return false
+            val wobble = kotlin.math.sin((gridX * 3 + gridY * 5 + variant * 11) * .11) * (.003 + variant * .0007)
+            val scale = .90 - variant * .009
+            val x = ((gridX + .5) / dimension * 2 - 1) / scale
+            val y = ((gridY + .5) / dimension * 2 - 1) / scale + wobble
+            return when (family) {
+                0 -> { val hx = x * 1.18; val hy = -y * 1.12 + .08; val base = hx * hx + hy * hy - 1; base * base * base - hx * hx * hy * hy * hy <= 0 }
+                1 -> x * x + y * y <= .78 && !(x > .1 && x < .34 && y < -.73)
+                2 -> { val angle = kotlin.math.atan2(y, x); val radius = kotlin.math.hypot(x, y); radius <= .46 + .28 * maxOf(0.0, kotlin.math.cos(5 * angle)) }
+                3 -> kotlin.math.abs(x) + kotlin.math.abs(y) <= .88
+                4 -> y > -.82 && y < .72 && kotlin.math.abs(x) <= .72 - maxOf(0.0, y) * .55 && (y < .42 || kotlin.math.abs(x) < .42 + (.72 - y))
+                5 -> (kotlin.math.abs(x) < .28 && y > -.82 && y < .58) || (y > .25 && y < .78 && kotlin.math.abs(x) < .62 - y * .45) || (y < -.55 && kotlin.math.abs(x) < .48 + y * .35)
+                6 -> ((x + .42) * (x + .42) / .25 + (y + .08) * (y + .08) / .55 <= 1) || ((x - .42) * (x - .42) / .25 + (y + .08) * (y + .08) / .55 <= 1) || kotlin.math.abs(x) < .10
+                7 -> y > -.65 && y < .70 && (y > -.05 || kotlin.math.abs(x) < .72) && !(y < -.18 && kotlin.math.abs(x) > .48) && !(y < -.30 && kotlin.math.abs(x) < .16)
+                8 -> (y < .48 && x * x + (y + .20) * (y + .20) <= .62) || (y >= .15 && y < .72 && kotlin.math.abs(x) < .62 && (((x + .62) * 6).toInt() % 2 == 0))
+                else -> x * x + (y + .05) * (y + .05) <= .58 || (y < -.42 && ((x + .42) * (x + .42) + (y + .55) * (y + .55) < .16 || (x - .42) * (x - .42) + (y + .55) * (y + .55) < .16))
+            }
+        }
+        val occupied = buildList { for (y in 0 until dimension) for (x in 0 until dimension) if (inside(x, y)) add(y * dimension + x) }
+        val unassigned = linkedSetOf<Int>().apply { addAll(occupied) }
+        val shapes = mutableListOf<Map<String, Any?>>()
+        val maxCells = size(5, 9, 18, 36)
+        val arrowTypes = listOf("STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR")
+        val cardinal = listOf(1 to 0, 0 to 1, -1 to 0, 0 to -1)
+        while (unassigned.isNotEmpty()) {
+            val path = mutableListOf(unassigned.first())
+            unassigned.remove(path.first())
+            var previousDirection = shapes.size % 4
+            while (path.size < maxCells) {
+                val current = path.last(); val x = current % dimension; val y = current / dimension
+                val candidates = cardinal.mapIndexedNotNull { directionIndex, (dx, dy) ->
+                    val nextX = x + dx; val nextY = y + dy; val encoded = nextY * dimension + nextX
+                    if (nextX in 0 until dimension && nextY in 0 until dimension && encoded in unassigned) directionIndex to encoded else null
+                }
+                if (candidates.isEmpty()) break
+                val straight = candidates.firstOrNull { it.first == previousDirection }
+                val selected = if (straight != null && random.nextFloat() < .90f) straight else candidates.random(random)
+                path += selected.second; unassigned.remove(selected.second); previousDirection = selected.first
+            }
+            fun edgeDistance(encoded: Int): Int { val x = encoded % dimension; val y = encoded / dimension; return minOf(x, y, dimension - 1 - x, dimension - 1 - y) }
+            if (edgeDistance(path.first()) < edgeDistance(path.last())) path.reverse()
+            val head = path.last(); val headX = head % dimension; val headY = head / dimension
+            val exits = listOf(
+                Triple("UP", 0 to -1, headY), Triple("RIGHT", 1 to 0, dimension - 1 - headX),
+                Triple("DOWN", 0 to 1, dimension - 1 - headY), Triple("LEFT", -1 to 0, headX),
+            ).sortedBy { it.third }
+            val (direction, vector, distance) = exits.first()
+            val renderCells = if (path.size > 1) path.takeLast(2) else path
+            val points = renderCells.map { encoded -> mapOf("x" to ((encoded % dimension) + .5f) / dimension, "y" to ((encoded / dimension) + .5f) / dimension) }.toMutableList()
+            if (points.size == 1) points.add(0, mapOf("x" to ((headX + .5f) - vector.first * .55f) / dimension, "y" to ((headY + .5f) - vector.second * .55f) / dimension))
+            val index = shapes.size
+            shapes += mapOf(
+                "id" to "route-$index", "points" to points, "direction" to direction,
+                "exitVector" to mapOf("x" to vector.first, "y" to vector.second), "thickness" to .70f / dimension,
+                "blockType" to if (index > 0 && index % 41 == 0) "BOMB" else "NORMAL",
+                "arrowType" to arrowTypes[index % arrowTypes.size], "memberKeys" to listOf("0:$index"),
+                "removalOrder" to distance * 100_000 + index, "gridX" to headX, "gridY" to headY, "gridCells" to path,
+            )
+        }
+        return result(
+            listOf(shapes.mapIndexed { index, shape -> GenericCell(shape["direction"], true, meta = mapOf(
+                "arrow" to shape["direction"], "shapeId" to "route-$index", "shapeAnchor" to true,
+                "pathType" to "GRID_FILLED", "blockType" to shape["blockType"], "arrowType" to shape["arrowType"],
+            )) }),
+            listOf(shapes.map { it["direction"] }),
+            mapOf(
+                "freeSpace" to true, "pathModel" to "SERPENTINE_V2", "gridBased" to true, "filledSilhouette" to true,
+                "worldWidth" to dimension, "worldHeight" to dimension, "logicalRows" to dimension, "logicalColumns" to dimension,
+                "level" to level, "levelCount" to 100, "figureFamily" to names[family], "figureName" to "${names[family]} ${variant + 1}",
+                "occupiedCells" to occupied.size, "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
+                "maxFailedTaps" to size(10, 8, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
+                "shapes" to shapes, "instructions" to "Nivel $level/100 · ${names[family]}. Toda la figura está cubierta por flechas.",
+            ),
+        )
+    }
+
+    @Suppress("unused")
+    private fun arrowsEscapeLegacyFilled(): Blueprint {
         val heartCells = buildList {
             for (gridY in 4..96) for (gridX in 4..96) {
                 val x = (gridX - 50) / 34.0

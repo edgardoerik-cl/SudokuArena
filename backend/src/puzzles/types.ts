@@ -81,4 +81,5 @@ export interface PuzzleBlueprint {
 export interface PuzzleGenerationOptions {
   seed?: string;
   difficulty?: PuzzleDifficulty;
+  level?: number;
 }

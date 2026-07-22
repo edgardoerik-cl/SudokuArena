@@ -877,7 +877,7 @@ function processGenericMove(room: RoomRuntime, playerId: string, payload: Generi
   } catch (error) {
     console.error("generic move rejected safely", room.config.gameType, error);
     responder?.emit("generic:move-rejected", { requestId: payload?.requestId ?? "", code: "INVALID_PAYLOAD", message: "La palabra o posición excede el tablero" });
-    emitGenericState(room);
+    if (room.config.gameType !== "ARROWS_ESCAPE") emitGenericState(room);
     return;
   }
   if (!result.accepted) {
@@ -888,18 +888,25 @@ function processGenericMove(room: RoomRuntime, playerId: string, payload: Generi
       responder?.emit("player:penalty", { requestId: result.requestId, blockedUntil, reason: result.code });
     }
     emitState(room);
-    emitGenericState(room);
+    if (room.config.gameType !== "ARROWS_ESCAPE") emitGenericState(room);
     return;
   }
   responder?.emit("generic:move-accepted", result);
   emitState(room);
-  emitGenericState(room);
+  emitGenericState(room, room.config.gameType === "ARROWS_ESCAPE");
   if (result.completed || room.phase === "SUDDEN_DEATH") finishMatch(room, true);
 }
 
-function emitGenericState(room: RoomRuntime): void {
+function emitGenericState(room: RoomRuntime, compact = false): void {
   if (!room.genericEngine) return;
   const snapshot = room.genericEngine.snapshot(room.game);
+  if (compact && room.config.gameType === "ARROWS_ESCAPE") {
+    // La geometría 32–256 es inmutable. Tras el primer snapshot sólo enviamos
+    // progreso y contadores; Android conserva tablero y rutas ya recibidos.
+    const { shapes: _shapes, ...dynamicMeta } = snapshot.meta;
+    snapshot.meta = { ...dynamicMeta, staticOmitted: true };
+    snapshot.board = [];
+  }
   io.to(room.code).emit("generic:state", snapshot);
   if (room.config.gameType === "CROSS_LETTERS") {
     for (const player of room.game.snapshot().players) {

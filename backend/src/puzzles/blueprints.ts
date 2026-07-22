@@ -19,7 +19,7 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "BRIDGES": return bridges(random, difficulty);
     case "TETRIS_ARENA": return { board: matrix(20, 10, () => cell(null, false)), answers: matrix<CellValue>(20, 10, () => null), meta: { actionMode: true, engine: "TETRIS_7_BAG", difficulty } };
     case "HANGMAN": return hangman(random, difficulty);
-    case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty);
+    case "ARROWS_ESCAPE": return arrowsEscapeFilled(random, difficulty, options.level);
     case "PACMAN_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "PACMAN_TILEMAP", difficulty } };
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
     case "SECRET_CODE": return secretCode(random, difficulty);
@@ -673,6 +673,116 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       shapes,
       instructions: "Toca una ruta o su punta. La flecha solo escapa si el rayo de su cabeza llega al borde sin cruzar otra ruta.",
       difficulty,
+    },
+  };
+}
+
+/**
+ * Flechas en Fuga 3: la dificultad define la resolución del lienzo y todas las
+ * celdas de la silueta pertenecen a una ruta. Las rutas agrupan celdas contiguas
+ * para que un nivel 256x256 siga siendo viable por Socket.IO y en Canvas.
+ * 10 familias x 10 variantes forman un catálogo procedural de 100 niveles.
+ */
+function arrowsEscapeFilled(random: SeededRandom, difficulty: PuzzleDifficulty, requestedLevel?: number): PuzzleBlueprint {
+  type GridPoint = { x: number; y: number };
+  type PackedRoute = {
+    id: string; points: GridPoint[]; direction: string; exitVector: GridPoint;
+    thickness: number; blockType: string; arrowType: string; memberKeys: string[];
+    removalOrder: number; gridX: number; gridY: number; gridCells: number[];
+  };
+  const dimension = sizeFor(difficulty, 32, 64, 128, 256);
+  const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? random.int(1, 100))));
+  const family = (level - 1) % 10;
+  const variant = Math.floor((level - 1) / 10);
+  const names = ["Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato"];
+  const occupied: number[] = [];
+  const inside = (gx: number, gy: number): boolean => {
+    const margin = Math.max(2, Math.floor(dimension * .035));
+    if (gx < margin || gy < margin || gx >= dimension - margin || gy >= dimension - margin) return false;
+    const wobble = Math.sin((gx * 3 + gy * 5 + variant * 11) * .11) * (.003 + variant * .0007);
+    const scale = .90 - variant * .009;
+    const x = ((gx + .5) / dimension * 2 - 1) / scale;
+    const y = ((gy + .5) / dimension * 2 - 1) / scale + wobble;
+    switch (family) {
+      case 0: {
+        const hx = x * 1.18; const hy = -y * 1.12 + .08;
+        return Math.pow(hx * hx + hy * hy - 1, 3) - hx * hx * hy * hy * hy <= 0;
+      }
+      case 1: return x * x + y * y <= .78 && !(x > .1 && x < .34 && y < -.73);
+      case 2: {
+        const angle = Math.atan2(y, x); const radius = Math.hypot(x, y);
+        return radius <= .46 + .28 * Math.max(0, Math.cos(5 * angle));
+      }
+      case 3: return Math.abs(x) + Math.abs(y) <= .88;
+      case 4: return y > -.82 && y < .72 && Math.abs(x) <= .72 - Math.max(0, y) * .55 && (y < .42 || Math.abs(x) < .42 + (.72 - y));
+      case 5: return (Math.abs(x) < .28 && y > -.82 && y < .58) || (y > .25 && y < .78 && Math.abs(x) < .62 - y * .45) || (y < -.55 && Math.abs(x) < .48 + y * .35);
+      case 6: return ((x + .42) ** 2 / .25 + (y + .08) ** 2 / .55 <= 1) || ((x - .42) ** 2 / .25 + (y + .08) ** 2 / .55 <= 1) || Math.abs(x) < .10;
+      case 7: return y > -.65 && y < .70 && (y > -.05 || Math.abs(x) < .72) && !(y < -.18 && Math.abs(x) > .48) && !(y < -.30 && Math.abs(x) < .16);
+      case 8: return (y < .48 && (x * x + (y + .20) ** 2 <= .62)) || (y >= .15 && y < .72 && Math.abs(x) < .62 && Math.floor((x + .62) * 6) % 2 === 0);
+      default: return (x * x + (y + .05) ** 2 <= .58) || (y < -.42 && ((x + .42) ** 2 + (y + .55) ** 2 < .16 || (x - .42) ** 2 + (y + .55) ** 2 < .16));
+    }
+  };
+  for (let y = 0; y < dimension; y += 1) for (let x = 0; x < dimension; x += 1) {
+    if (inside(x, y)) occupied.push(y * dimension + x);
+  }
+
+  const unassigned = new Set(occupied);
+  const routes: PackedRoute[] = [];
+  const maxCellsPerArrow = sizeFor(difficulty, 5, 9, 18, 36);
+  const arrowTypes = ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"];
+  const cardinal = [[1, 0], [0, 1], [-1, 0], [0, -1]] as const;
+  while (unassigned.size > 0) {
+    const first = unassigned.values().next().value as number;
+    const path = [first];
+    unassigned.delete(first);
+    let previousDirection = routes.length % 4;
+    while (path.length < maxCellsPerArrow) {
+      const current = path[path.length - 1]!; const x = current % dimension; const y = Math.floor(current / dimension);
+      const candidates = cardinal.map(([dx, dy], directionIndex) => ({
+        directionIndex, encoded: (y + dy) * dimension + x + dx,
+        valid: x + dx >= 0 && x + dx < dimension && y + dy >= 0 && y + dy < dimension,
+      })).filter((candidate) => candidate.valid && unassigned.has(candidate.encoded));
+      if (!candidates.length) break;
+      const straight = candidates.find((candidate) => candidate.directionIndex === previousDirection);
+      const selected = straight && random.next() < .90 ? straight : candidates[random.int(0, candidates.length - 1)]!;
+      path.push(selected.encoded); unassigned.delete(selected.encoded); previousDirection = selected.directionIndex;
+    }
+    const edgeDistance = (encoded: number) => {
+      const x = encoded % dimension; const y = Math.floor(encoded / dimension);
+      return Math.min(x, y, dimension - 1 - x, dimension - 1 - y);
+    };
+    if (edgeDistance(path[0]!) < edgeDistance(path[path.length - 1]!)) path.reverse();
+    const headCode = path[path.length - 1]!; const headX = headCode % dimension; const headY = Math.floor(headCode / dimension);
+    const exits = [
+      { name: "UP", x: 0, y: -1, distance: headY }, { name: "RIGHT", x: 1, y: 0, distance: dimension - 1 - headX },
+      { name: "DOWN", x: 0, y: 1, distance: dimension - 1 - headY }, { name: "LEFT", x: -1, y: 0, distance: headX },
+    ].sort((a, b) => a.distance - b.distance);
+    const exit = exits[0]!;
+    const renderCodes = path.length > 1 ? path.slice(-2) : path;
+    const points = renderCodes.map((encoded) => ({ x: ((encoded % dimension) + .5) / dimension, y: (Math.floor(encoded / dimension) + .5) / dimension }));
+    if (points.length === 1) points.unshift({ x: points[0]!.x - exit.x * .55 / dimension, y: points[0]!.y - exit.y * .55 / dimension });
+    const index = routes.length;
+    routes.push({
+      id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y },
+      thickness: .70 / dimension, blockType: index > 0 && index % 41 === 0 ? "BOMB" : "NORMAL",
+      arrowType: arrowTypes[index % arrowTypes.length]!, memberKeys: [`0:${index}`],
+      removalOrder: exit.distance * 100_000 + index, gridX: headX, gridY: headY, gridCells: path,
+    });
+  }
+  const board = [routes.map((route) => cell(route.direction, true, {
+    arrow: route.direction, shapeId: route.id, shapeAnchor: true, pathType: "GRID_FILLED",
+    blockType: route.blockType, arrowType: route.arrowType,
+  }))];
+  return {
+    board,
+    answers: [routes.map((route) => route.direction)],
+    meta: {
+      freeSpace: true, pathModel: "SERPENTINE_V2", gridBased: true, filledSilhouette: true,
+      worldWidth: dimension, worldHeight: dimension, logicalRows: dimension, logicalColumns: dimension,
+      level, levelCount: 100, figureFamily: names[family], figureName: `${names[family]} ${variant + 1}`,
+      occupiedCells: occupied.length, totalBlocks: routes.length, totalShapes: routes.length,
+      maxFailedTaps: sizeFor(difficulty, 10, 8, 6, 5), rotatePowerUses: 2, missilePowerUses: 1,
+      shapes: routes, instructions: `Nivel ${level}/100 · ${names[family]}. Cada celda de la figura está cubierta por una flecha.`, difficulty,
     },
   };
 }

@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun AdaptiveArenaLayout(
     modifier: Modifier = Modifier,
+    landscapeBoardFraction: Float = .75f,
+    portraitBoardFraction: Float = .64f,
     board: @Composable () -> Unit,
     controls: @Composable ColumnScope.() -> Unit,
 ) {
@@ -43,11 +45,11 @@ fun AdaptiveArenaLayout(
                 horizontalArrangement = Arrangement.spacedBy(gap),
             ) {
                 Box(
-                    Modifier.weight(.75f).fillMaxHeight(),
+                    Modifier.weight(landscapeBoardFraction).fillMaxHeight(),
                     contentAlignment = Alignment.Center,
                 ) { board() }
                 ControlPanel(
-                    Modifier.weight(.25f).fillMaxHeight(),
+                    Modifier.weight(1f - landscapeBoardFraction).fillMaxHeight(),
                     controls,
                 )
             }
@@ -57,11 +59,11 @@ fun AdaptiveArenaLayout(
                 verticalArrangement = Arrangement.spacedBy(gap),
             ) {
                 Box(
-                    Modifier.weight(.64f).fillMaxWidth(),
+                    Modifier.weight(portraitBoardFraction).fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) { board() }
                 ControlPanel(
-                    Modifier.weight(.36f).fillMaxWidth(),
+                    Modifier.weight(1f - portraitBoardFraction).fillMaxWidth(),
                     controls,
                 )
             }

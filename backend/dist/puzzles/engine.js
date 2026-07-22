@@ -1986,11 +1986,13 @@ export class GenericPuzzleEngine {
                         : directionOverride === "DOWN" ? { x: 0, y: 1 }
                             : directionOverride === "LEFT" ? { x: -1, y: 0 }
                                 : route.exitVector;
+                const dimension = Number(this.meta.logicalColumns ?? 100);
                 const occupied = new Set(activeRoutes.filter((candidate) => candidate.id !== route.id)
-                    .map((candidate) => `${candidate.gridX}:${candidate.gridY}`));
+                    .flatMap((candidate) => candidate.gridCells?.map((encoded) => `${encoded % dimension}:${Math.floor(encoded / dimension)}`)
+                    ?? [`${candidate.gridX}:${candidate.gridY}`]));
                 let x = route.gridX + vector.x;
                 let y = route.gridY + vector.y;
-                while (x >= 0 && x < 100 && y >= 0 && y < 100) {
+                while (x >= 0 && x < dimension && y >= 0 && y < dimension) {
                     if (occupied.has(`${x}:${y}`))
                         return false;
                     x += vector.x;

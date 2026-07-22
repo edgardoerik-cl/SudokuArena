@@ -155,6 +155,8 @@ fun GenericArenaScreen(
             AdaptiveArenaLayout(
                 Modifier.fillMaxSize()
                     .blur(if (state.isLocallyPaused || state.roomState?.phase == com.sudokuarena.domain.RoomPhase.PAUSED) 18.dp else 0.dp),
+                landscapeBoardFraction = if (state.gameType == GameType.ARROWS_ESCAPE) .86f else .75f,
+                portraitBoardFraction = if (state.gameType == GameType.ARROWS_ESCAPE) .78f else .64f,
                 board = {
                 BoxWithConstraints(
                     Modifier.fillMaxSize(),
@@ -471,19 +473,26 @@ private data class SerpentineRoute(
     val memberKeys: List<String>,
     val gridX: Int?,
     val gridY: Int?,
+    val gridCells: List<Int>,
 )
 
 private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRoute> {
     if (state.meta["pathModel"] != "SERPENTINE_V2") return emptyList()
+    val dimension = (state.meta["logicalColumns"] as? Number)?.toInt()?.coerceAtLeast(1) ?: 100
+    val filled = state.meta["filledSilhouette"] == true
     return (state.meta["shapes"] as? List<*>)?.mapNotNull { raw ->
         val route = raw as? Map<*, *> ?: return@mapNotNull null
-        val points = (route["points"] as? List<*>)?.mapNotNull { pointRaw ->
+        val gridCells = (route["gridCells"] as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }.orEmpty()
+        val explicitPoints = (route["points"] as? List<*>)?.mapNotNull { pointRaw ->
             val point = pointRaw as? Map<*, *> ?: return@mapNotNull null
             Offset(
                 (point["x"] as? Number)?.toFloat() ?: return@mapNotNull null,
                 (point["y"] as? Number)?.toFloat() ?: return@mapNotNull null,
             )
         }.orEmpty()
+        val points = if (filled && gridCells.isNotEmpty()) gridCells.map { encoded ->
+            Offset(((encoded % dimension) + .5f) / dimension, ((encoded / dimension) + .5f) / dimension)
+        } else explicitPoints
         if (points.size < 2) return@mapNotNull null
         val vector = route["exitVector"] as? Map<*, *>
         SerpentineRoute(
@@ -500,6 +509,7 @@ private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRout
             memberKeys = (route["memberKeys"] as? List<*>)?.mapNotNull { it?.toString() }.orEmpty(),
             gridX = (route["gridX"] as? Number)?.toInt(),
             gridY = (route["gridY"] as? Number)?.toInt(),
+            gridCells = gridCells,
         )
     }.orEmpty()
 }
@@ -531,18 +541,21 @@ private fun canSerpentineEscape(route: SerpentineRoute, routes: List<SerpentineR
     }
 }
 
-private fun canGridArrowEscape(route: SerpentineRoute, routes: List<SerpentineRoute>, removed: Set<String>): Boolean {
+private fun canGridArrowEscape(route: SerpentineRoute, routes: List<SerpentineRoute>, removed: Set<String>, dimension: Int): Boolean {
     val x = route.gridX ?: return false
     val y = route.gridY ?: return false
     val stepX = route.exitVector.x.toInt()
     val stepY = route.exitVector.y.toInt()
     val occupied = routes.asSequence()
         .filter { it.id != route.id && !it.memberKeys.all(removed::contains) }
-        .mapNotNull { candidate -> candidate.gridX?.let { gx -> candidate.gridY?.let { gy -> gx to gy } } }
+        .flatMap { candidate ->
+            if (candidate.gridCells.isNotEmpty()) candidate.gridCells.asSequence().map { encoded -> encoded % dimension to encoded / dimension }
+            else sequenceOf(candidate.gridX?.let { gx -> candidate.gridY?.let { gy -> gx to gy } }).filterNotNull()
+        }
         .toHashSet()
     var cursorX = x + stepX
     var cursorY = y + stepY
-    while (cursorX in 0 until 100 && cursorY in 0 until 100) {
+    while (cursorX in 0 until dimension && cursorY in 0 until dimension) {
         if ((cursorX to cursorY) in occupied) return false
         cursorX += stepX
         cursorY += stepY
@@ -581,6 +594,7 @@ private fun SerpentineArrowsBoard(
 ) {
     val routes = remember(state.meta) { parseSerpentineRoutes(state) }
     val gridBased = state.meta["gridBased"] == true
+    val logicalDimension = (state.meta["logicalColumns"] as? Number)?.toInt() ?: 100
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
             ?.mapNotNull { it?.toString() }?.toSet().orEmpty()
@@ -639,7 +653,7 @@ private fun SerpentineArrowsBoard(
                             ?.takeIf { candidate -> pointToRouteDistance(normalized, candidate) <= .055f || (normalized - candidate.points.last()).getDistance() <= .075f }
                             ?: return@detectTapGestures
                         val member = route.memberKeys.first().split(":").map(String::toInt)
-                        val canEscape = if (gridBased) canGridArrowEscape(route, routes, removed)
+                        val canEscape = if (gridBased) canGridArrowEscape(route, routes, removed, logicalDimension)
                             else canSerpentineEscape(route, routes, removed)
                         if (action != "ESCAPE" || canEscape) {
                             onDirectMove(member[0], member[1], mapOf("action" to action))

@@ -311,12 +311,17 @@ describe("motor genérico de puzzles", () => {
     const blueprint = createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "complex-shapes", difficulty: "EXPERT" });
     const shapes = blueprint.meta.shapes as Array<{
       id: string; points: Array<{ x: number; y: number }>; direction: string;
-      exitVector: { x: number; y: number }; thickness: number; removalOrder: number;
+      exitVector: { x: number; y: number }; thickness: number; removalOrder: number; gridCells: number[]; arrowType: string;
     }>;
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
-    assert.equal(shapes.length, 256);
+    assert.equal(blueprint.meta.logicalColumns, 256);
+    assert.equal(blueprint.meta.levelCount, 100);
+    assert.equal(blueprint.meta.filledSilhouette, true);
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
-    assert.ok(shapes.some((shape) => shape.points.length >= 4));
+    assert.ok(shapes.every((shape) => shape.gridCells.length >= 1));
+    assert.equal(new Set(shapes.flatMap((shape) => shape.gridCells)).size, Number(blueprint.meta.occupiedCells));
+    assert.equal(shapes.flatMap((shape) => shape.gridCells).length, Number(blueprint.meta.occupiedCells));
+    assert.equal(new Set(shapes.map((shape) => shape.arrowType)).size, 5);
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
     assert.ok(shapes.every((shape) => shape.points.slice(1).every((point, index) => {
@@ -326,10 +331,14 @@ describe("motor genérico de puzzles", () => {
     assert.ok(shapes.every((shape) => Math.abs(Math.hypot(shape.exitVector.x, shape.exitVector.y) - 1) < .01));
     assert.ok(shapes.every((shape) => shape.thickness > 0));
     assert.ok(blueprint.board.flat().every((cell) => typeof cell.meta.shapeId === "string"));
-    const counts = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
-      Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `count-${difficulty}`, difficulty }).meta.totalShapes)
+    const dimensions = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
+      Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `dimension-${difficulty}`, difficulty }).meta.logicalColumns)
     );
-    assert.deepEqual(counts, [32, 64, 128, 256]);
+    assert.deepEqual(dimensions, [32, 64, 128, 256]);
+    const levelNames = new Set(Array.from({ length: 100 }, (_unused, index) =>
+      String(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "catalog", difficulty: "EASY", level: index + 1 }).meta.figureName)
+    ));
+    assert.equal(levelNames.size, 100);
   });
 
   it("Reactor Chain acepta el toque directo de un grupo conectado", () => {
