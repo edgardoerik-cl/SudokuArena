@@ -17,7 +17,7 @@ export function createPuzzleBlueprint(gameType, options = {}) {
         case "BRIDGES": return bridges(random, difficulty);
         case "TETRIS_ARENA": return { board: matrix(20, 10, () => cell(null, false)), answers: matrix(20, 10, () => null), meta: { actionMode: true, engine: "TETRIS_7_BAG", difficulty } };
         case "HANGMAN": return hangman(random, difficulty);
-        case "ARROWS_ESCAPE": return arrowsEscapeFilled(random, difficulty, options.level);
+        case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty, options.level);
         case "PACMAN_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "PACMAN_TILEMAP", difficulty } };
         case "CROSS_LETTERS": return crossLetters(random, difficulty);
         case "SECRET_CODE": return secretCode(random, difficulty);
@@ -493,7 +493,7 @@ function hangman(random, difficulty) {
         meta: { wordLength: word.length, clue: entry.clue, maxErrors: 6, instructions: "Adivina letras. Seis errores eliminan al jugador.", difficulty },
     };
 }
-function arrowsEscape(random, difficulty) {
+function arrowsEscape(random, difficulty, requestedLevel) {
     const shapes = [];
     const directions = [
         { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
@@ -510,7 +510,12 @@ function arrowsEscape(random, difficulty) {
     // Progresión legible y predecible: cada dificultad duplica la anterior.
     // El muestreo uniforme conserva la silueta completa incluso con 32 rutas.
     const requestedCount = sizeFor(difficulty, 32, 64, 128, 256);
-    const selectedCells = Array.from({ length: Math.min(requestedCount, heartCells.length) }, (_unused, index) => heartCells[Math.floor((index + .5) * heartCells.length / requestedCount)]);
+    const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? 1)));
+    // Mantiene la distribucion fina que funcionaba bien antes de introducir las
+    // siluetas rellenas. El desplazamiento cambia la composicion entre etapas sin
+    // convertir cada recorrido en una franja gigante.
+    const stageOffset = (level * 53) % heartCells.length;
+    const selectedCells = Array.from({ length: Math.min(requestedCount, heartCells.length) }, (_unused, index) => heartCells[(Math.floor((index + .5) * heartCells.length / requestedCount) + stageOffset) % heartCells.length]);
     const arrowThickness = difficulty === "EASY" ? .007 : difficulty === "MEDIUM" ? .006 : difficulty === "HARD" ? .0048 : .0038;
     const count = selectedCells.length;
     const board = matrix(1, count, () => cell(null, true));
@@ -656,6 +661,11 @@ function arrowsEscape(random, difficulty) {
             worldHeight: 100,
             logicalRows: 100,
             logicalColumns: 100,
+            filledSilhouette: false,
+            level,
+            levelCount: 100,
+            figureFamily: "Corazon",
+            figureName: `Corazon neon ${level}`,
             totalBlocks: count,
             totalShapes: shapes.length,
             arrowCount: count,
@@ -663,7 +673,7 @@ function arrowsEscape(random, difficulty) {
             rotatePowerUses: 2,
             missilePowerUses: 1,
             shapes,
-            instructions: "Toca una ruta o su punta. La flecha solo escapa si el rayo de su cabeza llega al borde sin cruzar otra ruta.",
+            instructions: `Etapa ${level}/100. Toca una ruta fina o su punta cuando tenga salida libre hasta el borde.`,
             difficulty,
         },
     };

@@ -66,7 +66,8 @@ describe("motor genérico de puzzles", () => {
 
       const startedAt = Date.now();
       const maxTurns = gameType === "NEXUS_ZERO" ? 8_000 : 1_500;
-      for (let turn = 0; turn < maxTurns && !engine.snapshot(players).completed; turn += 1) {
+      for (let turn = 0; turn < maxTurns && !engine.snapshot(players).completed
+        && !(gameType === "ARROWS_ESCAPE" && Number(engine.snapshot(players).meta.level ?? 1) > 1); turn += 1) {
         const move = engine.createBotMove(1, "bot");
         assert.ok(move, `${gameType} debe producir una jugada mientras no termine`);
         const actionNow = startedAt + turn * (gameType === "TOWER_DEFENSE" ? 1_000 : 200);
@@ -77,7 +78,11 @@ describe("motor genérico de puzzles", () => {
           }
         }
       }
-      assert.equal(engine.snapshot(players).completed, true, `${gameType} debe poder completarse`);
+      if (gameType === "ARROWS_ESCAPE") {
+        assert.ok(Number(engine.snapshot(players).meta.level) > 1, "Flechas debe avanzar a la etapa siguiente");
+      } else {
+        assert.equal(engine.snapshot(players).completed, true, `${gameType} debe poder completarse`);
+      }
     });
   }
 
@@ -311,16 +316,14 @@ describe("motor genérico de puzzles", () => {
     const blueprint = createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "complex-shapes", difficulty: "EXPERT" });
     const shapes = blueprint.meta.shapes as Array<{
       id: string; points: Array<{ x: number; y: number }>; direction: string;
-      exitVector: { x: number; y: number }; thickness: number; removalOrder: number; gridCells: number[]; arrowType: string;
+      exitVector: { x: number; y: number }; thickness: number; removalOrder: number; arrowType: string;
     }>;
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
-    assert.equal(blueprint.meta.logicalColumns, 20);
+    assert.equal(blueprint.meta.logicalColumns, 100);
     assert.equal(blueprint.meta.levelCount, 100);
-    assert.equal(blueprint.meta.filledSilhouette, true);
+    assert.equal(blueprint.meta.filledSilhouette, false);
+    assert.equal(shapes.length, 256);
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
-    assert.ok(shapes.every((shape) => shape.gridCells.length >= 1));
-    assert.equal(new Set(shapes.flatMap((shape) => shape.gridCells)).size, Number(blueprint.meta.occupiedCells));
-    assert.equal(shapes.flatMap((shape) => shape.gridCells).length, Number(blueprint.meta.occupiedCells));
     assert.equal(new Set(shapes.map((shape) => shape.arrowType)).size, 5);
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT"].includes(shape.direction)));
@@ -334,7 +337,7 @@ describe("motor genérico de puzzles", () => {
     const dimensions = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
       Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `dimension-${difficulty}`, difficulty }).meta.logicalColumns)
     );
-    assert.deepEqual(dimensions, [5, 7, 8, 20]);
+    assert.deepEqual(dimensions, [100, 100, 100, 100]);
     const levelNames = new Set(Array.from({ length: 100 }, (_unused, index) =>
       String(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "catalog", difficulty: "EASY", level: index + 1 }).meta.figureName)
     ));

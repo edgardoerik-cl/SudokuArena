@@ -893,7 +893,9 @@ function processGenericMove(room: RoomRuntime, playerId: string, payload: Generi
   }
   responder?.emit("generic:move-accepted", result);
   emitState(room);
-  emitGenericState(room, room.config.gameType === "ARROWS_ESCAPE");
+  const geometryChanged = room.config.gameType === "ARROWS_ESCAPE"
+    && engine.consumeStaticGeometryChanged();
+  emitGenericState(room, room.config.gameType === "ARROWS_ESCAPE" && !geometryChanged);
   if (result.completed || room.phase === "SUDDEN_DEATH") finishMatch(room, true);
 }
 

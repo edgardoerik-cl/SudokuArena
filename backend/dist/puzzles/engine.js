@@ -59,6 +59,8 @@ export class GenericPuzzleEngine {
     arrowBlockedUntil = new Map();
     arrowTimerStartedAt = Date.now();
     arrowTimerTriggered = new Map();
+    arrowStaticGeometryChanged = false;
+    arrowStageAdvancedTo = null;
     capturedPawns = new Map([["BLUE", 0], ["RED", 0]]);
     memoryFirstPicks = new Map();
     nurikabeSonarUses = new Map();
@@ -92,6 +94,12 @@ export class GenericPuzzleEngine {
         this.turnOrder = [...playerIds];
         this.activePlayerId = this.turnOrder[0] ?? null;
         this.turnEndsAt = now + Number(this.meta.turnSeconds ?? 60) * 1_000;
+    }
+    /** El servidor usa este pulso para enviar la geometria completa de una etapa nueva. */
+    consumeStaticGeometryChanged() {
+        const changed = this.arrowStaticGeometryChanged;
+        this.arrowStaticGeometryChanged = false;
+        return changed;
     }
     snapshot(game, now = Date.now()) {
         if (this.gameType === "CROSS_LETTERS")
@@ -292,13 +300,17 @@ export class GenericPuzzleEngine {
         const points = outcome.points ?? GENERIC_HIT_POINTS;
         game.applyGenericSuccess(playerId, points, options.rewardEnergy === false || points <= 0 ? 0 : GENERIC_ENERGY, now);
         this.completed = this.isPuzzleComplete();
+        const advancedStage = this.arrowStageAdvancedTo;
+        this.arrowStageAdvancedTo = null;
         if (STRICT_PLAYER_TURN_GAMES.has(this.gameType) && outcome.extraTurn !== true)
             this.advanceStrictTurn();
         this.revision += 1;
         return {
             accepted: true,
             requestId: move.requestId,
-            message: this.completed ? "Puzzle completado" : outcome.message ?? "Movimiento aceptado",
+            message: this.completed ? "100 etapas completadas"
+                : advancedStage ? `Etapa ${advancedStage}/100`
+                    : outcome.message ?? "Movimiento aceptado",
             points,
             penaltyMs: 0,
             completed: this.completed
@@ -2187,8 +2199,34 @@ export class GenericPuzzleEngine {
             return this.board[0].every((cell) => cell.value !== null)
                 || (this.turnOrder.length > 0 && this.turnOrder.every((id) => (this.hangmanErrors.get(id) ?? 0) >= 6));
         }
-        if (this.gameType === "ARROWS_ESCAPE")
-            return [...this.arrowRemoved.values()].some((removed) => removed.size === this.board.length * this.board[0].length);
+        if (this.gameType === "ARROWS_ESCAPE") {
+            const stageCleared = [...this.arrowRemoved.values()]
+                .some((removed) => removed.size === this.board.length * this.board[0].length);
+            if (!stageCleared)
+                return false;
+            const level = Number(this.meta.level ?? 1);
+            if (level >= Number(this.meta.levelCount ?? 100))
+                return true;
+            const nextLevel = level + 1;
+            const next = createPuzzleBlueprint("ARROWS_ESCAPE", {
+                seed: `${this.gameId}-stage-${nextLevel}`,
+                difficulty: String(this.meta.difficulty ?? "MEDIUM"),
+                level: nextLevel,
+            });
+            this.board = next.board;
+            this.answers = next.answers;
+            this.meta = next.meta;
+            this.arrowRemoved.clear();
+            this.arrowFailedTaps.clear();
+            this.arrowCombo.clear();
+            this.arrowLastSuccessAt.clear();
+            this.arrowBlockedUntil.clear();
+            this.arrowTimerTriggered.clear();
+            this.arrowTimerStartedAt = Date.now();
+            this.arrowStaticGeometryChanged = true;
+            this.arrowStageAdvancedTo = nextLevel;
+            return false;
+        }
         if (this.gameType === "MEMORY_NEON")
             return this.board.flat().every((cell) => cell.ownerId !== null);
         if (this.gameType === "MERGE_2048") {

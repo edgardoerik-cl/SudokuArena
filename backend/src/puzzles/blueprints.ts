@@ -19,7 +19,7 @@ export function createPuzzleBlueprint(gameType: GameType, options: PuzzleGenerat
     case "BRIDGES": return bridges(random, difficulty);
     case "TETRIS_ARENA": return { board: matrix(20, 10, () => cell(null, false)), answers: matrix<CellValue>(20, 10, () => null), meta: { actionMode: true, engine: "TETRIS_7_BAG", difficulty } };
     case "HANGMAN": return hangman(random, difficulty);
-    case "ARROWS_ESCAPE": return arrowsEscapeFilled(random, difficulty, options.level);
+    case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty, options.level);
     case "PACMAN_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "PACMAN_TILEMAP", difficulty } };
     case "CROSS_LETTERS": return crossLetters(random, difficulty);
     case "SECRET_CODE": return secretCode(random, difficulty);
@@ -496,7 +496,7 @@ function hangman(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlue
   };
 }
 
-function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): PuzzleBlueprint {
+function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty, requestedLevel?: number): PuzzleBlueprint {
   // Un lienzo grande y denso: las cabezas dibujan colectivamente un corazon.
   // Modelo lógico 100×100, serializado de forma dispersa para no enviar diez
   // mil celdas vacías por WebSocket. Las rutas sí usan coordenadas de esa malla.
@@ -519,8 +519,13 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
   // Progresión legible y predecible: cada dificultad duplica la anterior.
   // El muestreo uniforme conserva la silueta completa incluso con 32 rutas.
   const requestedCount = sizeFor(difficulty, 32, 64, 128, 256);
+  const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? 1)));
+  // Mantiene la distribucion fina que funcionaba bien antes de introducir las
+  // siluetas rellenas. El desplazamiento cambia la composicion entre etapas sin
+  // convertir cada recorrido en una franja gigante.
+  const stageOffset = (level * 53) % heartCells.length;
   const selectedCells = Array.from({ length: Math.min(requestedCount, heartCells.length) }, (_unused, index) =>
-    heartCells[Math.floor((index + .5) * heartCells.length / requestedCount)]!
+    heartCells[(Math.floor((index + .5) * heartCells.length / requestedCount) + stageOffset) % heartCells.length]!
   );
   const arrowThickness = difficulty === "EASY" ? .007 : difficulty === "MEDIUM" ? .006 : difficulty === "HARD" ? .0048 : .0038;
   const count = selectedCells.length;
@@ -664,6 +669,11 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       worldHeight: 100,
       logicalRows: 100,
       logicalColumns: 100,
+      filledSilhouette: false,
+      level,
+      levelCount: 100,
+      figureFamily: "Corazon",
+      figureName: `Corazon neon ${level}`,
       totalBlocks: count,
       totalShapes: shapes.length,
       arrowCount: count,
@@ -671,7 +681,7 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty): Puzzl
       rotatePowerUses: 2,
       missilePowerUses: 1,
       shapes,
-      instructions: "Toca una ruta o su punta. La flecha solo escapa si el rayo de su cabeza llega al borde sin cruzar otra ruta.",
+      instructions: `Etapa ${level}/100. Toca una ruta fina o su punta cuando tenga salida libre hasta el borde.`,
       difficulty,
     },
   };

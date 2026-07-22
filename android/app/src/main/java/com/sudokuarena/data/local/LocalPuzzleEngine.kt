@@ -56,7 +56,7 @@ class LocalPuzzleEngine(
     seed: Long = System.nanoTime(),
 ) {
     private val random = Random(seed)
-    private val blueprint = createBlueprint(gameType)
+    private var blueprint = createBlueprint(gameType)
     private var board = blueprint.board
     private var revision = 0L
     private val foundWords = mutableSetOf<String>()
@@ -432,7 +432,21 @@ class LocalPuzzleEngine(
         return accept(if (boxes > 0) boxes * 50 else 5)
     }
 
-    private fun accept(points: Int): LocalPuzzleMoveResult { revision++; return LocalPuzzleMoveResult(true, snapshot(), points, message = if (isComplete()) "Puzzle completado" else "¡Correcto!") }
+    private fun accept(points: Int): LocalPuzzleMoveResult {
+        if (gameType == GameType.ARROWS_ESCAPE && board.firstOrNull().orEmpty().all { it.ownerId == OWNER }) {
+            val currentLevel = (blueprint.meta["level"] as? Number)?.toInt() ?: 1
+            if (currentLevel < 100) {
+                blueprint = arrowsEscape(currentLevel + 1)
+                board = blueprint.board
+                arrowRotateUses = 0
+                arrowMissileUses = 0
+                revision += 1
+                return LocalPuzzleMoveResult(true, snapshot(), points, message = "Etapa ${currentLevel + 1}/100")
+            }
+        }
+        revision++
+        return LocalPuzzleMoveResult(true, snapshot(), points, message = if (isComplete()) "Puzzle completado" else "¡Correcto!")
+    }
     private fun incorrect() = LocalPuzzleMoveResult(false, snapshot(), penaltyMs = 3_000, message = "Movimiento incorrecto")
     private fun reject(message: String) = LocalPuzzleMoveResult(false, snapshot(), message = message)
     private fun replace(row: Int, col: Int, value: GenericCell) { board = board.mapIndexed { y, cells -> if (y == row) cells.mapIndexed { x, old -> if (x == col) value else old } else cells } }
@@ -827,7 +841,7 @@ class LocalPuzzleEngine(
         }
     }
 
-    private fun arrowsEscape(): Blueprint {
+    private fun arrowsEscapeFilled(): Blueprint {
         val dimension = size(5, 7, 8, 20)
         val level = random.nextInt(1, 101)
         val family = (level - 1) % 10
@@ -926,8 +940,7 @@ class LocalPuzzleEngine(
         )
     }
 
-    @Suppress("unused")
-    private fun arrowsEscapeLegacyFilled(): Blueprint {
+    private fun arrowsEscape(requestedLevel: Int = 1): Blueprint {
         val heartCells = buildList {
             for (gridY in 4..96) for (gridX in 4..96) {
                 val x = (gridX - 50) / 34.0
@@ -939,8 +952,10 @@ class LocalPuzzleEngine(
             }
         }
         val requestedCount = size(32, 64, 128, 256)
+        val level = requestedLevel.coerceIn(1, 100)
+        val stageOffset = (level * 53) % heartCells.size
         val selectedCells = List(requestedCount.coerceAtMost(heartCells.size)) { index ->
-            heartCells[((index + .5) * heartCells.size / requestedCount).toInt()]
+            heartCells[(((index + .5) * heartCells.size / requestedCount).toInt() + stageOffset) % heartCells.size]
         }
         val arrowThickness = when (difficulty) {
             PuzzleDifficulty.EASY -> .007f
@@ -994,13 +1009,16 @@ class LocalPuzzleEngine(
             listOf(shapes.map { it["direction"] }),
             mapOf(
                 "freeSpace" to true, "pathModel" to "SERPENTINE_V2", "gridBased" to true,
+                "filledSilhouette" to false,
                 "silhouette" to "HEART", "worldWidth" to 100, "worldHeight" to 100,
                 "logicalRows" to 100, "logicalColumns" to 100,
+                "level" to level, "levelCount" to 100,
+                "figureFamily" to "Corazón", "figureName" to "Corazón neón $level",
                 "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
                 "arrowCount" to shapes.size,
                 "maxFailedTaps" to size(8, 7, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
                 "shapes" to shapes,
-                "instructions" to "Corazón 100×100: elimina primero las flechas con trayectoria libre hasta el borde.",
+                "instructions" to "Etapa $level/100. Elimina primero las flechas finas con trayectoria libre hasta el borde.",
             ),
         )
     }
