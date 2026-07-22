@@ -702,51 +702,17 @@ private fun SerpentineArrowsBoard(
                     moveTo(points.first().x, points.first().y)
                     for (pointIndex in 1..points.lastIndex) lineTo(points[pointIndex].x, points[pointIndex].y)
                 }
-                val color = when (route.arrowType) {
-                    "STRAIGHT" -> Color(0xFF00E5FF)
-                    "ELBOW_90" -> Color(0xFFB388FF)
-                    "L_SHAPE" -> Color(0xFF00E676)
-                    "S_SHAPE" -> Color(0xFFFF4081)
-                    "LONG_SPEAR" -> Color(0xFFFFAB00)
-                    else -> Color(0xFFFF4081)
-                }
+                // Una sola tinta para todo el puzzle: la forma se reconoce por
+                // su geometría, sin placas ni colores distintos por tipo.
+                val color = Color(0xFF00E5FF)
                 val alpha = if (isExiting) 1f - flight.value * .75f else 1f
                 val stroke = if (gridBased) maxOf(1.35f, route.thickness * size.minDimension * zoom)
                     else maxOf(7f, route.thickness * size.minDimension)
-                if (cellComplete && !isExiting) {
-                    // El cuerpo completo ocupa visualmente las mismas celdas que
-                    // usa el motor de colisiones. No se pinta sólo la cabeza.
-                    val tileWidth = size.width / logicalDimension * zoom * .98f
-                    val tileHeight = size.height / logicalDimension * zoom * .98f
-                    val occupiedTilePoints = if (route.gridCells.isNotEmpty()) route.gridCells.map { encoded ->
-                        val raw = Offset(
-                            ((encoded % logicalDimension) + .5f) / logicalDimension,
-                            ((encoded / logicalDimension) + .5f) / logicalDimension,
-                        )
-                        screenPoint(raw).let { Offset(it.x * size.width, it.y * size.height) }
-                    } else points
-                    occupiedTilePoints.forEach { occupiedPoint ->
-                        val tileTopLeft = occupiedPoint - Offset(tileWidth / 2f, tileHeight / 2f)
-                        drawRoundRect(
-                            color.copy(alpha = .24f),
-                            topLeft = tileTopLeft,
-                            size = Size(tileWidth, tileHeight),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(minOf(tileWidth, tileHeight) * .16f),
-                        )
-                        drawRoundRect(
-                            Color.White.copy(alpha = .16f),
-                            topLeft = tileTopLeft,
-                            size = Size(tileWidth, tileHeight),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(minOf(tileWidth, tileHeight) * .16f),
-                            style = Stroke(maxOf(1f, minOf(tileWidth, tileHeight) * .035f)),
-                        )
-                    }
-                }
                 drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
                 drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))
                 drawPath(path, Color.White.copy(alpha = .58f * alpha), style = Stroke(maxOf(1.5f, stroke * .18f)))
                 if (route.arrowType == "LONG_SPEAR") {
-                    drawPath(path, Color(0xFFFFF59D).copy(alpha = .8f * alpha), style = Stroke(maxOf(1f, stroke * .22f)))
+                    drawPath(path, Color.White.copy(alpha = .42f * alpha), style = Stroke(maxOf(1f, stroke * .22f)))
                 }
                 val head = points.last()
                 val tangent = if (gridBased) route.exitVector else {
