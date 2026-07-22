@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sudokuarena.domain.LeaderboardRepository
 import com.sudokuarena.domain.GameType
+import com.sudokuarena.data.AppUpdateInfo
 import kotlin.math.sin
 
 @Composable
@@ -89,6 +90,7 @@ fun WelcomeScreen(
     onDailyChallenge: () -> Unit,
     onMultiplayerMode: () -> Unit,
     onAbout: () -> Unit,
+    availableUpdate: AppUpdateInfo? = null,
 ) {
     var savedNickname by remember(initialNickname) { mutableStateOf(initialNickname.trim()) }
     var firstNickname by remember { mutableStateOf("") }
@@ -162,6 +164,26 @@ fun WelcomeScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (availableUpdate != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onAbout),
+                        color = Color(0xFFFFF3CD),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(2.dp, Color(0xFFFFA000)),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("ACTUALIZACIÓN DISPONIBLE", color = Color(0xFF7A3E00), fontWeight = FontWeight.Black)
+                                Text("Multi Arena ${availableUpdate.versionName} · toca para descargar", color = Color(0xFF5D4037), fontSize = 12.sp)
+                            }
+                            Text("↓", color = Color(0xFFE65100), fontSize = 25.sp, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
                 Text("ELIGE TU ARENA", fontWeight = FontWeight.Black, color = ArenaColors.Ink, modifier = Modifier.align(Alignment.CenterHorizontally))
                 GameCarouselSelector(selectedGameType, favoriteGames, onGameSelected, onToggleFavorite)
                 NeonArenaButton(

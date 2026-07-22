@@ -4,7 +4,9 @@ import { Server, type Socket } from "socket.io";
 import {
   BOARD_EVENT_DURATION_MS,
   BOARD_EVENT_INTERVAL_MS,
+  APP_DOWNLOAD_URL,
   APP_VERSION,
+  APP_VERSION_CODE,
   CLEAR_DELAY_MS,
   MATCH_DURATION_MS,
   SUDDEN_DEATH_DURATION_MS,
@@ -892,6 +894,10 @@ function processGenericMove(room: RoomRuntime, playerId: string, payload: Generi
     return;
   }
   responder?.emit("generic:move-accepted", result);
+  // START_WAVE is a global Tower Defense command. Re-arm the authoritative
+  // simulation here as well, so a recycled/suspended room timer can never
+  // leave a successfully deployed wave frozen on its first frame.
+  if (room.config.gameType === "TOWER_DEFENSE") startGenericLoop(room);
   emitState(room);
   const geometryChanged = room.config.gameType === "ARROWS_ESCAPE"
     && engine.consumeStaticGeometryChanged();
@@ -1281,6 +1287,14 @@ async function handleHttp(
         version: APP_VERSION,
         rooms: rooms.size,
         players: [...rooms.values()].reduce((total, room) => total + room.game.playerCount, 0)
+      });
+      return;
+    }
+    if (request.method === "GET" && request.url === "/api/app-version") {
+      sendJson(response, 200, {
+        versionCode: APP_VERSION_CODE,
+        versionName: APP_VERSION,
+        downloadUrl: process.env.APP_DOWNLOAD_URL ?? APP_DOWNLOAD_URL,
       });
       return;
     }

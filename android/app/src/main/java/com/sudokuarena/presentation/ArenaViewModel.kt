@@ -395,13 +395,17 @@ class ArenaViewModel(
         val current = mutableState.value
         if (!current.canInteractGeneric) return
         val cell = current.genericBoard?.board?.getOrNull(row)?.getOrNull(column) ?: return
+        val action = (value as? Map<*, *>)?.get("action")?.toString()?.uppercase()
+        val towerGlobalAction = current.gameType == GameType.TOWER_DEFENSE && action in setOf(
+            "START_WAVE", "EMP", "ORBITAL", "REPAIR", "OVERCLOCK",
+        )
         // Ahorcado usa una coordenada de transporte para todas las teclas. Esa
         // celda puede quedar revelada tras el primer acierto, pero el teclado
         // debe seguir emitiendo letras hasta que finalice la palabra.
-        if (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(
+        if (!towerGlobalAction && (cell.isBlocked || (cell.ownerId != null && current.gameType !in setOf(
                 GameType.NURIKABE, GameType.TETRIS_ARENA, GameType.WORD_SEARCH,
                 GameType.MERGE_2048, GameType.HANGMAN,
-            ))) return
+            )))) return
         submitGenericMove(CellPosition(row, column), value)
         if (current.gameType == GameType.NEXUS_ZERO) {
             mutableState.update { it.copy(selected = null) }

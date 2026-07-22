@@ -21,12 +21,16 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
+import com.sudokuarena.data.AppUpdateChecker
+import com.sudokuarena.data.AppUpdateInfo
 import kotlin.math.sin
 
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(availableUpdate: AppUpdateInfo? = null, onBack: () -> Unit) {
+    val context = LocalContext.current
     val transition = rememberInfiniteTransition(label = "pixelDance")
     val beat by transition.animateFloat(0f, 1f, infiniteRepeatable(tween(620, easing = LinearEasing), RepeatMode.Reverse), label = "beat")
     var selectedCharacter by remember { mutableStateOf<Int?>(null) }
@@ -118,6 +122,23 @@ fun AboutScreen(onBack: () -> Unit) {
             pixel(bx - 20, by + 8 - beat * 10f, 22f, 8f, Color(0xFFF1C6A8)); pixel(bx + 42, by + 8 + beat * 10f, 22f, 8f, Color(0xFFF1C6A8))
             pixelHeart(bx + 22, by - 82, selectedCharacter == 2)
         }
+        if (availableUpdate != null) {
+            Button(
+                onClick = { AppUpdateChecker.openDownload(context, availableUpdate.downloadUrl) },
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A8FF), contentColor = Color.White),
+            ) {
+                Text(
+                    "DESCARGAR MULTI ARENA ${availableUpdate.versionName}  ↓",
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Text(
+                "Se abrirá Google Drive. Descarga la APK más reciente y acepta la instalación de Android.",
+                color = Color(0xFFB9DDF8),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Canvas(Modifier.size(42.dp)) {
                 val scale = .82f + beat * .16f
@@ -135,6 +156,7 @@ fun AboutScreen(onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
+            "8.11.6 · Actualización desde Acerca de y oleadas de Tower Defense reparadas.",
             "8.11.5 · Flechas ocupa visualmente cada celda interior de la figura.",
             "8.11.4 · Flechas rellena cada celda de la figura; Boo baila al centro.",
             "8.11.3 · Flechas densifica las figuras sin aumentar su grosor.",

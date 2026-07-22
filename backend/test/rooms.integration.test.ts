@@ -48,6 +48,19 @@ after(async () => {
 });
 
 describe("matchmaking por salas", () => {
+  it("publica la versión vigente y el enlace oficial de actualización", async () => {
+    const response = await fetch(`${url}/api/app-version`);
+    assert.equal(response.status, 200);
+    const update = await response.json() as {
+      versionCode: number;
+      versionName: string;
+      downloadUrl: string;
+    };
+    assert.equal(update.versionCode, 55);
+    assert.equal(update.versionName, "8.11.6");
+    assert.match(update.downloadUrl, /^https:\/\/drive\.google\.com\/drive\/folders\//);
+  });
+
   it("publica y conserva el mejor récord solitario por HTTP", async () => {
     const firstChallenge = await fetch(`${url}/api/solo/challenge`, { method: "POST" }).then((value) => value.json()) as { token: string };
     const first = await fetch(`${url}/api/leaderboards/solo`, {

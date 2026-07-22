@@ -326,7 +326,12 @@ export class GenericPuzzleEngine {
     }
 
     const cell = this.board[move.row]![move.col]!;
-    if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048", "TOWER_DEFENSE"].includes(this.gameType))) {
+    const requestedAction = typeof move.val === "object" && move.val !== null
+      ? String((move.val as Record<string, unknown>).action ?? "").toUpperCase()
+      : String(move.val ?? "").toUpperCase();
+    const towerGlobalAction = this.gameType === "TOWER_DEFENSE"
+      && ["START_WAVE", "EMP", "ORBITAL", "REPAIR", "OVERCLOCK"].includes(requestedAction);
+    if (!towerGlobalAction && (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048", "TOWER_DEFENSE"].includes(this.gameType)))) {
       return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
     }
 

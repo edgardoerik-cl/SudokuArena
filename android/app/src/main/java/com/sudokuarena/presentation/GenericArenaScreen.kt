@@ -1636,12 +1636,6 @@ private fun TowerDefenseGrid(
                 radius = size.maxDimension * .72f,
             ),
         )
-        drawRoundRect(
-            Color(0xCC071426), Offset(8f, 8f), Size(size.width * .34f, 28f),
-            cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f),
-        )
-        val cameraLabel = textMeasurer.measure("Pellizca para zoom Â· arrastra para recorrer Â· doble toque reinicia", TextStyle(color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold))
-        drawText(cameraLabel, topLeft = Offset(14f, 14f))
         repeat(24) { index ->
             val x = ((index * 47 % 101) / 100f * size.width + pulse * (6f + index % 5)).mod(size.width)
             val y = (index * 71 % 97) / 96f * size.height

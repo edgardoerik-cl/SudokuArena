@@ -96,7 +96,9 @@ describe("motor genérico de puzzles", () => {
       requestId: "build", row: 0, col: 0, val: { action: "BUILD", towerType: "RAPID" },
     }, players).accepted, true);
     assert.equal(engine.makeMove("p1", {
-      requestId: "wave", row: 0, col: 0, val: { action: "START_WAVE" },
+      // Global commands must work even when their transport coordinate lands
+      // on the locked route rather than on a buildable terrain cell.
+      requestId: "wave", row: 1, col: 0, val: { action: "START_WAVE" },
     }, players).accepted, true);
     const started = engine.snapshot(players);
     assert.equal(started.meta.waveActive, true);

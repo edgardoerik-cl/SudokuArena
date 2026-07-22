@@ -14,6 +14,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +30,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import com.sudokuarena.data.SocketGameClient
+import com.sudokuarena.data.AppUpdateChecker
+import com.sudokuarena.data.AppUpdateInfo
 import com.sudokuarena.data.HttpLeaderboardRepository
 import com.sudokuarena.data.local.PlayerPreferences
 import com.sudokuarena.data.local.RandomSudokuGenerator
@@ -95,6 +98,11 @@ private fun MultiArenaApp() {
     var selectedGameType by rememberSaveable { mutableStateOf(GameType.SUDOKU) }
     var soloDifficulty by rememberSaveable { mutableStateOf(PuzzleDifficulty.MEDIUM) }
     var sessionId by rememberSaveable { mutableLongStateOf(0L) }
+    var availableUpdate by remember { mutableStateOf<AppUpdateInfo?>(null) }
+
+    LaunchedEffect(Unit) {
+        availableUpdate = AppUpdateChecker.findUpdate(BuildConfig.SOCKET_URL, BuildConfig.VERSION_CODE)
+    }
 
     AnimatedContent(
         targetState = screen,
@@ -132,8 +140,12 @@ private fun MultiArenaApp() {
                 },
                 onMultiplayerMode = { screen = "MULTIPLAYER_ENTRY" },
                 onAbout = { screen = "ABOUT" },
+                availableUpdate = availableUpdate,
             )
-            "ABOUT" -> AboutScreen(onBack = { screen = "WELCOME" })
+            "ABOUT" -> AboutScreen(
+                availableUpdate = availableUpdate,
+                onBack = { screen = "WELCOME" },
+            )
             "SOLO_SETUP" -> SoloSetupScreen(
                 gameType = selectedGameType,
                 isColorMode = soloColorMode,
