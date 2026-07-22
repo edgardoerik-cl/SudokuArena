@@ -951,7 +951,7 @@ class LocalPuzzleEngine(
                 }
             }
         }
-        val requestedCount = size(32, 64, 128, 256)
+        val requestedCount = size(72, 128, 192, 320)
         val level = requestedLevel.coerceIn(1, 100)
         val stageOffset = (level * 53) % heartCells.size
         val selectedCells = List(requestedCount.coerceAtMost(heartCells.size)) { index ->
@@ -1016,9 +1016,10 @@ class LocalPuzzleEngine(
                 "figureFamily" to "Corazón", "figureName" to "Corazón neón $level",
                 "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
                 "arrowCount" to shapes.size,
+                "densityProfile" to "FINE_DENSE",
                 "maxFailedTaps" to size(8, 7, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
                 "shapes" to shapes,
-                "instructions" to "Etapa $level/100. Elimina primero las flechas finas con trayectoria libre hasta el borde.",
+                "instructions" to "Etapa $level/100 · ${shapes.size} flechas. Elimina primero las rutas con salida libre.",
             ),
         )
     }

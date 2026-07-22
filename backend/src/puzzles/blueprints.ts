@@ -516,9 +516,9 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty, reques
     const x = (gx - 50) / 34; const y = (51 - gy) / 32;
     if (Math.pow(x * x + y * y - 1, 3) - x * x * y * y * y <= 0) heartCells.push({ x: gx / 100, y: gy / 100 });
   }
-  // Progresión legible y predecible: cada dificultad duplica la anterior.
-  // El muestreo uniforme conserva la silueta completa incluso con 32 rutas.
-  const requestedCount = sizeFor(difficulty, 32, 64, 128, 256);
+  // Densidad suficiente para que la silueta se lea como una figura continua,
+  // conservando trazos finos e independientes (sin volver a bloques gigantes).
+  const requestedCount = sizeFor(difficulty, 72, 128, 192, 320);
   const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? 1)));
   // Mantiene la distribucion fina que funcionaba bien antes de introducir las
   // siluetas rellenas. El desplazamiento cambia la composicion entre etapas sin
@@ -677,11 +677,12 @@ function arrowsEscape(random: SeededRandom, difficulty: PuzzleDifficulty, reques
       totalBlocks: count,
       totalShapes: shapes.length,
       arrowCount: count,
+      densityProfile: "FINE_DENSE",
       maxFailedTaps: sizeFor(difficulty, 8, 7, 6, 5),
       rotatePowerUses: 2,
       missilePowerUses: 1,
       shapes,
-      instructions: `Etapa ${level}/100. Toca una ruta fina o su punta cuando tenga salida libre hasta el borde.`,
+      instructions: `Etapa ${level}/100 · ${count} flechas. Toca una ruta fina o su punta cuando tenga salida libre hasta el borde.`,
       difficulty,
     },
   };

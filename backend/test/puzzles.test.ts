@@ -322,7 +322,7 @@ describe("motor genérico de puzzles", () => {
     assert.equal(blueprint.meta.logicalColumns, 100);
     assert.equal(blueprint.meta.levelCount, 100);
     assert.equal(blueprint.meta.filledSilhouette, false);
-    assert.equal(shapes.length, 256);
+    assert.equal(shapes.length, 320);
     assert.ok(shapes.every((shape) => shape.points.length >= 2));
     assert.equal(new Set(shapes.map((shape) => shape.arrowType)).size, 5);
     assert.ok(shapes.every((shape) => ["UP", "RIGHT", "DOWN", "LEFT", "ANGLE_60", "ANGLE_120", "ANGLE_240", "ANGLE_300"].includes(shape.direction)));

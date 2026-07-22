@@ -131,6 +131,7 @@ fun AboutScreen(onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
+            "8.11.3 · Flechas densifica las figuras sin aumentar su grosor.",
             "8.11.2 · Flechas recupera trazos finos y encadena 100 etapas.",
             "8.11.1 · Flechas: lienzos 5×5, 7×7, 8×8 y 20×20.",
             "8.11.0 · Personajes pixel art interactivos con salto y corazones.",
