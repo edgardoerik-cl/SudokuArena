@@ -17,7 +17,9 @@ export function createPuzzleBlueprint(gameType, options = {}) {
         case "BRIDGES": return bridges(random, difficulty);
         case "TETRIS_ARENA": return { board: matrix(20, 10, () => cell(null, false)), answers: matrix(20, 10, () => null), meta: { actionMode: true, engine: "TETRIS_7_BAG", difficulty } };
         case "HANGMAN": return hangman(random, difficulty);
-        case "ARROWS_ESCAPE": return arrowsEscape(random, difficulty, options.level);
+        // Cada ruta agrupa todas las celdas que ocupa su cuerpo. Así la cabeza y
+        // cada tramo de la flecha participan por igual en las colisiones.
+        case "ARROWS_ESCAPE": return arrowsEscapeFilled(random, difficulty, options.level);
         case "PACMAN_ARENA": return { board: [[cell(null, true)]], answers: [[null]], meta: { actionMode: true, engine: "PACMAN_TILEMAP", difficulty } };
         case "CROSS_LETTERS": return crossLetters(random, difficulty);
         case "SECRET_CODE": return secretCode(random, difficulty);
@@ -682,45 +684,37 @@ function arrowsEscape(random, difficulty, requestedLevel) {
  * Flechas en Fuga 3: la dificultad define la resolución del lienzo y todas las
  * celdas de la silueta pertenecen a una ruta. Las rutas agrupan celdas contiguas
  * para mantener una lectura clara incluso en pantallas pequeñas.
- * 10 familias x 10 variantes forman un catálogo procedural de 100 niveles.
+ * 20 familias x 5 variantes forman un catálogo procedural de 100 niveles.
  */
 function arrowsEscapeFilled(random, difficulty, requestedLevel) {
-    const dimension = sizeFor(difficulty, 5, 7, 8, 20);
+    const dimension = sizeFor(difficulty, 24, 30, 36, 42);
     const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? random.int(1, 100))));
-    const family = (level - 1) % 10;
-    const variant = Math.floor((level - 1) / 10);
-    const names = ["Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato"];
-    const pixelTemplates = [
-        [".###.", "#####", "#####", ".###.", "..#.."], [".###.", "#####", "#####", "#####", ".###."],
-        ["..#..", "#####", ".###.", ".#.#.", "#...#"], ["..#..", ".###.", "#####", ".###.", "..#.."],
-        ["#####", "#.#.#", "#####", ".###.", "..#.."], ["..#..", ".###.", ".###.", "#####", "#.#.#"],
-        ["#...#", "##.##", ".###.", "##.##", "#...#"], ["#.#.#", "#####", ".###.", ".###.", "#####"],
-        [".###.", "#####", "#####", "#####", "#.#.#"], ["#...#", "#####", "#####", "#.#.#", ".###."],
+    const family = (level - 1) % 20;
+    const variant = Math.floor((level - 1) / 20);
+    const names = [
+        "Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato",
+        "Ancla", "Pez", "Ave", "Árbol", "Flor", "Calavera", "Relámpago", "Llave", "Luna", "Trofeo",
     ];
-    const templateFilled = pixelTemplates[family].flatMap((row, y) => [...row].map((value, x) => value === "#" ? y * 5 + x : -1)).filter((value) => value >= 0);
-    const removedTemplateCell = variant === 0 ? -1 : templateFilled[(variant - 1) % templateFilled.length];
     const occupied = [];
     const inside = (gx, gy) => {
-        if (dimension <= 8) {
-            const templateX = Math.min(4, Math.floor(gx * 5 / dimension));
-            const templateY = Math.min(4, Math.floor(gy * 5 / dimension));
-            const encoded = templateY * 5 + templateX;
-            return pixelTemplates[family][templateY][templateX] === "#" && encoded !== removedTemplateCell;
-        }
-        const margin = dimension <= 8 ? 0 : 1;
+        const margin = 1;
         if (gx < margin || gy < margin || gx >= dimension - margin || gy >= dimension - margin)
             return false;
-        const wobble = Math.sin((gx * 3 + gy * 5 + variant * 11) * .11) * (.003 + variant * .0007);
-        const scale = .90 - variant * .009;
-        const x = ((gx + .5) / dimension * 2 - 1) / scale;
-        const y = ((gy + .5) / dimension * 2 - 1) / scale + wobble;
+        const scale = .88 - variant * .012;
+        const rawX = ((gx + .5) / dimension * 2 - 1) / scale;
+        const rawY = ((gy + .5) / dimension * 2 - 1) / scale;
+        const angle = (variant - 2) * .026 + Math.sin(family * 2.17) * .012;
+        const x = rawX * Math.cos(angle) - rawY * Math.sin(angle);
+        const y = rawX * Math.sin(angle) + rawY * Math.cos(angle)
+            + Math.sin((gx * 7 + gy * 11 + level * 13) * .09) * (.002 + variant * .0008);
+        const ellipse = (cx, cy, rx, ry) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2 <= 1;
         switch (family) {
             case 0: {
                 const hx = x * 1.18;
                 const hy = -y * 1.12 + .08;
                 return Math.pow(hx * hx + hy * hy - 1, 3) - hx * hx * hy * hy * hy <= 0;
             }
-            case 1: return x * x + y * y <= .78 && !(x > .1 && x < .34 && y < -.73);
+            case 1: return x * x + y * y <= .58 || (Math.abs(y - x * .28) < .075 && Math.abs(x) < .92);
             case 2: {
                 const angle = Math.atan2(y, x);
                 const radius = Math.hypot(x, y);
@@ -732,7 +726,28 @@ function arrowsEscapeFilled(random, difficulty, requestedLevel) {
             case 6: return ((x + .42) ** 2 / .25 + (y + .08) ** 2 / .55 <= 1) || ((x - .42) ** 2 / .25 + (y + .08) ** 2 / .55 <= 1) || Math.abs(x) < .10;
             case 7: return y > -.65 && y < .70 && (y > -.05 || Math.abs(x) < .72) && !(y < -.18 && Math.abs(x) > .48) && !(y < -.30 && Math.abs(x) < .16);
             case 8: return (y < .48 && (x * x + (y + .20) ** 2 <= .62)) || (y >= .15 && y < .72 && Math.abs(x) < .62 && Math.floor((x + .62) * 6) % 2 === 0);
-            default: return (x * x + (y + .05) ** 2 <= .58) || (y < -.42 && ((x + .42) ** 2 + (y + .55) ** 2 < .16 || (x - .42) ** 2 + (y + .55) ** 2 < .16));
+            case 9: return (x * x + (y + .05) ** 2 <= .58) || (y < -.42 && ((x + .42) ** 2 + (y + .55) ** 2 < .16 || (x - .42) ** 2 + (y + .55) ** 2 < .16));
+            case 10: return ellipse(0, -.48, .22, .22) || (Math.abs(x) < .11 && y > -.46 && y < .62)
+                || (y > .46 && y < .66 && Math.abs(x) < .62 - Math.abs(y - .54) * 1.4);
+            case 11: return ellipse(-.10, 0, .66, .42) || (x > .48 && x < .90 && Math.abs(y) < (x - .42) * .72);
+            case 12: return ellipse(-.34, -.02, .48, .24) || ellipse(.34, -.02, .48, .24)
+                || ellipse(0, .30, .18, .48);
+            case 13: return (y < .34 && y > -.82 && Math.abs(x) < .18 + (y + .82) * .62)
+                || (y >= .25 && y < .80 && Math.abs(x) < .14);
+            case 14: return ellipse(0, 0, .24, .24) || [0, 1, 2, 3, 4, 5].some((petal) => {
+                const a = petal * Math.PI / 3;
+                return ellipse(Math.cos(a) * .48, Math.sin(a) * .48, .27, .20);
+            });
+            case 15: return ellipse(0, -.18, .62, .58) || (y > .20 && y < .72 && Math.abs(x) < .40)
+                || (y > .48 && Math.abs(x) < .58 && Math.floor((x + .58) * 8) % 2 === 0);
+            case 16: return (x > -.22 && x < .30 && y > -.82 && y < .10 && x < -.22 + (y + .82) * .72)
+                || (x > -.34 && x < .22 && y > -.10 && y < .84 && x > .22 - (y + .10) * .66);
+            case 17: return (ellipse(-.40, -.22, .34, .34) && !ellipse(-.40, -.22, .15, .15))
+                || (Math.abs(y - .05) < .12 && x > -.18 && x < .78) || (x > .48 && y > .02 && y < .42 && (Math.abs(x - .56) < .10 || Math.abs(x - .75) < .10));
+            case 18: return ellipse(0, 0, .66, .82) && !ellipse(.28, -.08, .58, .72);
+            default: return (y > -.68 && y < .12 && Math.abs(x) < .58 - (y + .20) * .25)
+                || (Math.abs(x) > .45 && Math.abs(x) < .78 && y > -.52 && y < -.05)
+                || (Math.abs(x) < .11 && y > .02 && y < .62) || (y > .50 && y < .72 && Math.abs(x) < .42);
         }
     };
     for (let y = 0; y < dimension; y += 1)
@@ -742,15 +757,16 @@ function arrowsEscapeFilled(random, difficulty, requestedLevel) {
         }
     const unassigned = new Set(occupied);
     const routes = [];
-    const maxCellsPerArrow = sizeFor(difficulty, 5, 9, 18, 36);
+    const maxCellsPerArrow = sizeFor(difficulty, 7, 9, 11, 14);
     const arrowTypes = ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"];
     const cardinal = [[1, 0], [0, 1], [-1, 0], [0, -1]];
     while (unassigned.size > 0) {
         const first = unassigned.values().next().value;
         const path = [first];
         unassigned.delete(first);
-        let previousDirection = routes.length % 4;
-        while (path.length < maxCellsPerArrow) {
+        let previousDirection = random.int(0, 3);
+        const targetLength = random.int(2, maxCellsPerArrow);
+        while (path.length < targetLength) {
             const current = path[path.length - 1];
             const x = current % dimension;
             const y = Math.floor(current / dimension);
@@ -761,7 +777,8 @@ function arrowsEscapeFilled(random, difficulty, requestedLevel) {
             if (!candidates.length)
                 break;
             const straight = candidates.find((candidate) => candidate.directionIndex === previousDirection);
-            const selected = straight && random.next() < .90 ? straight : candidates[random.int(0, candidates.length - 1)];
+            // Mezcla rectas y giros de 90° sin una cadencia repetitiva reconocible.
+            const selected = straight && random.next() < .58 ? straight : candidates[random.int(0, candidates.length - 1)];
             path.push(selected.encoded);
             unassigned.delete(selected.encoded);
             previousDirection = selected.directionIndex;
@@ -781,18 +798,112 @@ function arrowsEscapeFilled(random, difficulty, requestedLevel) {
             { name: "DOWN", x: 0, y: 1, distance: dimension - 1 - headY }, { name: "LEFT", x: -1, y: 0, distance: headX },
         ].sort((a, b) => a.distance - b.distance);
         const exit = exits[0];
-        const renderCodes = path.length > 1 ? path.slice(-2) : path;
-        const points = renderCodes.map((encoded) => ({ x: ((encoded % dimension) + .5) / dimension, y: (Math.floor(encoded / dimension) + .5) / dimension }));
+        const points = path.map((encoded) => ({ x: ((encoded % dimension) + .5) / dimension, y: (Math.floor(encoded / dimension) + .5) / dimension }));
         if (points.length === 1)
             points.unshift({ x: points[0].x - exit.x * .55 / dimension, y: points[0].y - exit.y * .55 / dimension });
         const index = routes.length;
         routes.push({
             id: `route-${index}`, points, direction: exit.name, exitVector: { x: exit.x, y: exit.y },
-            thickness: .70 / dimension, blockType: index > 0 && index % 41 === 0 ? "BOMB" : "NORMAL",
+            thickness: .34 / dimension, blockType: index > 0 && index % 41 === 0 ? "BOMB" : "NORMAL",
             arrowType: arrowTypes[index % arrowTypes.length], memberKeys: [`0:${index}`],
             removalOrder: exit.distance * 100_000 + index, gridX: headX, gridY: headY, gridCells: path,
+            colorIndex: random.int(0, 4),
         });
     }
+    const exits = [
+        { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
+        { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
+    ];
+    const pending = new Set(routes);
+    let removalOrder = 0;
+    const canHeadEscape = (route, exit) => {
+        const occupiedByOthers = new Set([...pending]
+            .filter((candidate) => candidate !== route)
+            .flatMap((candidate) => candidate.gridCells));
+        const projection = (encoded) => (encoded % dimension) * exit.x + Math.floor(encoded / dimension) * exit.y;
+        const first = route.gridCells[0];
+        const last = route.gridCells[route.gridCells.length - 1];
+        const head = projection(first) > projection(last) ? first : last;
+        let x = head % dimension + exit.x;
+        let y = Math.floor(head / dimension) + exit.y;
+        while (x >= 0 && x < dimension && y >= 0 && y < dimension) {
+            if (occupiedByOthers.has(y * dimension + x))
+                return false;
+            x += exit.x;
+            y += exit.y;
+        }
+        return true;
+    };
+    while (pending.size > 0) {
+        let selected = null;
+        for (const route of pending) {
+            const available = exits.filter((exit) => canHeadEscape(route, exit));
+            if (available.length) {
+                selected = { route, exit: available[random.int(0, available.length - 1)] };
+                break;
+            }
+        }
+        if (!selected) {
+            // Una forma excesivamente entrelazada puede formar un ciclo. Dividimos
+            // sólo una de sus rutas; las celdas siguen totalmente ocupadas, pero el
+            // catálogo conserva una solución demostrable sin atravesar cuerpos.
+            const victim = [...pending].sort((a, b) => b.gridCells.length - a.gridCells.length)[0];
+            if (victim.gridCells.length <= 1)
+                throw new Error("No se pudo construir una etapa resoluble de Flechas en Fuga");
+            pending.delete(victim);
+            routes.splice(routes.indexOf(victim), 1);
+            victim.gridCells.forEach((encoded) => {
+                const x = (encoded % dimension + .5) / dimension;
+                const y = (Math.floor(encoded / dimension) + .5) / dimension;
+                const child = {
+                    ...victim,
+                    id: "pending",
+                    points: [{ x, y: y + .45 / dimension }, { x, y }],
+                    gridX: encoded % dimension,
+                    gridY: Math.floor(encoded / dimension),
+                    gridCells: [encoded],
+                    blockType: "NORMAL",
+                };
+                routes.push(child);
+                pending.add(child);
+            });
+            continue;
+        }
+        const { route, exit } = selected;
+        const first = route.gridCells[0];
+        const last = route.gridCells[route.gridCells.length - 1];
+        const projection = (encoded) => (encoded % dimension) * exit.x + Math.floor(encoded / dimension) * exit.y;
+        if (projection(first) > projection(last))
+            route.gridCells.reverse();
+        const head = route.gridCells[route.gridCells.length - 1];
+        route.direction = exit.name;
+        route.exitVector = { x: exit.x, y: exit.y };
+        route.gridX = head % dimension;
+        route.gridY = Math.floor(head / dimension);
+        route.points = route.gridCells.map((encoded) => ({
+            x: (encoded % dimension + .5) / dimension,
+            y: (Math.floor(encoded / dimension) + .5) / dimension,
+        }));
+        if (route.points.length === 1) {
+            route.points.unshift({
+                x: route.points[0].x - exit.x * .88 / dimension,
+                y: route.points[0].y - exit.y * .88 / dimension,
+            });
+        }
+        route.removalOrder = removalOrder++;
+        pending.delete(route);
+    }
+    routes.forEach((route, index) => {
+        route.id = `route-${index}`;
+        route.memberKeys = [`0:${index}`];
+        route.arrowType = arrowTypes[index % arrowTypes.length];
+        // Agrupación cromática orgánica semejante a las referencias, pero con una
+        // perturbación procedural por nivel para evitar mosaicos repetidos.
+        const region = Math.floor(route.gridX * 3 / dimension) + Math.floor(route.gridY * 3 / dimension) * 3;
+        route.colorIndex = (region + family + variant + route.colorIndex) % 5;
+        if (index > 0 && index % 41 === 0)
+            route.blockType = "BOMB";
+    });
     const board = [routes.map((route) => cell(route.direction, true, {
             arrow: route.direction, shapeId: route.id, shapeAnchor: true, pathType: "GRID_FILLED",
             blockType: route.blockType, arrowType: route.arrowType,
@@ -806,7 +917,8 @@ function arrowsEscapeFilled(random, difficulty, requestedLevel) {
             level, levelCount: 100, figureFamily: names[family], figureName: `${names[family]} ${variant + 1}`,
             occupiedCells: occupied.length, totalBlocks: routes.length, totalShapes: routes.length,
             maxFailedTaps: sizeFor(difficulty, 10, 8, 6, 5), rotatePowerUses: 2, missilePowerUses: 1,
-            shapes: routes, instructions: `Nivel ${level}/100 · ${names[family]}. Cada celda de la figura está cubierta por una flecha.`, difficulty,
+            densityProfile: "GRID_PATHS",
+            shapes: routes, instructions: `Nivel ${level}/100 · ${names[family]}. Libera las rutas que recorren la cuadrícula sin atravesar otros cuerpos.`, difficulty,
         },
     };
 }

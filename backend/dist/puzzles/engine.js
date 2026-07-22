@@ -270,7 +270,12 @@ export class GenericPuzzleEngine {
                 return this.reject(move.requestId, "INVALID_MOVE", "Espera tu turno económico");
         }
         const cell = this.board[move.row][move.col];
-        if (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048", "TOWER_DEFENSE"].includes(this.gameType))) {
+        const requestedAction = typeof move.val === "object" && move.val !== null
+            ? String(move.val.action ?? "").toUpperCase()
+            : String(move.val ?? "").toUpperCase();
+        const towerGlobalAction = this.gameType === "TOWER_DEFENSE"
+            && ["START_WAVE", "EMP", "ORBITAL", "REPAIR", "OVERCLOCK"].includes(requestedAction);
+        if (!towerGlobalAction && (cell.isBlocked || (cell.ownerId !== null && !["NURIKABE", "HITORI", "CROSS_LETTERS", "WORD_SEARCH", "CAPITAL_ARENA", "HANGMAN", "ARROWS_ESCAPE", "CHECKERS", "CHESS_TACTICS", "MERGE_2048", "TOWER_DEFENSE"].includes(this.gameType)))) {
             return this.reject(move.requestId, "CELL_LOCKED", "Casilla ya resuelta");
         }
         const outcome = this.applySpecificMove(playerId, move, cell, game, now);
@@ -823,6 +828,10 @@ export class GenericPuzzleEngine {
                         : next === "DOWN" ? { x: 0, y: 1 } : { x: -1, y: 0 };
                 members.forEach(({ cell: member }) => { member.value = next; member.meta.arrow = next; });
                 this.arrowRotateUses.set(playerId, used + 1);
+                // La geometría de Flechas normalmente se envía una sola vez. Girar sí
+                // cambia exitVector/direction, por lo que el siguiente snapshot debe ser
+                // completo; de lo contrario Android conservaría la flecha anterior.
+                this.arrowStaticGeometryChanged = true;
                 return { correct: true, points: 0 };
             }
             if (action === "MISSILE") {
@@ -2002,6 +2011,8 @@ export class GenericPuzzleEngine {
                 const occupied = new Set(activeRoutes.filter((candidate) => candidate.id !== route.id)
                     .flatMap((candidate) => candidate.gridCells?.map((encoded) => `${encoded % dimension}:${Math.floor(encoded / dimension)}`)
                     ?? [`${candidate.gridX}:${candidate.gridY}`]));
+                // Solo el rayo frontal de la punta decide; los cuerpos rivales que lo
+                // cruzan siguen actuando como obstáculos.
                 let x = route.gridX + vector.x;
                 let y = route.gridY + vector.y;
                 while (x >= 0 && x < dimension && y >= 0 && y < dimension) {

@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -558,23 +559,15 @@ private fun canGridArrowEscape(route: SerpentineRoute, routes: List<SerpentineRo
             else sequenceOf(candidate.gridX?.let { gx -> candidate.gridY?.let { gy -> gx to gy } }).filterNotNull()
         }
         .toHashSet()
-    val body = if (route.gridCells.isNotEmpty()) route.gridCells.map { it % dimension to it / dimension }
-        else listOf(headX to headY)
-    // La predicción local replica al servidor: se barre el cuerpo entero por
-    // la trayectoria. Esto evita animar como libre una flecha cuyo tallo corta
-    // otra ruta aunque la punta por sí sola tenga salida.
-    for (shift in 1..dimension * 2) {
-        var hasPartInside = false
-        body.forEach { (bodyX, bodyY) ->
-            val x = bodyX + stepX * shift
-            val y = bodyY + stepY * shift
-            if (x !in 0 until dimension || y !in 0 until dimension) return@forEach
-            hasPartInside = true
-            if ((x to y) in occupied) return false
-        }
-        if (!hasPartInside) return true
+    // Predicción idéntica al servidor: solo se comprueba el rayo de la punta.
+    var x = headX + stepX
+    var y = headY + stepY
+    while (x in 0 until dimension && y in 0 until dimension) {
+        if ((x to y) in occupied) return false
+        x += stepX
+        y += stepY
     }
-    return false
+    return true
 }
 
 private fun routeLength(points: List<Offset>): Float = points.zipWithNext().sumOf { (a, b) ->
@@ -2484,7 +2477,28 @@ private fun PuzzleHints(state: GenericBoardState) {
     val instructions = state.meta["instructions"]?.toString()
     if (!instructions.isNullOrBlank()) Text(instructions, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
     when (state.gameType) {
-        GameType.WORD_SEARCH -> Text("Palabras: ${(state.meta["words"] as? List<*>)?.joinToString(" · ").orEmpty()}")
+        GameType.WORD_SEARCH -> {
+            val words = (state.meta["words"] as? List<*>)?.map { it.toString() }.orEmpty()
+            val found = (state.meta["foundWords"] as? List<*>)?.map { it.toString() }?.toSet().orEmpty()
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Palabras", fontWeight = FontWeight.Black)
+                words.chunked(3).forEach { rowWords ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowWords.forEach { word ->
+                            val completed = word in found
+                            Text(
+                                text = if (completed) "✓ $word" else word,
+                                modifier = Modifier.weight(1f),
+                                color = if (completed) Color(0xFF15803D) else MaterialTheme.colorScheme.onSurface,
+                                fontWeight = if (completed) FontWeight.Bold else FontWeight.Medium,
+                                textDecoration = if (completed) TextDecoration.LineThrough else TextDecoration.None,
+                            )
+                        }
+                        repeat(3 - rowWords.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
         GameType.CROSSWORD -> Column(Modifier.fillMaxWidth()) {
             (state.meta["clues"] as? List<*>)?.forEachIndexed { index, clue -> Text("${index + 1}. $clue", fontSize = 12.sp) }
         }

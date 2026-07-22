@@ -107,6 +107,7 @@ class LocalPuzzleEngineTest {
             ),
         )
         assertTrue(result.accepted)
+        assertTrue((placement.getValue("word") as String) in (result.state.meta["foundWords"] as List<*>))
         assertTrue((placement.getValue("word") as String).indices.all { offset ->
             val row = (placement.getValue("startRow") as Int) + (placement.getValue("rowStep") as Int) * offset
             val col = (placement.getValue("startCol") as Int) + (placement.getValue("colStep") as Int) * offset

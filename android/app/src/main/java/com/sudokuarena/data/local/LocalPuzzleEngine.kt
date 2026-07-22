@@ -117,6 +117,9 @@ class LocalPuzzleEngine(
                 "discardedByPlayer" to mapOf(OWNER to hangmanDiscarded.toList()),
                 "hiddenWord" to board.firstOrNull().orEmpty().map { it.value?.toString() ?: "_" },
             ) else emptyMap<String, Any?>() +
+            if (gameType == GameType.WORD_SEARCH) mapOf(
+                "foundWords" to foundWords.sorted(),
+            ) else emptyMap<String, Any?>() +
             if (gameType in setOf(GameType.CHECKERS, GameType.CHESS_TACTICS)) mapOf(
                 "localTurnTeam" to localTurnTeam,
                 "instructions" to "Modo Hotseat: entrega el teléfono al equipo ${if (localTurnTeam == "BLUE") "Azul" else "Rojo"}.",
@@ -804,19 +807,14 @@ class LocalPuzzleEngine(
                             },
                         )).asSequence()
                 }.toHashSet()
-            val body = (route["gridCells"] as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }
-                ?.map { it % dimension to it / dimension }.orEmpty().ifEmpty { listOf(gridX to gridY) }
-            for (shift in 1..dimension * 2) {
-                var hasPartInside = false
-                body.forEach { (bodyX, bodyY) ->
-                    val x = bodyX + stepX * shift; val y = bodyY + stepY * shift
-                    if (x !in 0 until dimension || y !in 0 until dimension) return@forEach
-                    hasPartInside = true
-                    if ((x to y) in occupied) return false
-                }
-                if (!hasPartInside) return true
+            var x = gridX + stepX
+            var y = gridY + stepY
+            while (x in 0 until dimension && y in 0 until dimension) {
+                if ((x to y) in occupied) return false
+                x += stepX
+                y += stepY
             }
-            return false
+            return true
         }
         fun pointsOf(raw: Map<*, *>): List<Pair<Float, Float>> = (raw["points"] as? List<*>)?.mapNotNull { item ->
             val point = item as? Map<*, *> ?: return@mapNotNull null
@@ -935,24 +933,23 @@ class LocalPuzzleEngine(
             routes += Route(path, direction, vector.first, vector.second, headX, headY)
         }
         val pending = routes.toMutableSet()
-        fun canSweep(route: Route, vx: Int, vy: Int): Boolean {
+        fun canHeadEscape(route: Route, vx: Int, vy: Int): Boolean {
             val others = pending.asSequence().filter { it !== route }.flatMap { it.cells.asSequence() }.toHashSet()
-            for (shift in 1..dimension * 2) {
-                var insideBoard = false
-                route.cells.forEach { encoded ->
-                    val x = encoded % dimension + vx * shift; val y = encoded / dimension + vy * shift
-                    if (x !in 0 until dimension || y !in 0 until dimension) return@forEach
-                    insideBoard = true
-                    if (y * dimension + x in others) return false
-                }
-                if (!insideBoard) return true
+            fun projection(encoded: Int) = encoded % dimension * vx + encoded / dimension * vy
+            val head = if (projection(route.cells.first()) > projection(route.cells.last())) route.cells.first() else route.cells.last()
+            var x = head % dimension + vx
+            var y = head / dimension + vy
+            while (x in 0 until dimension && y in 0 until dimension) {
+                if (y * dimension + x in others) return false
+                x += vx
+                y += vy
             }
-            return false
+            return true
         }
         var order = 0
         while (pending.isNotEmpty()) {
             val selection = pending.firstNotNullOfOrNull { route ->
-                cardinal.shuffled(random).firstOrNull { (vx, vy) -> canSweep(route, vx, vy) }?.let { route to it }
+                cardinal.shuffled(random).firstOrNull { (vx, vy) -> canHeadEscape(route, vx, vy) }?.let { route to it }
             }
             if (selection == null) {
                 val victim = pending.maxBy { it.cells.size }

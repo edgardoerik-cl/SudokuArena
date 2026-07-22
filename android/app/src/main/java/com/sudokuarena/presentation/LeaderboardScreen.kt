@@ -109,7 +109,7 @@ fun LeaderboardBottomSheet(
                     val rows = if (selectedTab == 0) {
                         data!!.time.map { HonorRow(it.rank, it.nickname, formatHonorTime(it.bestTimeMs ?: 0)) }
                     } else {
-                        data!!.score.map { HonorRow(it.rank, it.nickname, "${it.bestScore ?: 0} pts · ${it.wins} V") }
+                        data!!.score.map { HonorRow(it.rank, it.nickname, "${it.bestScore ?: 0} pts") }
                     }
                     if (rows.isEmpty()) {
                         Text("Aún no hay campeones. ¡Sé el primero!", modifier = Modifier.padding(30.dp))

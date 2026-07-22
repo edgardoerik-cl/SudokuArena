@@ -7,7 +7,7 @@ import { Pool } from "pg";
  */
 export class LeaderboardStore {
     filePath;
-    data = { version: 2, players: {}, gameRecords: {} };
+    data = { version: 3, players: {}, gameRecords: {}, gameAttempts: [] };
     ready;
     writeQueue = Promise.resolve();
     pool;
@@ -91,26 +91,27 @@ export class LeaderboardStore {
         await this.ready;
         if (this.pool) {
             const [time, score] = await Promise.all([
-                this.pool.query(`SELECT nickname, best_time_ms, wins FROM multi_arena_game_leaderboard
-           WHERE game_type=$1 AND best_time_ms IS NOT NULL ORDER BY best_time_ms ASC, updated_at ASC LIMIT 10`, [gameType]),
-                this.pool.query(`SELECT nickname, best_score, wins FROM multi_arena_game_leaderboard
-           WHERE game_type=$1 AND best_score > 0 ORDER BY best_score DESC, wins DESC, updated_at ASC LIMIT 10`, [gameType])
+                this.pool.query(`SELECT nickname, elapsed_ms, won FROM multi_arena_game_attempts
+           WHERE game_type=$1 AND elapsed_ms IS NOT NULL
+           ORDER BY elapsed_ms ASC, score DESC, created_at ASC LIMIT 10`, [gameType]),
+                this.pool.query(`SELECT nickname, score, elapsed_ms, won FROM multi_arena_game_attempts
+           WHERE game_type=$1 ORDER BY score DESC, elapsed_ms ASC NULLS LAST, created_at ASC LIMIT 10`, [gameType])
             ]);
             return {
                 gameType,
-                time: time.rows.map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestTimeMs: Number(entry.best_time_ms), wins: Number(entry.wins) })),
-                score: score.rows.map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestScore: Number(entry.best_score), wins: Number(entry.wins) }))
+                time: time.rows.map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestTimeMs: Number(entry.elapsed_ms), wins: entry.won ? 1 : 0 })),
+                score: score.rows.map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestScore: Number(entry.score), wins: entry.won ? 1 : 0 }))
             };
         }
-        const records = Object.values(this.data.gameRecords?.[gameType] ?? {});
+        const attempts = (this.data.gameAttempts ?? []).filter((entry) => entry.gameType === gameType);
         return {
             gameType,
-            time: records.filter((entry) => entry.bestTimeMs !== null)
-                .sort((a, b) => a.bestTimeMs - b.bestTimeMs || b.bestScore - a.bestScore).slice(0, 10)
-                .map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestTimeMs: entry.bestTimeMs, wins: entry.wins })),
-            score: records.filter((entry) => entry.bestScore > 0)
-                .sort((a, b) => b.bestScore - a.bestScore || b.wins - a.wins).slice(0, 10)
-                .map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestScore: entry.bestScore, wins: entry.wins }))
+            time: attempts.filter((entry) => entry.elapsedMs !== null)
+                .sort((a, b) => a.elapsedMs - b.elapsedMs || b.score - a.score || a.createdAt - b.createdAt).slice(0, 10)
+                .map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestTimeMs: entry.elapsedMs, wins: entry.won ? 1 : 0 })),
+            score: attempts.slice()
+                .sort((a, b) => b.score - a.score || (a.elapsedMs ?? Number.MAX_SAFE_INTEGER) - (b.elapsedMs ?? Number.MAX_SAFE_INTEGER) || a.createdAt - b.createdAt).slice(0, 10)
+                .map((entry, index) => ({ rank: index + 1, nickname: entry.nickname, bestScore: entry.score, wins: entry.won ? 1 : 0 }))
         };
     }
     async recordGame(gameType, nickname, elapsedMs, score, won = false) {
@@ -119,15 +120,32 @@ export class LeaderboardStore {
         const validTime = Number.isFinite(elapsedMs) && elapsedMs > 0 ? Math.round(elapsedMs) : null;
         const validScore = Math.max(0, Math.round(score));
         if (this.pool) {
-            await this.pool.query(`INSERT INTO multi_arena_game_leaderboard (nickname_key, game_type, nickname, best_time_ms, best_score, wins, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,NOW())
-         ON CONFLICT (nickname_key, game_type) DO UPDATE SET nickname=EXCLUDED.nickname,
-           best_time_ms=CASE WHEN EXCLUDED.best_time_ms IS NULL THEN multi_arena_game_leaderboard.best_time_ms
-             ELSE LEAST(COALESCE(multi_arena_game_leaderboard.best_time_ms, EXCLUDED.best_time_ms), EXCLUDED.best_time_ms) END,
-           best_score=GREATEST(multi_arena_game_leaderboard.best_score, EXCLUDED.best_score),
-           wins=multi_arena_game_leaderboard.wins + EXCLUDED.wins, updated_at=NOW()`, [clean.toLocaleLowerCase("es"), gameType, clean, validTime, validScore, won ? 1 : 0]);
+            const client = await this.pool.connect();
+            try {
+                await client.query("BEGIN");
+                await client.query(`INSERT INTO multi_arena_game_attempts (game_type, nickname, elapsed_ms, score, won, created_at)
+           VALUES ($1,$2,$3,$4,$5,NOW())`, [gameType, clean, validTime, validScore, won]);
+                await client.query(`INSERT INTO multi_arena_game_leaderboard (nickname_key, game_type, nickname, best_time_ms, best_score, wins, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,NOW())
+           ON CONFLICT (nickname_key, game_type) DO UPDATE SET nickname=EXCLUDED.nickname,
+             best_time_ms=CASE WHEN EXCLUDED.best_time_ms IS NULL THEN multi_arena_game_leaderboard.best_time_ms
+               ELSE LEAST(COALESCE(multi_arena_game_leaderboard.best_time_ms, EXCLUDED.best_time_ms), EXCLUDED.best_time_ms) END,
+             best_score=GREATEST(multi_arena_game_leaderboard.best_score, EXCLUDED.best_score),
+             wins=multi_arena_game_leaderboard.wins + EXCLUDED.wins, updated_at=NOW()`, [clean.toLocaleLowerCase("es"), gameType, clean, validTime, validScore, won ? 1 : 0]);
+                await client.query("COMMIT");
+            }
+            catch (error) {
+                await client.query("ROLLBACK");
+                throw error;
+            }
+            finally {
+                client.release();
+            }
             return;
         }
+        (this.data.gameAttempts ??= []).push({
+            gameType, nickname: clean, elapsedMs: validTime, score: validScore, won, createdAt: Date.now()
+        });
         const gameRecords = this.data.gameRecords ??= {};
         const records = gameRecords[gameType] ??= {};
         const key = clean.toLocaleLowerCase("es");
@@ -162,8 +180,16 @@ export class LeaderboardStore {
     async load() {
         try {
             const parsed = JSON.parse(await readFile(this.filePath, "utf8"));
-            if ((parsed?.version === 1 || parsed?.version === 2) && parsed.players && typeof parsed.players === "object") {
-                this.data = { ...parsed, version: 2, gameRecords: parsed.gameRecords ?? {} };
+            if ((parsed?.version === 1 || parsed?.version === 2 || parsed?.version === 3) && parsed.players && typeof parsed.players === "object") {
+                const migratedAttempts = parsed.gameAttempts ?? Object.entries(parsed.gameRecords ?? {}).flatMap(([gameType, records]) => Object.values(records ?? {}).map((record) => ({
+                    gameType: gameType,
+                    nickname: record.nickname,
+                    elapsedMs: record.bestTimeMs,
+                    score: record.bestScore,
+                    won: record.wins > 0,
+                    createdAt: record.updatedAt,
+                })));
+                this.data = { ...parsed, version: 3, gameRecords: parsed.gameRecords ?? {}, gameAttempts: migratedAttempts };
             }
         }
         catch (error) {
@@ -190,6 +216,25 @@ export class LeaderboardStore {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (nickname_key, game_type)
       )`);
+        await this.pool.query(`CREATE TABLE IF NOT EXISTS multi_arena_game_attempts (
+        id BIGSERIAL PRIMARY KEY,
+        source_key TEXT UNIQUE NULL,
+        game_type TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        elapsed_ms BIGINT NULL,
+        score INTEGER NOT NULL DEFAULT 0,
+        won BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+        await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_multi_arena_attempts_time
+       ON multi_arena_game_attempts (game_type, elapsed_ms ASC) WHERE elapsed_ms IS NOT NULL`);
+        await this.pool.query(`CREATE INDEX IF NOT EXISTS idx_multi_arena_attempts_score
+       ON multi_arena_game_attempts (game_type, score DESC)`);
+        // Conserva el mejor dato historico agregado una sola vez al migrar.
+        await this.pool.query(`INSERT INTO multi_arena_game_attempts (source_key, game_type, nickname, elapsed_ms, score, won, created_at)
+       SELECT 'legacy:' || nickname_key || ':' || game_type, game_type, nickname, best_time_ms, best_score, wins > 0, updated_at
+       FROM multi_arena_game_leaderboard
+       ON CONFLICT (source_key) DO NOTHING`);
     }
     async persist() {
         await mkdir(dirname(this.filePath), { recursive: true });

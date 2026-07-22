@@ -32,7 +32,7 @@ describe("LeaderboardStore", () => {
     ]);
   });
 
-  it("mantiene tiempo y puntaje independientes para cada juego", async () => {
+  it("mantiene intentos independientes por juego y permite repetir jugador en el top", async () => {
     const store = new LeaderboardStore(file);
     await store.recordGame("MINESWEEPER", "Ada", 80_000, 120, true);
     await store.recordGame("MINESWEEPER", "Ada", 95_000, 180, false);
@@ -42,10 +42,12 @@ describe("LeaderboardStore", () => {
     const mines = await store.topGame("MINESWEEPER");
     assert.deepEqual(mines.time.map((entry) => [entry.nickname, entry.bestTimeMs]), [
       ["Linus", 75_000],
-      ["Ada", 80_000]
+      ["Ada", 80_000],
+      ["Ada", 95_000]
     ]);
     assert.deepEqual(mines.score.map((entry) => [entry.nickname, entry.bestScore]), [
       ["Ada", 180],
+      ["Ada", 120],
       ["Linus", 100]
     ]);
 

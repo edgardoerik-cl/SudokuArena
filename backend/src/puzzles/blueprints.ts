@@ -817,27 +817,27 @@ function arrowsEscapeFilled(random: SeededRandom, difficulty: PuzzleDifficulty, 
   ];
   const pending = new Set<PackedRoute>(routes);
   let removalOrder = 0;
-  const canSweepBody = (route: PackedRoute, exit: CardinalExit): boolean => {
+  const canHeadEscape = (route: PackedRoute, exit: CardinalExit): boolean => {
     const occupiedByOthers = new Set([...pending]
       .filter((candidate) => candidate !== route)
       .flatMap((candidate) => candidate.gridCells));
-    for (let shift = 1; shift <= dimension * 2; shift += 1) {
-      let hasPartInside = false;
-      for (const encoded of route.gridCells) {
-        const x = encoded % dimension + exit.x * shift;
-        const y = Math.floor(encoded / dimension) + exit.y * shift;
-        if (x < 0 || x >= dimension || y < 0 || y >= dimension) continue;
-        hasPartInside = true;
-        if (occupiedByOthers.has(y * dimension + x)) return false;
-      }
-      if (!hasPartInside) return true;
+    const projection = (encoded: number) => (encoded % dimension) * exit.x + Math.floor(encoded / dimension) * exit.y;
+    const first = route.gridCells[0]!;
+    const last = route.gridCells[route.gridCells.length - 1]!;
+    const head = projection(first) > projection(last) ? first : last;
+    let x = head % dimension + exit.x;
+    let y = Math.floor(head / dimension) + exit.y;
+    while (x >= 0 && x < dimension && y >= 0 && y < dimension) {
+      if (occupiedByOthers.has(y * dimension + x)) return false;
+      x += exit.x;
+      y += exit.y;
     }
-    return false;
+    return true;
   };
   while (pending.size > 0) {
     let selected: { route: PackedRoute; exit: CardinalExit } | null = null;
     for (const route of pending) {
-      const available = exits.filter((exit) => canSweepBody(route, exit));
+      const available = exits.filter((exit) => canHeadEscape(route, exit));
       if (available.length) {
         selected = { route, exit: available[random.int(0, available.length - 1)]! };
         break;

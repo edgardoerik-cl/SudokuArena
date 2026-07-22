@@ -156,6 +156,7 @@ fun AboutScreen(availableUpdate: AppUpdateInfo? = null, onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
+            "8.12.0 · Flechas valida solo su punta; Top 10 por intento y palabras encontradas tachadas.",
             "8.11.9 · Flechas sobre cuadrícula, 100 figuras densas y poder Girar reparado.",
             "8.11.8 · Flechas sin fondos y con color neón unificado.",
             "8.11.7 · Flechas con cuerpo físico y catálogo completo en el menú.",

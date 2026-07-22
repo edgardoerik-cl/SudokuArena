@@ -1,5 +1,7 @@
 export const BOARD_SIZE = 9;
-export const APP_VERSION = "8.8.0";
+export const APP_VERSION = "8.12.0";
+export const APP_VERSION_CODE = 59;
+export const APP_DOWNLOAD_URL = "https://drive.google.com/drive/folders/1iL8AaQgfRDqrBTnQ11-EBoMYz_KOGlXc?usp=drive_link";
 export const MAX_PLAYERS = 4;
 export const CELL_POINTS = 10;
 export const SECTION_POINTS = 100;
