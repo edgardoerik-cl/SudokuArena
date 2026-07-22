@@ -826,6 +826,10 @@ export class GenericPuzzleEngine {
             : next === "DOWN" ? { x: 0, y: 1 } : { x: -1, y: 0 };
         members.forEach(({ cell: member }) => { member.value = next; member.meta.arrow = next; });
         this.arrowRotateUses.set(playerId, used + 1);
+        // La geometría de Flechas normalmente se envía una sola vez. Girar sí
+        // cambia exitVector/direction, por lo que el siguiente snapshot debe ser
+        // completo; de lo contrario Android conservaría la flecha anterior.
+        this.arrowStaticGeometryChanged = true;
         return { correct: true, points: 0 };
       }
       if (action === "MISSILE") {

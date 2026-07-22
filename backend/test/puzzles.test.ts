@@ -322,7 +322,7 @@ describe("motor genérico de puzzles", () => {
       gridCells: number[];
     }>;
     assert.equal(blueprint.meta.pathModel, "SERPENTINE_V2");
-    assert.equal(blueprint.meta.logicalColumns, 20);
+    assert.equal(blueprint.meta.logicalColumns, 42);
     assert.equal(blueprint.meta.levelCount, 100);
     assert.equal(blueprint.meta.filledSilhouette, true);
     assert.ok(shapes.some((shape) => shape.gridCells.length > 1), "debe haber flechas cuyo cuerpo ocupe varias celdas");
@@ -343,7 +343,7 @@ describe("motor genérico de puzzles", () => {
     const dimensions = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((difficulty) =>
       Number(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: `dimension-${difficulty}`, difficulty }).meta.logicalColumns)
     );
-    assert.deepEqual(dimensions, [5, 7, 8, 20]);
+    assert.deepEqual(dimensions, [24, 30, 36, 42]);
     const levelNames = new Set(Array.from({ length: 100 }, (_unused, index) =>
       String(createPuzzleBlueprint("ARROWS_ESCAPE", { seed: "catalog", difficulty: "EASY", level: index + 1 }).meta.figureName)
     ));
@@ -355,8 +355,9 @@ describe("motor genérico de puzzles", () => {
       const players = new ArenaGame(`arrows-catalog-${level}`);
       players.addPlayer("bot", "Bot_Flechas", true);
       players.startMatch({ gameType: "ARROWS_ESCAPE", powersEnabled: false, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "HARD" }, "bot");
+      const difficulty = (["EASY", "MEDIUM", "HARD", "EXPERT"] as const)[(level - 1) % 4]!;
       const engine = new GenericPuzzleEngine("ARROWS_ESCAPE", `arrows-catalog-${level}`, {
-        seed: `solvable-${level}`, difficulty: "EXPERT", level,
+        seed: `solvable-${level}`, difficulty, level,
       });
       const routeCount = engine.snapshot(players).columns;
       for (let moveIndex = 0; moveIndex < routeCount && !engine.snapshot(players).completed
@@ -368,6 +369,21 @@ describe("motor genérico de puzzles", () => {
       const finalState = engine.snapshot(players);
       assert.ok(finalState.completed || Number(finalState.meta.level) !== level, `la etapa ${level} debe poder vaciarse`);
     }
+  });
+
+  it("Flechas sincroniza inmediatamente una rotación de 90 grados", () => {
+    const players = new ArenaGame("arrows-rotate");
+    players.addPlayer("p1", "Giro");
+    players.startMatch({ gameType: "ARROWS_ESCAPE", powersEnabled: true, teamMode: "FFA", tileType: "NUMBERS", botDifficulty: "MEDIUM" }, "p1");
+    const engine = new GenericPuzzleEngine("ARROWS_ESCAPE", "arrows-rotate", { seed: "rotate-visible", difficulty: "MEDIUM", level: 7 });
+    const before = engine.snapshot(players);
+    const previousDirection = String((before.meta.shapes as Array<{ direction: string }>)[0]!.direction);
+    const result = engine.makeMove("p1", { requestId: "rotate", row: 0, col: 0, val: { action: "ROTATE" } }, players);
+    assert.equal(result.accepted, true);
+    const after = engine.snapshot(players);
+    const direction = String((after.meta.shapes as Array<{ direction: string }>)[0]!.direction);
+    assert.notEqual(direction, previousDirection);
+    assert.equal(engine.consumeStaticGeometryChanged(), true, "debe forzar un snapshot con la nueva dirección");
   });
 
   it("Reactor Chain acepta el toque directo de un grupo conectado", () => {

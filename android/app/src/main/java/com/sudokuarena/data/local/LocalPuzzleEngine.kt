@@ -295,6 +295,17 @@ class LocalPuzzleEngine(
             if (action == "ROTATE") {
                 if (arrowRotateUses >= 2) return reject("No quedan rotaciones")
                 val next = when (cell.value?.toString()) { "UP" -> "RIGHT"; "RIGHT" -> "DOWN"; "DOWN" -> "LEFT"; else -> "UP" }
+                val vector = when (next) {
+                    "UP" -> mapOf("x" to 0, "y" to -1); "RIGHT" -> mapOf("x" to 1, "y" to 0)
+                    "DOWN" -> mapOf("x" to 0, "y" to 1); else -> mapOf("x" to -1, "y" to 0)
+                }
+                val shapes = (blueprint.meta["shapes"] as? List<*>)?.mapIndexed { index, raw ->
+                    val shape = raw as? Map<*, *> ?: return@mapIndexed raw
+                    if (index != col) shape else shape.entries.associate { it.key.toString() to it.value } + mapOf(
+                        "direction" to next, "exitVector" to vector,
+                    )
+                }.orEmpty()
+                blueprint = blueprint.copy(meta = blueprint.meta + ("shapes" to shapes))
                 replace(row, col, cell.copy(value = next, meta = cell.meta + ("arrow" to next)))
                 arrowRotateUses++
                 return accept(0)
@@ -436,7 +447,7 @@ class LocalPuzzleEngine(
         if (gameType == GameType.ARROWS_ESCAPE && board.firstOrNull().orEmpty().all { it.ownerId == OWNER }) {
             val currentLevel = (blueprint.meta["level"] as? Number)?.toInt() ?: 1
             if (currentLevel < 100) {
-                blueprint = arrowsEscape(currentLevel + 1)
+                blueprint = arrowsEscapeGridPaths(currentLevel + 1)
                 board = blueprint.board
                 arrowRotateUses = 0
                 arrowMissileUses = 0
@@ -486,7 +497,7 @@ class LocalPuzzleEngine(
         GameType.MINESWEEPER -> mines(); GameType.WORD_SEARCH -> words(); GameType.CROSSWORD -> crossword(); GameType.TIC_TAC_TOE -> ticTacToe()
         GameType.DOTS_AND_BOXES -> dots(); GameType.KAKURO -> kakuro(); GameType.MATHDOKU -> mathdoku(); GameType.HITORI -> hitori()
         GameType.NURIKABE -> nurikabe(); GameType.BRIDGES -> bridges()
-        GameType.HANGMAN -> hangman(); GameType.ARROWS_ESCAPE -> arrowsEscape()
+        GameType.HANGMAN -> hangman(); GameType.ARROWS_ESCAPE -> arrowsEscapeGridPaths()
         GameType.CROSS_LETTERS -> crossLetters(); GameType.SECRET_CODE -> secretCode()
         GameType.CAPITAL_ARENA -> capitalArena(); GameType.NEXUS_ZERO -> nexusZero()
         GameType.CHECKERS -> checkers()
@@ -793,13 +804,19 @@ class LocalPuzzleEngine(
                             },
                         )).asSequence()
                 }.toHashSet()
-            var x = gridX + stepX
-            var y = gridY + stepY
-            while (x in 0 until dimension && y in 0 until dimension) {
-                if ((x to y) in occupied) return false
-                x += stepX; y += stepY
+            val body = (route["gridCells"] as? List<*>)?.mapNotNull { (it as? Number)?.toInt() }
+                ?.map { it % dimension to it / dimension }.orEmpty().ifEmpty { listOf(gridX to gridY) }
+            for (shift in 1..dimension * 2) {
+                var hasPartInside = false
+                body.forEach { (bodyX, bodyY) ->
+                    val x = bodyX + stepX * shift; val y = bodyY + stepY * shift
+                    if (x !in 0 until dimension || y !in 0 until dimension) return@forEach
+                    hasPartInside = true
+                    if ((x to y) in occupied) return false
+                }
+                if (!hasPartInside) return true
             }
-            return true
+            return false
         }
         fun pointsOf(raw: Map<*, *>): List<Pair<Float, Float>> = (raw["points"] as? List<*>)?.mapNotNull { item ->
             val point = item as? Map<*, *> ?: return@mapNotNull null
@@ -841,6 +858,156 @@ class LocalPuzzleEngine(
         }
     }
 
+    private fun arrowsEscapeGridPaths(requestedLevel: Int = 1): Blueprint {
+        class Route(
+            var cells: MutableList<Int>, var direction: String, var vectorX: Int, var vectorY: Int,
+            var gridX: Int, var gridY: Int, var removalOrder: Int = 0,
+            var colorIndex: Int = random.nextInt(5), var blockType: String = "NORMAL",
+        )
+        val dimension = size(24, 30, 36, 42)
+        val level = requestedLevel.coerceIn(1, 100)
+        val family = (level - 1) % 20
+        val variant = (level - 1) / 20
+        val names = listOf(
+            "Corazón", "Planeta", "Estrella", "Diamante", "Escudo", "Cohete", "Mariposa", "Corona", "Fantasma", "Gato",
+            "Ancla", "Pez", "Ave", "Árbol", "Flor", "Calavera", "Relámpago", "Llave", "Luna", "Trofeo",
+        )
+        fun inside(gridX: Int, gridY: Int): Boolean {
+            if (gridX !in 1 until dimension - 1 || gridY !in 1 until dimension - 1) return false
+            val scale = .88 - variant * .012
+            val rawX = ((gridX + .5) / dimension * 2 - 1) / scale
+            val rawY = ((gridY + .5) / dimension * 2 - 1) / scale
+            val angle = (variant - 2) * .026 + kotlin.math.sin(family * 2.17) * .012
+            val x = rawX * kotlin.math.cos(angle) - rawY * kotlin.math.sin(angle)
+            val y = rawX * kotlin.math.sin(angle) + rawY * kotlin.math.cos(angle) +
+                kotlin.math.sin((gridX * 7 + gridY * 11 + level * 13) * .09) * (.002 + variant * .0008)
+            fun ellipse(cx: Double, cy: Double, rx: Double, ry: Double) = ((x - cx) / rx) * ((x - cx) / rx) + ((y - cy) / ry) * ((y - cy) / ry) <= 1
+            return when (family) {
+                0 -> { val hx = x * 1.18; val hy = -y * 1.12 + .08; val base = hx * hx + hy * hy - 1; base * base * base - hx * hx * hy * hy * hy <= 0 }
+                1 -> x * x + y * y <= .58 || (kotlin.math.abs(y - x * .28) < .075 && kotlin.math.abs(x) < .92)
+                2 -> { val a = kotlin.math.atan2(y, x); kotlin.math.hypot(x, y) <= .46 + .28 * maxOf(0.0, kotlin.math.cos(5 * a)) }
+                3 -> kotlin.math.abs(x) + kotlin.math.abs(y) <= .88
+                4 -> y > -.82 && y < .72 && kotlin.math.abs(x) <= .72 - maxOf(0.0, y) * .55 && (y < .42 || kotlin.math.abs(x) < .42 + (.72 - y))
+                5 -> (kotlin.math.abs(x) < .28 && y > -.82 && y < .58) || (y > .25 && y < .78 && kotlin.math.abs(x) < .62 - y * .45) || (y < -.55 && kotlin.math.abs(x) < .48 + y * .35)
+                6 -> ellipse(-.42, -.08, .50, .74) || ellipse(.42, -.08, .50, .74) || kotlin.math.abs(x) < .10
+                7 -> y > -.65 && y < .70 && (y > -.05 || kotlin.math.abs(x) < .72) && !(y < -.18 && kotlin.math.abs(x) > .48) && !(y < -.30 && kotlin.math.abs(x) < .16)
+                8 -> (y < .48 && x * x + (y + .20) * (y + .20) <= .62) || (y >= .15 && y < .72 && kotlin.math.abs(x) < .62 && (((x + .62) * 6).toInt() % 2 == 0))
+                9 -> x * x + (y + .05) * (y + .05) <= .58 || (y < -.42 && (ellipse(-.42, -.55, .40, .40) || ellipse(.42, -.55, .40, .40)))
+                10 -> ellipse(0.0, -.48, .22, .22) || (kotlin.math.abs(x) < .11 && y > -.46 && y < .62) || (y > .46 && y < .66 && kotlin.math.abs(x) < .62 - kotlin.math.abs(y - .54) * 1.4)
+                11 -> ellipse(-.10, 0.0, .66, .42) || (x > .48 && x < .90 && kotlin.math.abs(y) < (x - .42) * .72)
+                12 -> ellipse(-.34, -.02, .48, .24) || ellipse(.34, -.02, .48, .24) || ellipse(0.0, .30, .18, .48)
+                13 -> (y < .34 && y > -.82 && kotlin.math.abs(x) < .18 + (y + .82) * .62) || (y >= .25 && y < .80 && kotlin.math.abs(x) < .14)
+                14 -> ellipse(0.0, 0.0, .24, .24) || (0..5).any { petal -> val a = petal * Math.PI / 3; ellipse(kotlin.math.cos(a) * .48, kotlin.math.sin(a) * .48, .27, .20) }
+                15 -> ellipse(0.0, -.18, .62, .58) || (y > .20 && y < .72 && kotlin.math.abs(x) < .40) || (y > .48 && kotlin.math.abs(x) < .58 && (((x + .58) * 8).toInt() % 2 == 0))
+                16 -> (x > -.22 && x < .30 && y > -.82 && y < .10 && x < -.22 + (y + .82) * .72) || (x > -.34 && x < .22 && y > -.10 && y < .84 && x > .22 - (y + .10) * .66)
+                17 -> (ellipse(-.40, -.22, .34, .34) && !ellipse(-.40, -.22, .15, .15)) || (kotlin.math.abs(y - .05) < .12 && x > -.18 && x < .78) || (x > .48 && y > .02 && y < .42 && (kotlin.math.abs(x - .56) < .10 || kotlin.math.abs(x - .75) < .10))
+                18 -> ellipse(0.0, 0.0, .66, .82) && !ellipse(.28, -.08, .58, .72)
+                else -> (y > -.68 && y < .12 && kotlin.math.abs(x) < .58 - (y + .20) * .25) || (kotlin.math.abs(x) > .45 && kotlin.math.abs(x) < .78 && y > -.52 && y < -.05) || (kotlin.math.abs(x) < .11 && y > .02 && y < .62) || (y > .50 && y < .72 && kotlin.math.abs(x) < .42)
+            }
+        }
+        val occupied = buildList { for (y in 0 until dimension) for (x in 0 until dimension) if (inside(x, y)) add(y * dimension + x) }
+        val unassigned = linkedSetOf<Int>().apply { addAll(occupied) }
+        val routes = mutableListOf<Route>()
+        val cardinal = listOf(1 to 0, 0 to 1, -1 to 0, 0 to -1)
+        val maxCells = size(7, 9, 11, 14)
+        while (unassigned.isNotEmpty()) {
+            val path = mutableListOf(unassigned.first())
+            unassigned.remove(path.first())
+            var previousDirection = random.nextInt(4)
+            val targetLength = random.nextInt(2, maxCells + 1)
+            while (path.size < targetLength) {
+                val current = path.last(); val x = current % dimension; val y = current / dimension
+                val candidates = cardinal.mapIndexedNotNull { directionIndex, (dx, dy) ->
+                    val nextX = x + dx; val nextY = y + dy; val encoded = nextY * dimension + nextX
+                    if (nextX in 0 until dimension && nextY in 0 until dimension && encoded in unassigned) directionIndex to encoded else null
+                }
+                if (candidates.isEmpty()) break
+                val straight = candidates.firstOrNull { it.first == previousDirection }
+                val selected = if (straight != null && random.nextFloat() < .58f) straight else candidates.random(random)
+                path += selected.second; unassigned.remove(selected.second); previousDirection = selected.first
+            }
+            val head = path.last(); val headX = head % dimension; val headY = head / dimension
+            val exits = listOf(
+                Triple("UP", 0 to -1, headY), Triple("RIGHT", 1 to 0, dimension - 1 - headX),
+                Triple("DOWN", 0 to 1, dimension - 1 - headY), Triple("LEFT", -1 to 0, headX),
+            ).sortedBy { it.third }
+            val (direction, vector) = exits.first()
+            routes += Route(path, direction, vector.first, vector.second, headX, headY)
+        }
+        val pending = routes.toMutableSet()
+        fun canSweep(route: Route, vx: Int, vy: Int): Boolean {
+            val others = pending.asSequence().filter { it !== route }.flatMap { it.cells.asSequence() }.toHashSet()
+            for (shift in 1..dimension * 2) {
+                var insideBoard = false
+                route.cells.forEach { encoded ->
+                    val x = encoded % dimension + vx * shift; val y = encoded / dimension + vy * shift
+                    if (x !in 0 until dimension || y !in 0 until dimension) return@forEach
+                    insideBoard = true
+                    if (y * dimension + x in others) return false
+                }
+                if (!insideBoard) return true
+            }
+            return false
+        }
+        var order = 0
+        while (pending.isNotEmpty()) {
+            val selection = pending.firstNotNullOfOrNull { route ->
+                cardinal.shuffled(random).firstOrNull { (vx, vy) -> canSweep(route, vx, vy) }?.let { route to it }
+            }
+            if (selection == null) {
+                val victim = pending.maxBy { it.cells.size }
+                check(victim.cells.size > 1) { "Nivel de Flechas sin salida" }
+                pending.remove(victim); routes.remove(victim)
+                victim.cells.forEach { encoded ->
+                    Route(mutableListOf(encoded), "UP", 0, -1, encoded % dimension, encoded / dimension).also {
+                        routes += it; pending += it
+                    }
+                }
+                continue
+            }
+            val (route, vector) = selection
+            fun projection(encoded: Int) = encoded % dimension * vector.first + encoded / dimension * vector.second
+            if (projection(route.cells.first()) > projection(route.cells.last())) route.cells.reverse()
+            val head = route.cells.last()
+            route.direction = when (vector) { 0 to -1 -> "UP"; 1 to 0 -> "RIGHT"; 0 to 1 -> "DOWN"; else -> "LEFT" }
+            route.vectorX = vector.first; route.vectorY = vector.second
+            route.gridX = head % dimension; route.gridY = head / dimension; route.removalOrder = order++
+            pending.remove(route)
+        }
+        val arrowTypes = listOf("STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR")
+        val shapes = routes.mapIndexed { index, route ->
+            val points = route.cells.map { encoded -> mapOf("x" to ((encoded % dimension) + .5f) / dimension, "y" to ((encoded / dimension) + .5f) / dimension) }.toMutableList()
+            if (points.size == 1) points.add(0, mapOf("x" to (route.gridX + .5f - route.vectorX * .88f) / dimension, "y" to (route.gridY + .5f - route.vectorY * .88f) / dimension))
+            val region = route.gridX * 3 / dimension + route.gridY * 3 / dimension * 3
+            route.colorIndex = (region + family + variant + route.colorIndex) % 5
+            route.blockType = if (index > 0 && index % 41 == 0) "BOMB" else "NORMAL"
+            mapOf<String, Any?>(
+                "id" to "route-$index", "points" to points, "direction" to route.direction,
+                "exitVector" to mapOf("x" to route.vectorX, "y" to route.vectorY), "thickness" to .34f / dimension,
+                "blockType" to route.blockType, "arrowType" to arrowTypes[index % arrowTypes.size], "memberKeys" to listOf("0:$index"),
+                "removalOrder" to route.removalOrder, "gridX" to route.gridX, "gridY" to route.gridY,
+                "gridCells" to route.cells, "colorIndex" to route.colorIndex,
+            )
+        }
+        return result(
+            listOf(shapes.mapIndexed { index, shape -> GenericCell(shape["direction"], true, meta = mapOf(
+                "arrow" to shape["direction"], "shapeId" to "route-$index", "shapeAnchor" to true,
+                "pathType" to "GRID_PATHS", "blockType" to shape["blockType"], "arrowType" to shape["arrowType"],
+            )) }),
+            listOf(shapes.map { it["direction"] }),
+            mapOf(
+                "freeSpace" to true, "pathModel" to "SERPENTINE_V2", "gridBased" to true, "filledSilhouette" to true,
+                "worldWidth" to dimension, "worldHeight" to dimension, "logicalRows" to dimension, "logicalColumns" to dimension,
+                "level" to level, "levelCount" to 100, "figureFamily" to names[family], "figureName" to "${names[family]} ${variant + 1}",
+                "occupiedCells" to occupied.size, "totalBlocks" to routes.size, "totalShapes" to routes.size,
+                "maxFailedTaps" to size(10, 8, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
+                "densityProfile" to "GRID_PATHS", "shapes" to shapes,
+                "instructions" to "Nivel $level/100 · ${names[family]}. Libera las rutas sin atravesar otros cuerpos.",
+            ),
+        )
+    }
+
+    @Suppress("unused")
     private fun arrowsEscapeFilled(): Blueprint {
         val dimension = size(5, 7, 8, 20)
         val level = random.nextInt(1, 101)

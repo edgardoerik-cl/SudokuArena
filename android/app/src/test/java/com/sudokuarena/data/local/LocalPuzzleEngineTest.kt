@@ -157,6 +157,20 @@ class LocalPuzzleEngineTest {
     }
 
     @Test
+    fun `Flechas local gira la dirección visible y conserva cuerpos densos`() {
+        val engine = LocalPuzzleEngine(GameType.ARROWS_ESCAPE, seed = 73L)
+        val initial = engine.snapshot()
+        val shapes = initial.meta["shapes"] as List<Map<*, *>>
+        assertTrue(shapes.size >= 20)
+        assertTrue(shapes.any { ((it["gridCells"] as? List<*>)?.size ?: 0) > 1 })
+        val previous = shapes.first()["direction"]
+        val result = engine.move(0, 0, mapOf("action" to "ROTATE"))
+        assertTrue(result.accepted)
+        val rotated = result.state.meta["shapes"] as List<Map<*, *>>
+        assertTrue(rotated.first()["direction"] != previous)
+    }
+
+    @Test
     fun `Damas hotseat conserva equipo tras rechazo y rota tras jugada valida`() {
         val engine = LocalPuzzleEngine(GameType.CHECKERS, seed = 3L)
         val invalid = engine.move(2, 1, mapOf("targetRow" to 7, "targetCol" to 6))

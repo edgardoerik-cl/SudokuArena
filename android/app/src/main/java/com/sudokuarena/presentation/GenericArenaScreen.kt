@@ -474,6 +474,7 @@ private data class SerpentineRoute(
     val gridX: Int?,
     val gridY: Int?,
     val gridCells: List<Int>,
+    val colorIndex: Int,
 )
 
 private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRoute> {
@@ -513,6 +514,7 @@ private fun parseSerpentineRoutes(state: GenericBoardState): List<SerpentineRout
             gridX = (route["gridX"] as? Number)?.toInt(),
             gridY = (route["gridY"] as? Number)?.toInt(),
             gridCells = gridCells,
+            colorIndex = (route["colorIndex"] as? Number)?.toInt() ?: 0,
         )
     }.orEmpty()
 }
@@ -598,7 +600,6 @@ private fun shiftedRoute(route: SerpentineRoute, progress: Float): List<Offset> 
 @Composable
 private fun SerpentineArrowsBoard(
     state: GenericBoardState,
-    players: Map<String, Player>,
     enabled: Boolean,
     localPlayerId: String?,
     onDirectMove: (Int, Int, Any?) -> Unit,
@@ -606,7 +607,6 @@ private fun SerpentineArrowsBoard(
 ) {
     val routes = remember(state.meta) { parseSerpentineRoutes(state) }
     val gridBased = state.meta["gridBased"] == true
-    val cellComplete = state.meta["densityProfile"] in setOf("CELL_COMPLETE", "TILE_COMPLETE")
     val logicalDimension = (state.meta["logicalColumns"] as? Number)?.toInt() ?: 100
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
@@ -622,6 +622,12 @@ private fun SerpentineArrowsBoard(
     var panOffset by remember(state.gameId) { mutableStateOf(Offset.Zero) }
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
+    val routePalette = remember {
+        listOf(
+            Color(0xFF00A86B), Color(0xFF2463EB), Color(0xFFFF2D35),
+            Color(0xFFFF8A00), Color(0xFF8247FF),
+        )
+    }
     LaunchedEffect(removed) {
         val fresh = removed - previousRemoved
         previousRemoved = removed
@@ -631,11 +637,6 @@ private fun SerpentineArrowsBoard(
             flight.snapTo(0f)
             flight.animateTo(1f, tween(720, easing = androidx.compose.animation.core.FastOutSlowInEasing))
             exiting = emptySet()
-        }
-    }
-    val palette = remember(players) {
-        players.values.map { parseGenericColor(it.colorHex) }.ifEmpty {
-            listOf(Color(0xFF00B8D4), Color(0xFF7C3AED), Color(0xFFFF2D8D), Color(0xFFFF8A00))
         }
     }
     fun screenPoint(point: Offset): Offset = Offset(
@@ -661,9 +662,10 @@ private fun SerpentineArrowsBoard(
                         if (!enabled) return@detectTapGestures
                         val screen = Offset(tap.x / size.width, tap.y / size.height)
                         val normalized = Offset((screen.x - panOffset.x - .5f) / zoom + .5f, (screen.y - panOffset.y - .5f) / zoom + .5f)
+                        val hitRadius = (1.15f / logicalDimension).coerceIn(.018f, .045f)
                         val route = routes.filterNot { it.memberKeys.all(removed::contains) }
                             .minByOrNull { candidate -> minOf(pointToRouteDistance(normalized, candidate), (normalized - candidate.points.last()).getDistance() * .75f) }
-                            ?.takeIf { candidate -> pointToRouteDistance(normalized, candidate) <= .055f || (normalized - candidate.points.last()).getDistance() <= .075f }
+                            ?.takeIf { candidate -> pointToRouteDistance(normalized, candidate) <= hitRadius || (normalized - candidate.points.last()).getDistance() <= hitRadius * 1.45f }
                             ?: return@detectTapGestures
                         val member = route.memberKeys.first().split(":").map(String::toInt)
                         val canEscape = if (gridBased) canGridArrowEscape(route, routes, removed, logicalDimension)
@@ -681,11 +683,15 @@ private fun SerpentineArrowsBoard(
                     }
                 },
         ) {
-            val gridColor = Color(0xFF38BDF8).copy(alpha = .08f)
-            repeat(21) { index ->
-                val x = size.width * index / 20f; val y = size.height * index / 20f
-                drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), 1f)
-                drawLine(gridColor, Offset(0f, y), Offset(size.width, y), 1f)
+            // La ruta vive exactamente sobre las líneas de esta cuadrícula.
+            repeat(logicalDimension) { index ->
+                val raw = (index + .5f) / logicalDimension
+                val vertical = screenPoint(Offset(raw, .5f)).x * size.width
+                val horizontal = screenPoint(Offset(.5f, raw)).y * size.height
+                val major = index % 5 == 0
+                val gridColor = Color(0xFF7DD3FC).copy(alpha = if (major) .20f else .10f)
+                drawLine(gridColor, Offset(vertical, 0f), Offset(vertical, size.height), if (major) 1.35f else .7f)
+                drawLine(gridColor, Offset(0f, horizontal), Offset(size.width, horizontal), if (major) 1.35f else .7f)
             }
             routes.forEachIndexed { index, route ->
                 val isRemoved = route.memberKeys.all(removed::contains)
@@ -702,9 +708,7 @@ private fun SerpentineArrowsBoard(
                     moveTo(points.first().x, points.first().y)
                     for (pointIndex in 1..points.lastIndex) lineTo(points[pointIndex].x, points[pointIndex].y)
                 }
-                // Una sola tinta para todo el puzzle: la forma se reconoce por
-                // su geometría, sin placas ni colores distintos por tipo.
-                val color = Color(0xFF00E5FF)
+                val color = routePalette[route.colorIndex.mod(routePalette.size)]
                 val alpha = if (isExiting) 1f - flight.value * .75f else 1f
                 val stroke = if (gridBased) maxOf(1.35f, route.thickness * size.minDimension * zoom)
                     else maxOf(7f, route.thickness * size.minDimension)
@@ -721,8 +725,8 @@ private fun SerpentineArrowsBoard(
                 }
                 val side = Offset(-tangent.y, tangent.x)
                 val cellExtent = size.minDimension / logicalDimension * zoom
-                val headLength = if (cellComplete) maxOf(stroke * 1.7f, cellExtent * .24f)
-                    else stroke * if (gridBased) 1.7f else 2.2f
+                val headLength = if (gridBased) maxOf(stroke * 2.0f, cellExtent * .31f)
+                    else stroke * 2.2f
                 val arrowHead = Path().apply {
                     moveTo(head.x, head.y)
                     lineTo(head.x - tangent.x * headLength + side.x * headLength * .62f, head.y - tangent.y * headLength + side.y * headLength * .62f)
@@ -779,7 +783,7 @@ private fun AnimatedArrowsGrid(
 ) {
     val serpentineRoutes = remember(state.meta) { parseSerpentineRoutes(state) }
     if (serpentineRoutes.isNotEmpty()) {
-        SerpentineArrowsBoard(state, players, enabled, localPlayerId, onDirectMove, modifier)
+        SerpentineArrowsBoard(state, enabled, localPlayerId, onDirectMove, modifier)
         return
     }
     val textMeasurer = rememberTextMeasurer()
