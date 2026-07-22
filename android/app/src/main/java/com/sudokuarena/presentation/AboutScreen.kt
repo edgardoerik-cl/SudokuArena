@@ -51,9 +51,9 @@ fun AboutScreen(onBack: () -> Unit) {
                 detectTapGestures { tap ->
                     if (tap.y < size.height * .18f || tap.y > size.height * .88f) return@detectTapGestures
                     selectedCharacter = when {
-                        tap.x < size.width * .36f -> 0
-                        tap.x < size.width * .63f -> 1
-                        else -> 2
+                        tap.x < size.width * .34f -> 0
+                        tap.x < size.width * .66f -> 2
+                        else -> 1
                     }
                     jumpTrigger++
                 }
@@ -74,7 +74,7 @@ fun AboutScreen(onBack: () -> Unit) {
                 pixel(centerX - 8, top + 13, 8f, 7f, Color.White.copy(alpha = alpha * .75f))
             }
             // Sulley: gran silueta azul con manchas violetas y cuernos.
-            val sx = size.width * .20f; val sy = floor - 112f - bounce - characterJump(0)
+            val sx = size.width * .12f; val sy = floor - 112f - bounce - characterJump(0)
             pixel(sx, sy, 76f, 96f, Color(0xFF27B7D8)); pixel(sx + 12, sy - 18, 52f, 30f, Color(0xFF27B7D8));
             pixel(sx + 5, sy - 25, 12f, 16f, Color(0xFFE9E1C2)); pixel(sx + 59, sy - 25, 12f, 16f, Color(0xFFE9E1C2))
             repeat(5) { i -> pixel(sx + 10f + (i * 13f) % 50f, sy + 20f + (i % 3) * 22f, 10f, 10f, Color(0xFF7C3AED)) }
@@ -83,18 +83,21 @@ fun AboutScreen(onBack: () -> Unit) {
             pixel(sx + 18, sy - 5, 14f, 15f, Color.White); pixel(sx + 44, sy - 5, 14f, 15f, Color.White)
             pixel(sx + 23, sy, 6f, 8f, Color(0xFF2878B8)); pixel(sx + 47, sy, 6f, 8f, Color(0xFF2878B8))
             pixel(sx + 24, sy + 9, 28f, 17f, Color(0xFF8DE1DF)); pixel(sx + 32, sy + 8, 12f, 8f, Color(0xFF26364B))
-            pixel(sx + 29, sy + 23, 18f, 5f, Color(0xFF3A1830)); pixel(sx + 29, sy + 23, 5f, 7f, Color.White); pixel(sx + 42, sy + 23, 5f, 7f, Color.White)
+            // Sonrisa abierta en tres niveles para que nunca parezca un gesto neutro.
+            pixel(sx + 25, sy + 20, 26f, 5f, Color(0xFF3A1830)); pixel(sx + 29, sy + 25, 18f, 6f, Color(0xFF3A1830))
+            pixel(sx + 34, sy + 28, 8f, 4f, Color(0xFFFF7A9D)); pixel(sx + 26, sy + 20, 5f, 6f, Color.White); pixel(sx + 45, sy + 20, 5f, 6f, Color.White)
             pixel(sx + 14, sy + 38, 8f, 8f, Color(0xFF79D9E8)); pixel(sx + 52, sy + 48, 8f, 8f, Color(0xFF79D9E8))
             pixel(sx + 9, sy + 82, 18f, 9f, Color(0xFF1688B5)); pixel(sx + 49, sy + 82, 18f, 9f, Color(0xFF1688B5))
             repeat(3) { claw -> pixel(sx + 8 + claw * 6f, sy + 91, 4f, 7f, Color(0xFFE9E1C2)); pixel(sx + 49 + claw * 6f, sy + 91, 4f, 7f, Color(0xFFE9E1C2)) }
             pixel(sx - 12, sy + 18 + beat * 12f, 16f, 58f, Color(0xFF27B7D8)); pixel(sx + 72, sy + 28 - beat * 12f, 16f, 58f, Color(0xFF27B7D8))
             pixelHeart(sx + 38, sy - 70, selectedCharacter == 0)
             // Mike: esfera verde, ojo grande y extremidades danzantes.
-            val mx = size.width * .49f; val my = floor - 72f + bounce - characterJump(1)
+            val mx = size.width * .78f; val my = floor - 72f + bounce - characterJump(1)
             drawCircle(Color(0xFF8BCF2F), 42f, Offset(mx, my)); drawCircle(Color.White, 17f, Offset(mx, my - 8)); drawCircle(Color(0xFF172033), 7f, Offset(mx, my - 8))
             // Mike: ceja expresiva, sonrisa, diente y cuernos.
             pixel(mx - 19, my - 34, 38f, 5f, Color(0xFF315B24))
-            pixel(mx - 16, my + 13, 32f, 10f, Color(0xFF173020)); pixel(mx - 7, my + 13, 14f, 6f, Color.White)
+            pixel(mx - 17, my + 12, 34f, 6f, Color(0xFF173020)); pixel(mx - 13, my + 18, 26f, 7f, Color(0xFF173020))
+            pixel(mx - 7, my + 22, 14f, 5f, Color(0xFFFF7A9D)); pixel(mx - 8, my + 12, 16f, 5f, Color.White)
             pixel(mx - 31, my - 39, 8f, 14f, Color(0xFFE9E1C2)); pixel(mx + 23, my - 39, 8f, 14f, Color(0xFFE9E1C2))
             pixel(mx - 9, my - 12, 5f, 5f, Color.White); pixel(mx + 8, my + 4, 7f, 5f, Color(0xFFAEEB63))
             pixel(mx - 36, my + 4, 7f, 7f, Color(0xFF5A9824)); pixel(mx + 29, my + 4, 7f, 7f, Color(0xFF5A9824))
@@ -102,12 +105,13 @@ fun AboutScreen(onBack: () -> Unit) {
             pixel(mx - 23, my + 34, 9f, 38f, Color(0xFF8BCF2F)); pixel(mx + 14, my + 34, 9f, 38f, Color(0xFF8BCF2F))
             pixelHeart(mx, my - 92, selectedCharacter == 1)
             // Boo: pequeña figura rosa con coletas.
-            val bx = size.width * .73f; val by = floor - 76f - bounce - characterJump(2)
+            val bx = size.width * .45f; val by = floor - 76f - bounce - characterJump(2)
             pixel(bx, by, 44f, 62f, Color(0xFFFF78B5)); pixel(bx + 7, by - 28, 30f, 30f, Color(0xFFF1C6A8))
             pixel(bx - 4, by - 32, 12f, 12f, Color(0xFF3A241F)); pixel(bx + 36, by - 32, 12f, 12f, Color(0xFF3A241F))
             // Boo: flequillo, ojos, nariz y sonrisa pixel art.
             pixel(bx + 7, by - 30, 30f, 7f, Color(0xFF3A241F)); pixel(bx + 12, by - 17, 5f, 7f, Color(0xFF2E2525)); pixel(bx + 27, by - 17, 5f, 7f, Color(0xFF2E2525))
-            pixel(bx + 20, by - 9, 4f, 4f, Color(0xFFD18E7D)); pixel(bx + 17, by - 3, 11f, 4f, Color(0xFF9B4E62))
+            pixel(bx + 20, by - 9, 4f, 4f, Color(0xFFD18E7D))
+            pixel(bx + 14, by - 4, 16f, 4f, Color(0xFF9B4E62)); pixel(bx + 18, by, 8f, 4f, Color(0xFF9B4E62)); pixel(bx + 19, by, 6f, 2f, Color(0xFFFFB0C8))
             pixel(bx + 9, by + 8, 26f, 5f, Color(0xFFFFB0D1)); pixel(bx + 7, by + 24, 30f, 5f, Color(0xFFD94B8C))
             pixel(bx + 5, by + 48, 12f, 12f, Color(0xFF8E5CD9)); pixel(bx + 27, by + 48, 12f, 12f, Color(0xFF8E5CD9))
             pixel(bx + 8, by - 21, 4f, 4f, Color(0xFFFFE5D1)); pixel(bx + 32, by - 21, 4f, 4f, Color(0xFFFFE5D1))
@@ -131,6 +135,7 @@ fun AboutScreen(onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
+            "8.11.4 · Flechas rellena cada celda de la figura; Boo baila al centro.",
             "8.11.3 · Flechas densifica las figuras sin aumentar su grosor.",
             "8.11.2 · Flechas recupera trazos finos y encadena 100 etapas.",
             "8.11.1 · Flechas: lienzos 5×5, 7×7, 8×8 y 20×20.",

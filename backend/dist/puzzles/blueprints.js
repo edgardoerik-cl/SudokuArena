@@ -499,24 +499,21 @@ function arrowsEscape(random, difficulty, requestedLevel) {
         { name: "UP", x: 0, y: -1 }, { name: "RIGHT", x: 1, y: 0 },
         { name: "DOWN", x: 0, y: 1 }, { name: "LEFT", x: -1, y: 0 },
     ];
+    // Una flecha pequeña por cada celda interior: no hay muestreo ni huecos
+    // artificiales. La resolución crece con la dificultad, pero el grosor visual
+    // se normaliza para evitar las flechas gigantes de la versión anterior.
+    const dimension = sizeFor(difficulty, 12, 16, 20, 24);
     const heartCells = [];
-    for (let gy = 4; gy <= 96; gy += 1)
-        for (let gx = 4; gx <= 96; gx += 1) {
-            const x = (gx - 50) / 34;
-            const y = (51 - gy) / 32;
+    for (let gy = 0; gy < dimension; gy += 1)
+        for (let gx = 0; gx < dimension; gx += 1) {
+            const x = (gx + .5 - dimension * .5) / (dimension * .38);
+            const y = (dimension * .51 - gy - .5) / (dimension * .36);
             if (Math.pow(x * x + y * y - 1, 3) - x * x * y * y * y <= 0)
-                heartCells.push({ x: gx / 100, y: gy / 100 });
+                heartCells.push({ x: gx, y: gy });
         }
-    // Densidad suficiente para que la silueta se lea como una figura continua,
-    // conservando trazos finos e independientes (sin volver a bloques gigantes).
-    const requestedCount = sizeFor(difficulty, 72, 128, 192, 320);
     const level = Math.max(1, Math.min(100, Math.round(requestedLevel ?? 1)));
-    // Mantiene la distribucion fina que funcionaba bien antes de introducir las
-    // siluetas rellenas. El desplazamiento cambia la composicion entre etapas sin
-    // convertir cada recorrido en una franja gigante.
-    const stageOffset = (level * 53) % heartCells.length;
-    const selectedCells = Array.from({ length: Math.min(requestedCount, heartCells.length) }, (_unused, index) => heartCells[(Math.floor((index + .5) * heartCells.length / requestedCount) + stageOffset) % heartCells.length]);
-    const arrowThickness = difficulty === "EASY" ? .007 : difficulty === "MEDIUM" ? .006 : difficulty === "HARD" ? .0048 : .0038;
+    const selectedCells = heartCells;
+    const arrowThickness = .075 / dimension;
     const count = selectedCells.length;
     const board = matrix(1, count, () => cell(null, true));
     const answers = matrix(1, count, () => null);
@@ -552,7 +549,8 @@ function arrowsEscape(random, difficulty, requestedLevel) {
         return [head, { x: head.x + vector.x * distance, y: head.y + vector.y * distance }];
     };
     for (let index = 0; index < count; index += 1) {
-        const grid = selectedCells[index];
+        const gridCell = selectedCells[index];
+        const grid = { x: (gridCell.x + .5) / dimension, y: (gridCell.y + .5) / dimension };
         const distances = [
             { name: "UP", x: 0, y: -1, distance: grid.y },
             { name: "RIGHT", x: 1, y: 0, distance: 1 - grid.x },
@@ -567,17 +565,18 @@ function arrowsEscape(random, difficulty, requestedLevel) {
             y: grid.y + back.y * backDistance + side.y * sideDistance,
         });
         const arrowType = ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"][index % 5];
-        const routePoints = arrowType === "STRAIGHT" ? [at(.05), grid]
-            : arrowType === "ELBOW_90" ? [at(.06, .03), at(.06), grid]
-                : arrowType === "L_SHAPE" ? [at(.08, -.03), at(.08), at(.035), grid]
-                    : arrowType === "S_SHAPE" ? [at(.09, .03), at(.09), at(.055), at(.055, -.03), at(.02, -.03), at(.02), grid]
-                        : [at(.10), at(.075), at(.05), at(.025), grid];
+        const unit = 1 / dimension;
+        const routePoints = arrowType === "STRAIGHT" ? [at(.54 * unit), grid]
+            : arrowType === "ELBOW_90" ? [at(.64 * unit, .25 * unit), at(.64 * unit), grid]
+                : arrowType === "L_SHAPE" ? [at(.82 * unit, -.25 * unit), at(.82 * unit), at(.34 * unit), grid]
+                    : arrowType === "S_SHAPE" ? [at(.88 * unit, .22 * unit), at(.88 * unit), at(.54 * unit), at(.54 * unit, -.22 * unit), at(.20 * unit, -.22 * unit), at(.20 * unit), grid]
+                        : [at(.96 * unit), at(.70 * unit), at(.44 * unit), at(.20 * unit), grid];
         const direct = {
             id: `route-${index}`, points: routePoints, direction: exit.name,
             exitVector: { x: exit.x, y: exit.y }, thickness: arrowThickness,
             blockType: index > 0 && index % 97 === 0 ? "BOMB" : "NORMAL",
             arrowType, memberKeys: [`0:${index}`],
-            gridX: Math.round(grid.x * 100), gridY: Math.round(grid.y * 100),
+            gridX: gridCell.x, gridY: gridCell.y,
             removalOrder: Math.round(exit.distance * 100) * 10000 + index,
         };
         shapes.push(direct);
@@ -657,10 +656,10 @@ function arrowsEscape(random, difficulty, requestedLevel) {
             pathModel: "SERPENTINE_V2",
             gridBased: true,
             silhouette: "HEART",
-            worldWidth: 100,
-            worldHeight: 100,
-            logicalRows: 100,
-            logicalColumns: 100,
+            worldWidth: dimension,
+            worldHeight: dimension,
+            logicalRows: dimension,
+            logicalColumns: dimension,
             filledSilhouette: false,
             level,
             levelCount: 100,
@@ -669,7 +668,7 @@ function arrowsEscape(random, difficulty, requestedLevel) {
             totalBlocks: count,
             totalShapes: shapes.length,
             arrowCount: count,
-            densityProfile: "FINE_DENSE",
+            densityProfile: "CELL_COMPLETE",
             maxFailedTaps: sizeFor(difficulty, 8, 7, 6, 5),
             rotatePowerUses: 2,
             missilePowerUses: 1,

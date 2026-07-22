@@ -941,48 +941,41 @@ class LocalPuzzleEngine(
     }
 
     private fun arrowsEscape(requestedLevel: Int = 1): Blueprint {
+        val dimension = size(12, 16, 20, 24)
         val heartCells = buildList {
-            for (gridY in 4..96) for (gridX in 4..96) {
-                val x = (gridX - 50) / 34.0
-                val y = (51 - gridY) / 32.0
+            for (gridY in 0 until dimension) for (gridX in 0 until dimension) {
+                val x = (gridX + .5 - dimension * .5) / (dimension * .38)
+                val y = (dimension * .51 - gridY - .5) / (dimension * .36)
                 val base = x * x + y * y - 1.0
                 if (base * base * base - x * x * y * y * y <= 0.0) {
                     add(gridX to gridY)
                 }
             }
         }
-        val requestedCount = size(72, 128, 192, 320)
         val level = requestedLevel.coerceIn(1, 100)
-        val stageOffset = (level * 53) % heartCells.size
-        val selectedCells = List(requestedCount.coerceAtMost(heartCells.size)) { index ->
-            heartCells[(((index + .5) * heartCells.size / requestedCount).toInt() + stageOffset) % heartCells.size]
-        }
-        val arrowThickness = when (difficulty) {
-            PuzzleDifficulty.EASY -> .007f
-            PuzzleDifficulty.MEDIUM -> .006f
-            PuzzleDifficulty.HARD -> .0048f
-            PuzzleDifficulty.EXPERT -> .0038f
-        }
+        val selectedCells = heartCells
+        val arrowThickness = .075f / dimension
         val shapes = selectedCells.mapIndexed { index, (gridX, gridY) ->
             val exits = listOf(
                 Triple("UP", 0 to -1, gridY),
-                Triple("RIGHT", 1 to 0, 100 - gridX),
-                Triple("DOWN", 0 to 1, 100 - gridY),
+                Triple("RIGHT", 1 to 0, dimension - 1 - gridX),
+                Triple("DOWN", 0 to 1, dimension - 1 - gridY),
                 Triple("LEFT", -1 to 0, gridX),
             )
             val (direction, vector, distance) = exits.minBy { it.third }
-            val x = gridX / 100f
-            val y = gridY / 100f
+            val x = (gridX + .5f) / dimension
+            val y = (gridY + .5f) / dimension
             val backX = -vector.first.toFloat(); val backY = -vector.second.toFloat()
             val sideX = -vector.second.toFloat(); val sideY = vector.first.toFloat()
             fun point(back: Float, side: Float = 0f) = mapOf("x" to x + backX * back + sideX * side, "y" to y + backY * back + sideY * side)
             val arrowType = listOf("STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR")[index % 5]
+            val unit = 1f / dimension
             val points = when (arrowType) {
-                "STRAIGHT" -> listOf(point(.05f), point(0f))
-                "ELBOW_90" -> listOf(point(.06f, .03f), point(.06f), point(0f))
-                "L_SHAPE" -> listOf(point(.08f, -.03f), point(.08f), point(.035f), point(0f))
-                "S_SHAPE" -> listOf(point(.09f, .03f), point(.09f), point(.055f), point(.055f, -.03f), point(.02f, -.03f), point(.02f), point(0f))
-                else -> listOf(point(.10f), point(.075f), point(.05f), point(.025f), point(0f))
+                "STRAIGHT" -> listOf(point(.54f * unit), point(0f))
+                "ELBOW_90" -> listOf(point(.64f * unit, .25f * unit), point(.64f * unit), point(0f))
+                "L_SHAPE" -> listOf(point(.82f * unit, -.25f * unit), point(.82f * unit), point(.34f * unit), point(0f))
+                "S_SHAPE" -> listOf(point(.88f * unit, .22f * unit), point(.88f * unit), point(.54f * unit), point(.54f * unit, -.22f * unit), point(.20f * unit, -.22f * unit), point(.20f * unit), point(0f))
+                else -> listOf(point(.96f * unit), point(.70f * unit), point(.44f * unit), point(.20f * unit), point(0f))
             }
             mapOf(
                 "id" to "route-$index",
@@ -1010,13 +1003,13 @@ class LocalPuzzleEngine(
             mapOf(
                 "freeSpace" to true, "pathModel" to "SERPENTINE_V2", "gridBased" to true,
                 "filledSilhouette" to false,
-                "silhouette" to "HEART", "worldWidth" to 100, "worldHeight" to 100,
-                "logicalRows" to 100, "logicalColumns" to 100,
+                "silhouette" to "HEART", "worldWidth" to dimension, "worldHeight" to dimension,
+                "logicalRows" to dimension, "logicalColumns" to dimension,
                 "level" to level, "levelCount" to 100,
                 "figureFamily" to "Corazón", "figureName" to "Corazón neón $level",
                 "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
                 "arrowCount" to shapes.size,
-                "densityProfile" to "FINE_DENSE",
+                "densityProfile" to "CELL_COMPLETE",
                 "maxFailedTaps" to size(8, 7, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
                 "shapes" to shapes,
                 "instructions" to "Etapa $level/100 · ${shapes.size} flechas. Elimina primero las rutas con salida libre.",

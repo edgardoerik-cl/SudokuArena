@@ -594,6 +594,7 @@ private fun SerpentineArrowsBoard(
 ) {
     val routes = remember(state.meta) { parseSerpentineRoutes(state) }
     val gridBased = state.meta["gridBased"] == true
+    val cellComplete = state.meta["densityProfile"] == "CELL_COMPLETE"
     val logicalDimension = (state.meta["logicalColumns"] as? Number)?.toInt() ?: 100
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
@@ -700,6 +701,12 @@ private fun SerpentineArrowsBoard(
                 val alpha = if (isExiting) 1f - flight.value * .75f else 1f
                 val stroke = if (gridBased) maxOf(1.35f, route.thickness * size.minDimension * zoom)
                     else maxOf(7f, route.thickness * size.minDimension)
+                if (cellComplete && !isExiting) {
+                    // Halo por celda: une visualmente la silueta sin agrandar la
+                    // flecha ni ocultar su dirección o su área táctil.
+                    val cellRadius = size.minDimension / logicalDimension * zoom * .44f
+                    drawCircle(color.copy(alpha = .09f), cellRadius, points.last())
+                }
                 drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
                 drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))
                 drawPath(path, Color.White.copy(alpha = .58f * alpha), style = Stroke(maxOf(1.5f, stroke * .18f)))
