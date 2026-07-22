@@ -594,7 +594,7 @@ private fun SerpentineArrowsBoard(
 ) {
     val routes = remember(state.meta) { parseSerpentineRoutes(state) }
     val gridBased = state.meta["gridBased"] == true
-    val cellComplete = state.meta["densityProfile"] == "CELL_COMPLETE"
+    val cellComplete = state.meta["densityProfile"] in setOf("CELL_COMPLETE", "TILE_COMPLETE")
     val logicalDimension = (state.meta["logicalColumns"] as? Number)?.toInt() ?: 100
     val removed = remember(state.meta, localPlayerId) {
         ((state.meta["removedByPlayer"] as? Map<*, *>)?.get(localPlayerId) as? List<*>)
@@ -702,10 +702,29 @@ private fun SerpentineArrowsBoard(
                 val stroke = if (gridBased) maxOf(1.35f, route.thickness * size.minDimension * zoom)
                     else maxOf(7f, route.thickness * size.minDimension)
                 if (cellComplete && !isExiting) {
-                    // Halo por celda: une visualmente la silueta sin agrandar la
-                    // flecha ni ocultar su dirección o su área táctil.
-                    val cellRadius = size.minDimension / logicalDimension * zoom * .44f
-                    drawCircle(color.copy(alpha = .09f), cellRadius, points.last())
+                    // Cada posición interior se convierte en una ficha visual
+                    // completa. El 2% de separación conserva la lectura de cada
+                    // flecha, pero ya no deja huecos oscuros dentro de la figura.
+                    val tileWidth = size.width / logicalDimension * zoom * .98f
+                    val tileHeight = size.height / logicalDimension * zoom * .98f
+                    val tileTopLeft = points.last() - Offset(tileWidth / 2f, tileHeight / 2f)
+                    drawRoundRect(
+                        color.copy(alpha = .30f),
+                        topLeft = tileTopLeft,
+                        size = Size(tileWidth, tileHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                            minOf(tileWidth, tileHeight) * .16f,
+                        ),
+                    )
+                    drawRoundRect(
+                        Color.White.copy(alpha = .20f),
+                        topLeft = tileTopLeft,
+                        size = Size(tileWidth, tileHeight),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                            minOf(tileWidth, tileHeight) * .16f,
+                        ),
+                        style = Stroke(maxOf(1f, minOf(tileWidth, tileHeight) * .035f)),
+                    )
                 }
                 drawPath(path, color.copy(alpha = .16f * alpha), style = Stroke(stroke * 3.1f))
                 drawPath(path, color.copy(alpha = alpha), style = Stroke(stroke))
@@ -719,7 +738,9 @@ private fun SerpentineArrowsBoard(
                     (head - before).let { delta -> delta / delta.getDistance().coerceAtLeast(.001f) }
                 }
                 val side = Offset(-tangent.y, tangent.x)
-                val headLength = stroke * if (gridBased) 1.7f else 2.2f
+                val cellExtent = size.minDimension / logicalDimension * zoom
+                val headLength = if (cellComplete) maxOf(stroke * 1.7f, cellExtent * .24f)
+                    else stroke * if (gridBased) 1.7f else 2.2f
                 val arrowHead = Path().apply {
                     moveTo(head.x, head.y)
                     lineTo(head.x - tangent.x * headLength + side.x * headLength * .62f, head.y - tangent.y * headLength + side.y * headLength * .62f)

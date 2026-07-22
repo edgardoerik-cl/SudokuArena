@@ -971,10 +971,10 @@ class LocalPuzzleEngine(
             val arrowType = listOf("STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR")[index % 5]
             val unit = 1f / dimension
             val points = when (arrowType) {
-                "STRAIGHT" -> listOf(point(.54f * unit), point(0f))
-                "ELBOW_90" -> listOf(point(.64f * unit, .25f * unit), point(.64f * unit), point(0f))
-                "L_SHAPE" -> listOf(point(.82f * unit, -.25f * unit), point(.82f * unit), point(.34f * unit), point(0f))
-                "S_SHAPE" -> listOf(point(.88f * unit, .22f * unit), point(.88f * unit), point(.54f * unit), point(.54f * unit, -.22f * unit), point(.20f * unit, -.22f * unit), point(.20f * unit), point(0f))
+                "STRAIGHT" -> listOf(point(.82f * unit), point(0f))
+                "ELBOW_90" -> listOf(point(.84f * unit, .25f * unit), point(.84f * unit), point(0f))
+                "L_SHAPE" -> listOf(point(.90f * unit, -.25f * unit), point(.90f * unit), point(.34f * unit), point(0f))
+                "S_SHAPE" -> listOf(point(.94f * unit, .22f * unit), point(.94f * unit), point(.54f * unit), point(.54f * unit, -.22f * unit), point(.20f * unit, -.22f * unit), point(.20f * unit), point(0f))
                 else -> listOf(point(.96f * unit), point(.70f * unit), point(.44f * unit), point(.20f * unit), point(0f))
             }
             mapOf(
@@ -1009,10 +1009,10 @@ class LocalPuzzleEngine(
                 "figureFamily" to "Corazón", "figureName" to "Corazón neón $level",
                 "totalBlocks" to shapes.size, "totalShapes" to shapes.size,
                 "arrowCount" to shapes.size,
-                "densityProfile" to "CELL_COMPLETE",
+                "densityProfile" to "TILE_COMPLETE",
                 "maxFailedTaps" to size(8, 7, 6, 5), "rotatePowerUses" to 2, "missilePowerUses" to 1,
                 "shapes" to shapes,
-                "instructions" to "Etapa $level/100 · ${shapes.size} flechas. Elimina primero las rutas con salida libre.",
+                "instructions" to "Etapa $level/100 · ${shapes.size} flechas. Cada celda interior contiene una ficha-flecha.",
             ),
         )
     }

@@ -566,10 +566,10 @@ function arrowsEscape(random, difficulty, requestedLevel) {
         });
         const arrowType = ["STRAIGHT", "ELBOW_90", "L_SHAPE", "S_SHAPE", "LONG_SPEAR"][index % 5];
         const unit = 1 / dimension;
-        const routePoints = arrowType === "STRAIGHT" ? [at(.54 * unit), grid]
-            : arrowType === "ELBOW_90" ? [at(.64 * unit, .25 * unit), at(.64 * unit), grid]
-                : arrowType === "L_SHAPE" ? [at(.82 * unit, -.25 * unit), at(.82 * unit), at(.34 * unit), grid]
-                    : arrowType === "S_SHAPE" ? [at(.88 * unit, .22 * unit), at(.88 * unit), at(.54 * unit), at(.54 * unit, -.22 * unit), at(.20 * unit, -.22 * unit), at(.20 * unit), grid]
+        const routePoints = arrowType === "STRAIGHT" ? [at(.82 * unit), grid]
+            : arrowType === "ELBOW_90" ? [at(.84 * unit, .25 * unit), at(.84 * unit), grid]
+                : arrowType === "L_SHAPE" ? [at(.90 * unit, -.25 * unit), at(.90 * unit), at(.34 * unit), grid]
+                    : arrowType === "S_SHAPE" ? [at(.94 * unit, .22 * unit), at(.94 * unit), at(.54 * unit), at(.54 * unit, -.22 * unit), at(.20 * unit, -.22 * unit), at(.20 * unit), grid]
                         : [at(.96 * unit), at(.70 * unit), at(.44 * unit), at(.20 * unit), grid];
         const direct = {
             id: `route-${index}`, points: routePoints, direction: exit.name,
@@ -668,12 +668,12 @@ function arrowsEscape(random, difficulty, requestedLevel) {
             totalBlocks: count,
             totalShapes: shapes.length,
             arrowCount: count,
-            densityProfile: "CELL_COMPLETE",
+            densityProfile: "TILE_COMPLETE",
             maxFailedTaps: sizeFor(difficulty, 8, 7, 6, 5),
             rotatePowerUses: 2,
             missilePowerUses: 1,
             shapes,
-            instructions: `Etapa ${level}/100 · ${count} flechas. Toca una ruta fina o su punta cuando tenga salida libre hasta el borde.`,
+            instructions: `Etapa ${level}/100 · ${count} flechas. Cada celda interior de la figura contiene una ficha-flecha.`,
             difficulty,
         },
     };

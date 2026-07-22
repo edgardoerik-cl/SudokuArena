@@ -135,6 +135,7 @@ fun AboutScreen(onBack: () -> Unit) {
         }
         Text("CHANGELOG", color = Color(0xFF00E5FF), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
         listOf(
+            "8.11.5 · Flechas ocupa visualmente cada celda interior de la figura.",
             "8.11.4 · Flechas rellena cada celda de la figura; Boo baila al centro.",
             "8.11.3 · Flechas densifica las figuras sin aumentar su grosor.",
             "8.11.2 · Flechas recupera trazos finos y encadena 100 etapas.",
